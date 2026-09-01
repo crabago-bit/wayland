@@ -42,6 +42,8 @@ import type {
   KimiStatusResult,
   OpenClawSetupResult,
   OpenClawStatusResult,
+  HermesSetupResult,
+  HermesStatusResult,
   OpencodeSetupResult,
   OpencodeStatusResult,
 } from '../types/fluxConnector';
@@ -1485,6 +1487,10 @@ export const fluxConnector = {
   openclawStatus: buildProvider<OpenClawStatusResult, void>('flux-connector:openclaw-status'),
   setupOpenClaw: buildProvider<OpenClawSetupResult, void>('flux-connector:setup-openclaw'),
   removeOpenClaw: buildProvider<FluxConnectorReport, void>('flux-connector:remove-openclaw'),
+  // LOCAL ADDITION: Hermes Agent connector.
+  hermesStatus: buildProvider<HermesStatusResult, void>('flux-connector:hermes-status'),
+  setupHermes: buildProvider<HermesSetupResult, void>('flux-connector:setup-hermes'),
+  removeHermes: buildProvider<FluxConnectorReport, void>('flux-connector:remove-hermes'),
 };
 
 /**

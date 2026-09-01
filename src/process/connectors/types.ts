@@ -51,6 +51,17 @@ export type InstallReceipt = {
    * `null` means the id was free and removal should delete what we added.
    */
   priorProvider?: unknown;
+  /**
+   * LOCAL ADDITION: prior primary-provider scalars, for connectors that must
+   * OVERWRITE a tool's single provider slot rather than add a sibling entry
+   * (Hermes). Optional and ignored by the opencode/codex connectors, whose
+   * rollback is a surgical delete and needs no memory of a previous value.
+   */
+  previous?: {
+    provider?: string | undefined;
+    baseUrl?: string | undefined;
+    apiKey?: string | undefined;
+  };
 };
 
 /** Inputs a connector needs; tests inject paths, prod resolves real ones. */

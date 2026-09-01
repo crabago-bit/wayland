@@ -42,6 +42,11 @@ import { initFsBridge } from '@process/bridge/fsBridge';
 import { initMcpBridge } from '@process/bridge/mcpBridge';
 import { initNotificationBridge } from '@process/bridge/notificationBridge';
 import { initSystemSettingsBridge } from '@process/bridge/systemSettingsBridge';
+// LOCAL PATCH (not upstream): the Flux connector bridge was Electron-only, so the
+// WebUI had the flux-connector channel names but no handlers bound to them —
+// "route through Flux" silently did nothing. It no longer imports electron, so it
+// can be registered here alongside the other standalone bridges.
+import { initFluxConnectorBridge } from '@process/bridge/fluxConnectorBridge';
 import { initTaskBridge } from '@process/bridge/taskBridge';
 import { initSpeechToTextBridge } from '@process/bridge/speechToTextBridge';
 import { initHubBridge } from '@process/bridge/hubBridge';
@@ -129,6 +134,7 @@ export async function initBridgeStandalone(): Promise<void> {
   initDatabaseBridge(repo);
   initExtensionsBridge(repo, workerTaskManager);
   initSystemSettingsBridge();
+  initFluxConnectorBridge();
   initCronBridge();
   initMcpBridge();
   initNotificationBridge();

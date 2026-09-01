@@ -14,9 +14,8 @@
 
 import path from 'node:path';
 
-import { app } from 'electron';
-
 import { ipcBridge } from '@/common';
+import { getPlatformServices } from '@/common/platform';
 import { FLUX_SURFACE } from '@/common/config/flux';
 import type {
   CodexSetupResult,
@@ -24,11 +23,14 @@ import type {
   FluxConnectorReport,
   KimiSetupResult,
   KimiStatusResult,
+  HermesSetupResult,
+  HermesStatusResult,
   OpencodeSetupResult,
   OpencodeStatusResult,
   OpenClawSetupResult,
   OpenClawStatusResult,
 } from '@/common/types/fluxConnector';
+import { hermesStatus, removeHermes, resolveHermesConfigPath, setupHermes } from '@process/connectors/hermes';
 import { acpDetector } from '@process/agent/acp/AcpDetector';
 import { codexStatus, removeCodex, resolveCodexConfigPath, setupCodex } from '@process/connectors/codex';
 import { readConnectedFluxKey } from '@process/connectors/fluxKey';
@@ -44,11 +46,27 @@ import { existsSync } from 'node:fs';
  * empty string (they never read it), setup passes the connected key.
  */
 function buildContext(fluxKey: string): ConnectorContext {
+  // LOCAL PATCH (not upstream): resolve userData through the platform abstraction
+  // instead of `app.getPath('userData')` from electron.
+  //
+  // This module previously imported `electron` directly, which meant it could only
+  // ever be registered on the Electron main path (bridge/index.ts). The WebUI
+  // server build registers a curated list in initBridgeStandalone.ts, which did
+  // NOT include this bridge — so in web mode the `flux-connector:*` channel names
+  // existed (they come from ipcBridge.ts) but NO handler was ever bound. Clicking
+  // "route through Flux" invoked a channel nothing answered, and the UI showed a
+  // silent/unmapped failure.
+  //
+  // getPlatformServices().paths.getDataDir() is the same value in both runtimes:
+  // ElectronPlatformServices returns app.getPath('userData'); NodePlatformServices
+  // returns $DATA_DIR. So this is behaviour-preserving on desktop and makes the
+  // bridge registrable in the standalone server.
+  const userData = getPlatformServices().paths.getDataDir();
   return {
     fluxKey,
     baseURL: FLUX_SURFACE.openai,
-    manifestPath: path.join(app.getPath('userData'), 'flux-connectors.json'),
-    backupDir: path.join(app.getPath('userData'), 'flux-connector-backups'),
+    manifestPath: path.join(userData, 'flux-connectors.json'),
+    backupDir: path.join(userData, 'flux-connector-backups'),
   };
 }
 
@@ -198,6 +216,16 @@ async function kimiOnPath(): Promise<boolean> {
   }
 }
 
+/** True when a `hermes` binary is detectable on PATH. Never throws. */
+async function hermesOnPath(): Promise<boolean> {
+  try {
+    const found = await acpDetector.batchCheckCliAvailability(['hermes']);
+    return found.has('hermes');
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Handler: report Kimi Code's routing status, resolved config path, and whether
  * kimi is installed (binary on PATH OR a config file present). Does not need the
@@ -213,6 +241,18 @@ export async function handleKimiStatus(): Promise<KimiStatusResult> {
 }
 
 /**
+ * LOCAL ADDITION — Handler: report Hermes' routing status, resolved config path,
+ * and whether Hermes is installed. Does not need the flux key.
+ */
+export async function handleHermesStatus(): Promise<HermesStatusResult> {
+  const ctx = buildContext('');
+  const status = await hermesStatus(ctx);
+  const configPath = resolveHermesConfigPath();
+  const installed = (await hermesOnPath()) || existsSync(configPath);
+  return { status, configPath, installed };
+}
+
+/**
  * Handler: install (or refresh) the Flux provider in Kimi Code's config. Reads
  * the connected flux key; if Flux is not connected, returns a typed refusal and
  * never calls the connector.
@@ -224,6 +264,24 @@ export async function handleSetupKimi(): Promise<KimiSetupResult> {
   }
   try {
     const report = await setupKimi(buildContext(fluxKey));
+    return { ok: true, report };
+  } catch (err) {
+    return { ok: false, reason: 'error', message: String(err) };
+  }
+}
+
+/**
+ * LOCAL ADDITION — Handler: point Hermes' primary provider at Flux. Reads the
+ * connected flux key; if Flux is not connected, returns a typed refusal and never
+ * touches the config.
+ */
+export async function handleSetupHermes(): Promise<HermesSetupResult> {
+  const fluxKey = await readConnectedFluxKey();
+  if (fluxKey === undefined) {
+    return { ok: false, reason: 'flux-not-connected' };
+  }
+  try {
+    const report = await setupHermes(buildContext(fluxKey));
     return { ok: true, report };
   } catch (err) {
     return { ok: false, reason: 'error', message: String(err) };
@@ -286,7 +344,15 @@ export async function handleRemoveOpenClaw(): Promise<FluxConnectorReport> {
   return reportOnThrow('openclaw', () => removeOpenClaw(buildContext('')));
 }
 
-/** Register the flux-connector IPC providers (opencode + codex + kimi + openclaw). */
+/**
+ * LOCAL ADDITION — Handler: restore Hermes' previous primary provider. Does not
+ * need the flux key.
+ */
+export async function handleRemoveHermes(): Promise<FluxConnectorReport> {
+  return removeHermes(buildContext(''));
+}
+
+/** Register the flux-connector IPC providers (opencode + codex + kimi + openclaw + hermes). */
 export function initFluxConnectorBridge(): void {
   ipcBridge.fluxConnector.opencodeStatus.provider(handleOpencodeStatus);
   ipcBridge.fluxConnector.setupOpencode.provider(handleSetupOpencode);
@@ -300,4 +366,7 @@ export function initFluxConnectorBridge(): void {
   ipcBridge.fluxConnector.openclawStatus.provider(handleOpenClawStatus);
   ipcBridge.fluxConnector.setupOpenClaw.provider(handleSetupOpenClaw);
   ipcBridge.fluxConnector.removeOpenClaw.provider(handleRemoveOpenClaw);
+  ipcBridge.fluxConnector.hermesStatus.provider(handleHermesStatus);
+  ipcBridge.fluxConnector.setupHermes.provider(handleSetupHermes);
+  ipcBridge.fluxConnector.removeHermes.provider(handleRemoveHermes);
 }

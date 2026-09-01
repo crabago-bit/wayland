@@ -14,6 +14,8 @@ import type {
   FluxConnectorReport,
   KimiSetupResult,
   KimiStatusResult,
+  HermesSetupResult,
+  HermesStatusResult,
   OpencodeSetupResult,
   OpencodeStatusResult,
   OpenClawSetupResult,
@@ -22,10 +24,20 @@ import type {
 import styles from './AgentsSettings.module.css';
 
 /** Backends that route through Flux via a one-time config write. */
-type FluxSetupBackend = 'opencode' | 'codex' | 'kimi' | 'openclaw-gateway';
+type FluxSetupBackend = 'opencode' | 'codex' | 'kimi' | 'openclaw-gateway' | 'hermes';
 
-type SetupStatusResult = OpencodeStatusResult | CodexStatusResult | KimiStatusResult | OpenClawStatusResult;
-type SetupActionResult = OpencodeSetupResult | CodexSetupResult | KimiSetupResult | OpenClawSetupResult;
+type SetupStatusResult =
+  | OpencodeStatusResult
+  | CodexStatusResult
+  | KimiStatusResult
+  | OpenClawStatusResult
+  | HermesStatusResult;
+type SetupActionResult =
+  | OpencodeSetupResult
+  | CodexSetupResult
+  | KimiSetupResult
+  | OpenClawSetupResult
+  | HermesSetupResult;
 
 /**
  * Resolve the IPC trio (status / setup / remove) for a given setup backend.
@@ -56,6 +68,17 @@ function connectorFor(backend: FluxSetupBackend): {
       status: () => ipcBridge.fluxConnector.kimiStatus.invoke(),
       setup: () => ipcBridge.fluxConnector.setupKimi.invoke(),
       remove: () => ipcBridge.fluxConnector.removeKimi.invoke(),
+    };
+  }
+  // LOCAL ADDITION: Hermes shares the same result shapes, so the modal is
+  // unchanged; only the bridge target differs. Note Hermes' setup OVERWRITES its
+  // single primary provider (rather than adding a sibling like opencode), and the
+  // connector records the prior values so Remove restores them.
+  if (backend === 'hermes') {
+    return {
+      status: () => ipcBridge.fluxConnector.hermesStatus.invoke(),
+      setup: () => ipcBridge.fluxConnector.setupHermes.invoke(),
+      remove: () => ipcBridge.fluxConnector.removeHermes.invoke(),
     };
   }
   return {

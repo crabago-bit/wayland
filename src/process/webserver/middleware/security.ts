@@ -80,6 +80,32 @@ export function attachCsrfToken(req: Request, res: Response, next: NextFunction)
   if (typeof req.csrfToken === 'function') {
     const token = req.csrfToken();
     res.setHeader(CSRF_HEADER_NAME, token);
+
+    // LOCAL PATCH (not upstream): publish the token as a JS-readable mirror cookie.
+    //
+    // The browser client reads the token from exactly this cookie
+    // (csrfClient.getCsrfToken -> readCookie(CSRF_COOKIE_NAME)), but nothing in the
+    // server ever set it: tiny-csrf's own `csrfToken` cookie is HttpOnly (so
+    // document.cookie cannot see it), the x-csrf-token response header is never
+    // captured by the renderer, and res.locals.csrfToken has no consumer. So
+    // getCsrfToken() always returned null and EVERY CSRF-protected write failed with
+    // `csrf_invalid` ("Security token missing or expired"). Login was the exception
+    // only because /login is on the tiny-csrf exclusion list.
+    //
+    // SECURITY_CONFIG.CSRF.COOKIE_OPTIONS already declares httpOnly:false for this
+    // purpose, so this is the intended double-submit design with the write wired up.
+    // Exposing the raw token to JS is standard double-submit (cf. Django csrftoken,
+    // Angular XSRF-TOKEN); the authority remains tiny-csrf's signed HttpOnly cookie.
+    //
+    // `secure` follows req.secure so it is set behind the TLS proxy but still works
+    // for a plain-HTTP loopback probe. maxAge matches tiny-csrf's 300s cookie so the
+    // mirror can never outlive the token it mirrors and hand back a stale value.
+    res.cookie(CSRF_COOKIE_NAME, token, {
+      ...SECURITY_CONFIG.CSRF.COOKIE_OPTIONS,
+      secure: req.secure,
+      maxAge: 300_000,
+    });
+
     res.locals.csrfToken = token;
   }
   next();

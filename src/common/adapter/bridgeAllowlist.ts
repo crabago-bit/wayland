@@ -557,6 +557,15 @@ export const REMOTE_DENIED_KEYS: ReadonlySet<string> = new Set([
   //     is a read and stays allowed so the panel still renders remotely.
   'flux-connector:setup-openclaw',
   'flux-connector:remove-openclaw',
+  //     LOCAL ADDITION (WarriorHi v0.12.5 rebase): the hermes pair is the same
+  //     class. `setup-hermes` reads the stored Flux key and writes it in plaintext
+  //     into `~/.hermes/config.yaml`, and OVERWRITES the primary provider slot
+  //     (rather than adding a sibling like opencode) — see connectors/hermes.ts.
+  //     `remove-hermes` restores the prior primary provider from the receipt.
+  //     A paired-device remote client must not be able to reach either.
+  //     `hermes-status` is a read and stays allowed so the panel still renders.
+  'flux-connector:setup-hermes',
+  'flux-connector:remove-hermes',
   // --- Managed agent installs (K-05, decision D7). `install` runs a package
   //     manager against the user's profile — it fetches an npm package and
   //     writes an executable tree under userData; `uninstall` recursively
