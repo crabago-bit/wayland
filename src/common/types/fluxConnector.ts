@@ -85,3 +85,16 @@ export type KimiStatusResult = {
   /** kimi binary detected on PATH OR a config file present. */
   installed: boolean;
 };
+
+/** LOCAL ADDITION: result of a setup-hermes request over the bridge. */
+export type HermesSetupResult =
+  | { ok: true; report: FluxConnectorReport }
+  | { ok: false; reason: 'flux-not-connected' | 'error'; message?: string };
+
+/** LOCAL ADDITION: result of a hermes-status request over the bridge. */
+export type HermesStatusResult = {
+  status: ConnectorStatus;
+  configPath: string;
+  /** hermes binary detected on PATH OR a config file present. */
+  installed: boolean;
+};

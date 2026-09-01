@@ -11,7 +11,31 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { app } from 'electron';
+
+/**
+ * LOCAL PATCH (not upstream): `app` is resolved lazily instead of via a
+ * top-level `import { app } from 'electron'`.
+ *
+ * `writeAtomic` is the write primitive for the Flux connectors and their
+ * manifest, and those now run in the non-Electron WebUI server too. A top-level
+ * electron import is fatal there: node_modules/electron/index.js executes
+ * `module.exports = getElectronPath()` on evaluation and THROWS
+ * "Electron failed to install correctly" outside an Electron runtime — which
+ * would take down every module that transitively imports this one, even though
+ * `app` is only ever touched by ijfwCacheKey().
+ *
+ * Deferring the require keeps Electron out of the import graph for the
+ * filesystem helpers while leaving ijfwCacheKey()'s behaviour unchanged on
+ * desktop.
+ */
+function electronApp(): { getVersion(): string } | undefined {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return (require('electron') as { app?: { getVersion(): string } }).app;
+  } catch {
+    return undefined;
+  }
+}
 
 const COPYFILE_EXCL = (fs.constants as { COPYFILE_EXCL?: number }).COPYFILE_EXCL ?? 1;
 
@@ -81,7 +105,7 @@ async function copyRecursive(src: string, dst: string): Promise<void> {
 
 export function ijfwCacheKey(): string {
   const parts = [
-    app.getVersion(),
+    electronApp()?.getVersion() ?? 'app-unknown',
     process.versions.electron ?? 'electron-unknown',
     process.versions.node ?? 'node-unknown',
     'ijfw-install-v1',

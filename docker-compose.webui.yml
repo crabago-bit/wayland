@@ -1,0 +1,46 @@
+# Wayland desktop app in headless WebUI mode, fronted by Traefik at
+# https://os.warriorhi.com.
+#
+# The upstream Dockerfile builds the renderer with `build:renderer:web` and the
+# server with `scripts/build-server.mjs` — no Electron in the runtime image, so
+# this needs no X11/xvfb on a headless box.
+#
+# WAYLAND_ALLOWED_ORIGINS is load-bearing: per docs/guides/webui.md, remote mode
+# no longer auto-allowlists detected interfaces. If it is unset, the server
+# silently falls back to localhost-only and logs
+#   [security] remote mode without WAYLAND_ALLOWED_ORIGINS: only localhost allowed
+# which presents as a browser that connects and then does nothing.
+services:
+  wayland-webui:
+    image: wayland-webui:v0.11.18-csrf
+    container_name: wayland-webui
+    restart: unless-stopped
+    # Loopback-only publish. Traefik runs on the host network and reaches this
+    # via 127.0.0.1:3403; nothing is exposed on a public interface directly.
+    ports:
+      - "127.0.0.1:3403:3000"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATA_DIR: /data
+      ALLOW_REMOTE: "true"
+      WAYLAND_ALLOWED_ORIGINS: "https://os.warriorhi.com"
+      # Public entrypoint. Without this the connect POST is saved server-side but
+      # the response carries no Access-Control-Allow-Origin, so the browser blocks
+      # the credentialed response and the UI dead-ends. This is upstream #524.
+      SERVER_BASE_URL: "https://os.warriorhi.com"
+      # Trust the Docker bridge gateway as a reverse-proxy hop.
+      #
+      # setupTrustProxy() trusts only ['loopback', ...WAYLAND_OPERATOR_CIDRS], and
+      # deriveTrustedProxyOrigin() believes X-Forwarded-* only when the DIRECT socket
+      # peer is trusted. Upstream's own repro used same-host Caddy, where that peer is
+      # 127.0.0.1. Here Traefik reaches us through the published port, so the peer is
+      # the bridge gateway (172.16.17.1) — untrusted by default, which left req.secure
+      # false (cookies issued without Secure) and the public origin off the allowlist.
+      #
+      # Scoped to this compose network's /24, not 172.16.0.0/12, so it grants no more
+      # trust than necessary. Traefik binds the host side to 127.0.0.1 only, so nothing
+      # off-box can reach this port to exploit the trusted hop.
+      WAYLAND_OPERATOR_CIDRS: "172.16.17.0/24"
+    volumes:
+      - /home/forge/wayland-desktop-data:/data
