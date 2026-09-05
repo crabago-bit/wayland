@@ -36,14 +36,49 @@
  * order. Identity passthrough is load-bearing: engines namespace tools as
  * `server__tool`, so substituting the shim's own name would break per-chat model
  * memory between sessions. Filtering changes list membership, never tool names.
+ *
+ * THE AUTONOMY LADDER rides on exception (2) and nothing else. A rung is a
+ * statement about EFFECT, so it is enforced where effect happens - the
+ * `tools/call` - and never by trimming `tools/list`: an agent at rung 1 still
+ * needs to SEE the write tool in order to draft the thing it is asking
+ * permission for. The hard floor is checked before the rung, so rung 4 cannot
+ * buy past it. Read/list/get/search names match neither pattern and pass at
+ * every rung, which keeps this a filter on actions rather than on information.
  */
+
+import { connectorOfToolName, decideToolCall, type AutonomyRung } from '@/common/jarvis/autonomy';
+import type { ApprovalRecord } from '@process/services/jarvis/approvalsLog';
 
 /** A decoded JSON-RPC message. Deliberately loose: we relay what we do not touch. */
 export type JsonRpcMessage = Record<string, unknown>;
 
+/**
+ * The autonomy half of the shim's job. Absent means "no ladder" - the shim
+ * behaves exactly as it did before the ladder existed, which is what keeps the
+ * per-tool allowlist path (#998) independently testable.
+ */
+export type ToolFilterAutonomy = {
+  /** Whose ladder this is - the agent key, recorded on every ledger line. */
+  agent: string;
+  rung: AutonomyRung;
+  /** Extra hard-floor keywords from the operator's notes. Additive only. */
+  hardFloorKeywords: readonly string[];
+  /** Ledger sink. Called for refusals and for allowed write calls at rung >= 3. */
+  onDecision?: (record: ApprovalRecord) => void;
+};
+
 export type ToolFilterOptions = {
   /** Exact tool names the engine is permitted to see and call. */
   allowed: readonly string[];
+  /**
+   * No per-tool selection was made for this connector: every tool the server
+   * publishes is listable and callable, and the shim is present only for the
+   * autonomy ladder. The allowlist is then not consulted at all - it is NOT
+   * treated as an empty (deny-everything) list, which would be the fail-closed
+   * direction but would also silently mute every unscoped connector.
+   */
+  allowAll?: boolean;
+  autonomy?: ToolFilterAutonomy;
   sendToEngine: (message: JsonRpcMessage) => void;
   sendToUpstream: (message: JsonRpcMessage) => void;
 };
@@ -58,6 +93,15 @@ export type ToolFilter = {
 /** JSON-RPC "method not found" - the honest code for a tool that is not there. */
 const METHOD_NOT_FOUND = -32601;
 
+/**
+ * Implementation-defined server error, used for an autonomy refusal.
+ *
+ * Deliberately NOT `METHOD_NOT_FOUND`: the tool exists, is listed, and would
+ * work at a higher rung. Telling the engine it does not exist would invite it to
+ * give up on the task instead of doing what the message asks - draft it and ask.
+ */
+const AUTONOMY_REFUSED = -32000;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -71,6 +115,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 export function createToolFilter(options: ToolFilterOptions): ToolFilter {
   const allowed = new Set(options.allowed);
+  const allowAll = options.allowAll === true;
+  const autonomy = options.autonomy;
   // Ids of in-flight requests the ENGINE issued as `tools/list`. Only replies to
   // these are filtered: a `resources/list` reply that happens to carry a `tools`
   // key must pass through untouched, and an id is forgotten once answered so a
@@ -91,7 +137,7 @@ export function createToolFilter(options: ToolFilterOptions): ToolFilter {
     if (method === 'tools/call') {
       const params = isRecord(message.params) ? message.params : undefined;
       const name = typeof params?.name === 'string' ? params.name : undefined;
-      if (name === undefined || !allowed.has(name)) {
+      if (name === undefined || (!allowAll && !allowed.has(name))) {
         // Refused HERE. The real server never receives the request, which is the
         // whole point: enforcement is a boundary, not a request the engine is
         // trusted to honour. A notification (no id) is simply dropped - there is
@@ -107,6 +153,40 @@ export function createToolFilter(options: ToolFilterOptions): ToolFilter {
           });
         }
         return;
+      }
+
+      // The tool is in scope for this connector. The ladder decides whether it
+      // may actually run. Order matters and is owned by `decideToolCall`: hard
+      // floor first, then the rung.
+      if (autonomy) {
+        const verdict = decideToolCall({
+          toolName: name,
+          rung: autonomy.rung,
+          hardFloorKeywords: autonomy.hardFloorKeywords,
+        });
+        if (verdict.loggable) {
+          autonomy.onDecision?.({
+            ts: Date.now(),
+            agent: autonomy.agent,
+            rung: autonomy.rung,
+            tool: name,
+            connector: connectorOfToolName(name),
+            decision: verdict.decision,
+            reason: verdict.reason,
+          });
+        }
+        if (verdict.decision === 'refused') {
+          // Same posture as the allowlist refusal above: answered HERE, never
+          // forwarded, and a notification (no id) is simply dropped.
+          if (message.id !== undefined) {
+            options.sendToEngine({
+              jsonrpc: '2.0',
+              id: message.id,
+              error: { code: AUTONOMY_REFUSED, message: verdict.reason },
+            });
+          }
+          return;
+        }
       }
     }
 
@@ -128,6 +208,11 @@ export function createToolFilter(options: ToolFilterOptions): ToolFilter {
       return;
     }
 
+    // The ladder deliberately does NOT trim this list - see the module header.
+    if (allowAll) {
+      options.sendToEngine(message);
+      return;
+    }
     const tools = result.tools.filter(
       (tool) => isRecord(tool) && typeof tool.name === 'string' && allowed.has(tool.name)
     );

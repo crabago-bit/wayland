@@ -41,6 +41,7 @@ import { AcpConnection } from './AcpConnection';
 import { AcpApprovalStore, createAcpApprovalKey } from './ApprovalStore';
 import { CLAUDE_YOLO_SESSION_MODE, CODEBUDDY_YOLO_SESSION_MODE, QWEN_YOLO_SESSION_MODE } from './constants';
 import { buildAcpModelInfo } from './modelInfo';
+import { resolveSpawnAutonomy } from '@process/services/jarvis/autonomySettings';
 import {
   UnsupportedHostedAcpToolSelectionError,
   buildAcpSessionMcpServers,
@@ -1724,7 +1725,11 @@ export class AcpAgent {
               mcpConfig,
               mcpCaps,
               this.extra.activeMcpServers,
-              this.extra.allowConciergeDiag === true
+              this.extra.allowConciergeDiag === true,
+              // JARVIS autonomy ladder: the rung this agent is on plus the hard
+              // floor, resolved host-side and handed to the filtering shim. The
+              // agent key matches `agents.hidden` / the Agents settings page.
+              await resolveSpawnAutonomy(this.extra.backend)
             )
           );
         }

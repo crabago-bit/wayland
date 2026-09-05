@@ -1,0 +1,89 @@
+/**
+ * @license
+ * Copyright 2026 Ferrox Labs
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.panel {
+  border: 1px solid var(--color-border-2);
+  border-radius: 10px;
+  background: var(--color-bg-2);
+  padding: 14px 16px;
+}
+
+.panelTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-1);
+  margin-bottom: 10px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 150px 120px 1fr 96px;
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-top: 1px solid var(--color-border-1);
+  font-size: 12px;
+}
+
+.row:first-of-type {
+  border-top: none;
+}
+
+.ts {
+  color: var(--color-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.tool {
+  color: var(--color-text-1);
+  font-family: var(--font-family-mono, monospace);
+  word-break: break-all;
+}
+
+.reason {
+  color: var(--color-text-3);
+}
+
+.empty {
+  color: var(--color-text-3);
+  font-size: 12px;
+  padding: 18px 0;
+  text-align: center;
+}
+
+.tierRow {
+  display: grid;
+  grid-template-columns: 1fr 90px 90px 70px;
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-top: 1px solid var(--color-border-1);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tierRow:first-of-type {
+  border-top: none;
+}
+
+.tierName {
+  color: var(--color-text-1);
+  font-weight: 500;
+}

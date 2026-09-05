@@ -39,6 +39,7 @@ import { registerConstitutionRoutes } from './constitutionRoutes';
 import { registerUsernameRoutes } from './usernameRoutes';
 import { registerFluxConnectRoutes } from './fluxConnectRoutes';
 import { registerMcpOAuthRoutes } from './mcpOAuthRoutes';
+import { registerJarvisRoutes } from './jarvisRoutes';
 
 /** Temp directory used by multer disk storage - validated at runtime to prevent path traversal */
 const MULTER_TEMP_DIR = os.tmpdir();
@@ -753,6 +754,11 @@ export function registerApiRoutes(app: Express): void {
   registerUsernameRoutes(app, validateApiAccess);
   registerFluxConnectRoutes(app, validateApiAccess);
   registerMcpOAuthRoutes(app, validateApiAccess);
+
+  // JARVIS autonomy ladder: read-only approvals ledger + hard floor. The IPC
+  // equivalent is denied to paired-device WS callers (`jarvis.` prefix in
+  // bridgeAllowlist.ts), so this token-authed GET is the remote rail.
+  registerJarvisRoutes(app, validateApiAccess);
 
   /**
    * Generic API endpoint

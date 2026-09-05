@@ -185,7 +185,18 @@ describe('createToolFilter - #998 strict per-tool subset', () => {
 describe('parseShimArgv - #998', () => {
   it('parses repeated --allow flags and the upstream argv after the separator', () => {
     const parsed = parseShimArgv(['--allow', 'alpha', '--allow', 'beta', '--', 'npx', '-y', 'some-server']);
-    expect(parsed).toEqual({ allowed: ['alpha', 'beta'], command: 'npx', args: ['-y', 'some-server'] });
+    // The autonomy-ladder flags are absent here, and absence must stay inert:
+    // no rung, no ledger path, no extra floor keywords, allow-all off.
+    expect(parsed).toEqual({
+      allowed: ['alpha', 'beta'],
+      allowAll: false,
+      rung: undefined,
+      agent: '',
+      hardFloorKeywords: [],
+      logPath: undefined,
+      command: 'npx',
+      args: ['-y', 'some-server'],
+    });
   });
 
   it('treats a tool name containing a comma as ONE tool, never two', () => {

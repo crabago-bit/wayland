@@ -14,6 +14,7 @@ import {
   mergeMcpSpawnEnv,
   resolveSessionMcpStdioSpawn,
   wrapSpawnWithToolFilter,
+  type ToolFilterSpawnAutonomy,
 } from '@process/services/mcpServices/builtinMcpRuntime';
 
 export interface AcpSessionMcpNameValue {
@@ -163,7 +164,8 @@ export function buildAcpSessionMcpServers(
   mcpServers: IMcpServer[] | undefined | null,
   capabilities: AcpMcpCapabilities,
   activeServerIds?: readonly string[],
-  allowConciergeDiag: boolean = false
+  allowConciergeDiag: boolean = false,
+  autonomy?: ToolFilterSpawnAutonomy
 ): AcpSessionMcpServer[] {
   if (!Array.isArray(mcpServers) || mcpServers.length === 0) {
     return [];
@@ -206,9 +208,21 @@ export function buildAcpSessionMcpServers(
             // subset stops being state the engine is asked to respect and
             // becomes a boundary it cannot cross: it never holds the real
             // server's descriptor.
-            const spawn = hasExplicitToolSelection(server)
-              ? wrapSpawnWithToolFilter(resolved, server.allowedTools ?? [])
-              : resolved;
+            // The ladder (JARVIS autonomy rungs) needs the SAME interposition
+            // for the same reason: a rung is a rule about `tools/call`, and no
+            // engine wire carries one. So the shim is spawned whenever EITHER a
+            // strict subset or a ladder has to be enforced, and it is handed
+            // `null` for the selection when only the ladder applies - `[]` would
+            // mean "allow nothing" and silently mute an unscoped connector.
+            const spawn = autonomy
+              ? wrapSpawnWithToolFilter(
+                  resolved,
+                  hasExplicitToolSelection(server) ? (server.allowedTools ?? []) : null,
+                  autonomy
+                )
+              : hasExplicitToolSelection(server)
+                ? wrapSpawnWithToolFilter(resolved, server.allowedTools ?? [])
+                : resolved;
             return {
               type: 'stdio',
               name: server.name,

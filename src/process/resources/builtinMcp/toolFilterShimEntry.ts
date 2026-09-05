@@ -31,12 +31,31 @@
 
 import { spawn } from 'node:child_process';
 
+import { toAutonomyRung, type AutonomyRung } from '@/common/jarvis/autonomy';
+import { appendApprovalTo } from '@process/services/jarvis/approvalsLog';
 import { createToolFilter, type JsonRpcMessage } from './toolFilterShim';
 
-export type ShimArgv = { allowed: string[]; command: string; args: string[] };
+export type ShimArgv = {
+  /** Exact per-tool selection. Empty only when `allowAll` is set. */
+  allowed: string[];
+  /** `--allow-all`: no per-tool selection, the shim is here for the ladder. */
+  allowAll: boolean;
+  /** `--rung N`. Absent means no ladder is enforced for this connector. */
+  rung?: AutonomyRung;
+  /** `--agent <key>`: whose ladder, recorded on every ledger line. */
+  agent: string;
+  /** `--floor <keyword>`, repeatable. Additive to the built-in hard floor. */
+  hardFloorKeywords: string[];
+  /** `--log <path>`: absolute path of approvals.jsonl, resolved by the host. */
+  logPath?: string;
+  command: string;
+  args: string[];
+};
 
 /**
- * Parse `--allow <tool> [--allow <tool> ...] -- cmd args...`.
+ * Parse
+ *   `[--allow <tool> ... | --allow-all] [--rung N] [--agent <key>]
+ *    [--floor <keyword> ...] [--log <path>] -- cmd args...`.
  *
  * One tool per flag, NOT a delimited list. A comma-joined list would be a
  * fail-OPEN bug: MCP does not forbid a comma in a tool name, and a tool called
@@ -58,20 +77,51 @@ export function parseShimArgv(argv: readonly string[]): ShimArgv | null {
   if (tail.length === 0) return null;
 
   const allowed: string[] = [];
-  for (let i = 0; i < head.length; i += 1) {
-    if (head[i] !== '--allow') continue;
-    const name = head[i + 1];
-    // A trailing `--allow` with no value is a malformed invocation, not an
-    // empty entry to skip over.
-    if (name === undefined) return null;
-    if (name.length > 0) allowed.push(name);
-    i += 1;
-  }
-  // An empty allowlist is a caller bug - the app withholds the connector
-  // entirely in that case, so the shim should never be spawned for it.
-  if (allowed.length === 0) return null;
+  const hardFloorKeywords: string[] = [];
+  let allowAll = false;
+  let rung: AutonomyRung | undefined;
+  let agent = '';
+  let logPath: string | undefined;
 
-  return { allowed, command: tail[0], args: tail.slice(1) };
+  for (let i = 0; i < head.length; i += 1) {
+    const flag = head[i];
+    if (flag === '--allow-all') {
+      allowAll = true;
+      continue;
+    }
+    if (flag !== '--allow' && flag !== '--rung' && flag !== '--agent' && flag !== '--floor' && flag !== '--log') {
+      continue;
+    }
+    const value = head[i + 1];
+    // A trailing value-taking flag with no value is a malformed invocation, not
+    // an empty entry to skip over.
+    if (value === undefined) return null;
+    i += 1;
+    if (value.length === 0) continue;
+    switch (flag) {
+      case '--allow':
+        allowed.push(value);
+        break;
+      case '--rung':
+        rung = toAutonomyRung(value);
+        break;
+      case '--agent':
+        agent = value;
+        break;
+      case '--floor':
+        hardFloorKeywords.push(value.toLowerCase());
+        break;
+      case '--log':
+        logPath = value;
+        break;
+    }
+  }
+  // An empty allowlist without `--allow-all` is a caller bug - the app withholds
+  // the connector entirely in that case, so the shim should never be spawned for
+  // it.
+  if (allowed.length === 0 && !allowAll) return null;
+
+  return { allowed, allowAll, rung, agent, hardFloorKeywords, logPath, command: tail[0], args: tail.slice(1) };
 }
 
 /**
@@ -109,7 +159,8 @@ export function main(argv: readonly string[] = process.argv.slice(2)): void {
   const parsed = parseShimArgv(argv);
   if (!parsed) {
     process.stderr.write(
-      '[wayland-tool-filter] usage: --allow <tool> [--allow <tool> ...] -- <command> [args...]\n' +
+      '[wayland-tool-filter] usage: (--allow <tool> ... | --allow-all) [--rung N] [--agent <key>]\n' +
+        '[wayland-tool-filter]        [--floor <keyword> ...] [--log <path>] -- <command> [args...]\n' +
         '[wayland-tool-filter] refusing to start; running unfiltered would expose tools the user switched off\n'
     );
     process.exit(2);
@@ -121,8 +172,21 @@ export function main(argv: readonly string[] = process.argv.slice(2)): void {
   const write = (stream: NodeJS.WritableStream) => (message: JsonRpcMessage) => {
     stream.write(`${JSON.stringify(message)}\n`);
   };
+  const logPath = parsed.logPath;
   const filter = createToolFilter({
     allowed: parsed.allowed,
+    allowAll: parsed.allowAll,
+    autonomy:
+      parsed.rung === undefined
+        ? undefined
+        : {
+            agent: parsed.agent,
+            rung: parsed.rung,
+            hardFloorKeywords: parsed.hardFloorKeywords,
+            // No `--log` means no ledger, not a crash: the ladder still refuses,
+            // it simply is not written down.
+            onDecision: logPath ? (record) => appendApprovalTo(logPath, record) : undefined,
+          },
     sendToEngine: write(process.stdout),
     sendToUpstream: write(child.stdin),
   });

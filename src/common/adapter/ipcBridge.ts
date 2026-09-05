@@ -3346,6 +3346,26 @@ export const cost = {
   budgetGateBlocked: buildEmitter<import('@process/services/cost/types').BudgetGateBlocked>('cost.budgetGateBlocked'),
 };
 
+// JARVIS autonomy ladder reads. The rung itself is persisted in ConfigStorage
+// (`agents.autonomy`) and read directly by the renderer; these two providers
+// expose what only the MAIN process can see - the append-only approvals ledger
+// at `$DATA_DIR/jarvis/approvals.jsonl`, written by the tool-filter shim, and
+// the hard-floor keyword list resolved from the operator's autonomy notes.
+//
+// Read-only by construction: there is no provider here that can change a rung
+// or edit the ledger. Remote (paired-device WebSocket) callers are denied the
+// whole namespace by the `jarvis.` prefix in bridgeAllowlist.ts - a remote WebUI
+// reads the ledger over the token-authed GET /api/jarvis/approvals route instead.
+export const jarvis = {
+  /** Newest-first page of the approvals ledger (capped at APPROVALS_PAGE_SIZE). */
+  approvals: buildProvider<
+    import('@process/services/jarvis/approvalsLog').ApprovalRecord[],
+    { limit?: number }
+  >('jarvis.approvals'),
+  /** The effective hard floor: the built-in pattern source plus operator keywords. */
+  hardFloor: buildProvider<{ pattern: string; keywords: string[]; notesPath: string }, void>('jarvis.hardFloor'),
+};
+
 // ==================== Memory Archive (v0.6.4) ====================
 // Direct filesystem access to .ijfw/memory/*.md files - does NOT go through
 // the MCP server. The MCP server stays as the write/orchestrate layer.
