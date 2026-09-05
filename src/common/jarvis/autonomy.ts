@@ -210,7 +210,13 @@ export const READ_TOOL_TOKENS: readonly string[] = [
 const WRITE_TOKEN_SET: ReadonlySet<string> = new Set(WRITE_TOOL_TOKENS);
 
 /**
- * The built-in hard floor: never callable at ANY rung, on ANY connector.
+ * The built-in hard floor: never callable at ANY rung.
+ *
+ * "Any connector" means any connector the tool-filter shim is interposed on -
+ * which, since the hosted-connector bridge, is every stdio and every
+ * http/streamable_http/sse connector an ACP session registers. The ONE surface
+ * still outside it is a connector Wayland Core loads from its own config.toml
+ * `[mcp.servers]` table, which the engine reads at startup without asking us.
  *
  * This ships in code rather than only in `~/.claude/crew-state/autonomy.md`
  * because a missing or renamed notes file must not silently remove the floor.

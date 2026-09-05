@@ -14,6 +14,7 @@ import {
   hasExplicitToolSelection,
   mergeMcpSpawnEnv,
   resolveSessionMcpStdioSpawn,
+  wrapHostedWithToolFilter,
   wrapSpawnWithToolFilter,
   type ToolFilterSpawnAutonomy,
 } from '@process/services/mcpServices/builtinMcpRuntime';
@@ -133,10 +134,13 @@ export function isServerActiveForSession(server: IMcpServer, activeServerIds?: r
 /**
  * Build the `session/new` `mcpServers` array for an ACP backend.
  *
- * #998 — SERVER-level selection only. The ACP protocol's MCP server descriptor
- * carries name + transport and has no per-tool field, so a server that reaches
- * here is registered with every tool it publishes; a STRICT per-tool subset is
- * not enforced on this path. `allowedTools: []` is, by withholding the server -
+ * #998 — the ACP protocol's MCP server descriptor carries name + transport and
+ * has no per-tool field, so a strict subset (and, later, an autonomy rung) can
+ * only be enforced by interposing: the engine is handed a descriptor pointing at
+ * our shim instead of at the server. That now covers BOTH transport families -
+ * a stdio server is spawned by the shim, and a hosted http/streamable_http/sse
+ * endpoint is bridged by it, so the engine holds neither the command nor the
+ * URL. `allowedTools: []` is handled a rung earlier, by withholding the server -
  * see `contributesTools`. Codex is the exception and does NOT rely on this array
  * for scoping - its `enabled_tools` are written into the generated `config.toml`
  * by `buildCodexMcpServerTable`.
@@ -214,21 +218,52 @@ export function buildAcpSessionMcpServers(
           }
           case 'http':
           case 'streamable_http':
+          case 'sse': {
+            const hosted = server.transport;
+            const wantsShim = autonomy !== undefined || hasExplicitToolSelection(server);
+            // A rung and a hard floor are rules about `tools/call`, and no engine
+            // wire carries either - so a hosted connector handed over as a raw
+            // URL is a connector the ladder does not reach, however loudly the
+            // settings card says otherwise. Bridge instead: the engine gets a
+            // STDIO descriptor pointing at our shim, and the shim opens the HTTP
+            // connection itself. Same `decideToolCall` verdict as the stdio leg,
+            // and the engine never holds the endpoint.
+            if (wantsShim && capabilities.stdio) {
+              const spawn = wrapHostedWithToolFilter(
+                { url: hosted.url, type: hosted.type, headers: hosted.headers },
+                hasExplicitToolSelection(server) ? (server.allowedTools ?? []) : null,
+                autonomy
+              );
+              return {
+                type: 'stdio',
+                name: server.name,
+                command: spawn.command,
+                args: spawn.args,
+                env: toNameValueEntries(spawn.env) ?? [],
+              };
+            }
+            // No stdio capability to bridge THROUGH, and a ladder to enforce.
+            // Withholding the connector is the only fail-closed answer left:
+            // registering it raw would hand the engine an unfiltered endpoint
+            // while the UI promises the floor applies to it.
+            if (wantsShim) return null;
+            if (hosted.type === 'sse') {
+              if (!capabilities.sse) return null;
+              return {
+                type: 'sse',
+                name: server.name,
+                url: hosted.url,
+                headers: toNameValueEntries(hosted.headers),
+              };
+            }
             if (!capabilities.http) return null;
             return {
               type: 'http',
               name: server.name,
-              url: server.transport.url,
-              headers: toNameValueEntries(server.transport.headers),
+              url: hosted.url,
+              headers: toNameValueEntries(hosted.headers),
             };
-          case 'sse':
-            if (!capabilities.sse) return null;
-            return {
-              type: 'sse',
-              name: server.name,
-              url: server.transport.url,
-              headers: toNameValueEntries(server.transport.headers),
-            };
+          }
           default:
             return null;
         }

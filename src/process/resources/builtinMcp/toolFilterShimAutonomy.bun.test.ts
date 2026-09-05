@@ -15,7 +15,13 @@
 import { describe, expect, it } from 'bun:test';
 
 import { createToolFilter } from './toolFilterShim';
-import { parseShimArgv } from './toolFilterShimEntry';
+import {
+  SHIM_HEADERS_ENV,
+  connectHttpUpstream,
+  parseShimArgv,
+  readUpstreamHeaders,
+  type UpstreamTransport,
+} from './toolFilterShimEntry';
 import type { ApprovalRecord } from '../../services/jarvis/approvalsLog';
 import { DEFAULT_AUTONOMY_RUNG, type AutonomyRung } from '../../../common/jarvis/autonomy';
 
@@ -190,6 +196,7 @@ describe('shim argv for the ladder', () => {
       agent: 'claude',
       hardFloorKeywords: ['appointment', 'bid'],
       logPath: '/data/jarvis/approvals.jsonl',
+      upstream: 'stdio',
       command: 'node',
       args: ['server.js'],
     });
@@ -210,5 +217,165 @@ describe('shim argv for the ladder', () => {
   it('refuses a trailing value-taking flag instead of running unfiltered', () => {
     expect(parseShimArgv(['--allow-all', '--', 'node'])).not.toBeNull();
     expect(parseShimArgv(['--allow', 'a', '--rung', '--', 'node'])).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The hosted-connector bridge. A rung that only bites on stdio is a rung the
+// settings card lies about, so these assert that the SAME verdict decides an
+// http/sse call and that a refused one never reaches the endpoint.
+// ---------------------------------------------------------------------------
+
+/** A transport that records what the bridge tried to send upstream. */
+function fakeTransport(): UpstreamTransport & { sent: unknown[]; started: boolean; closed: boolean } {
+  const transport = {
+    sent: [] as unknown[],
+    started: false,
+    closed: false,
+    start: async () => {
+      transport.started = true;
+    },
+    send: async (message: unknown) => {
+      transport.sent.push(message);
+    },
+    close: async () => {
+      transport.closed = true;
+    },
+  };
+  return transport as UpstreamTransport & { sent: unknown[]; started: boolean; closed: boolean };
+}
+
+/** Drive one `tools/call` through the filter with a HOSTED upstream behind it. */
+async function callToolOverHttp(toolName: string, rung: AutonomyRung) {
+  const transport = fakeTransport();
+  const toEngine: Msg[] = [];
+  const ledger: ApprovalRecord[] = [];
+  const link = connectHttpUpstream({
+    url: 'https://example.test/mcp',
+    kind: 'http',
+    onMessage: () => {},
+    onClose: () => {},
+    createTransport: () => transport,
+  });
+  const filter = createToolFilter({
+    allowed: [],
+    allowAll: true,
+    autonomy: { agent: 'claude', rung, hardFloorKeywords: [], onDecision: (r) => ledger.push(r) },
+    sendToEngine: (m) => toEngine.push(m),
+    sendToUpstream: (m) => link.send(m),
+  });
+  filter.fromEngine({ jsonrpc: '2.0', id: 11, method: 'tools/call', params: { name: toolName } });
+  // Let the queued start() settle so anything allowed has actually been sent.
+  await Promise.resolve();
+  await Promise.resolve();
+  return { transport, toEngine, ledger, link };
+}
+
+describe('the hosted-connector bridge enforces the same ladder', () => {
+  it('never reaches the endpoint for a write tool at rung 1', async () => {
+    const { transport, toEngine, ledger } = await callToolOverHttp('slack__send_message', 1);
+    expect(transport.sent).toHaveLength(0);
+    expect(toEngine).toHaveLength(1);
+    expect(errorMessageOf(toEngine[0])).toBe('Requires approval (autonomy rung 1). Draft it and ask.');
+    expect(ledger[0]?.decision).toBe('refused');
+  });
+
+  it('never reaches the endpoint for a hard-floor tool at rung 4', async () => {
+    const { transport, toEngine } = await callToolOverHttp('gusto__run_payroll', 4);
+    expect(transport.sent).toHaveLength(0);
+    expect(errorMessageOf(toEngine[0])).toContain('Hard floor');
+  });
+
+  it('forwards an allowed write tool at rung 3 to the endpoint', async () => {
+    const { transport, toEngine } = await callToolOverHttp('erpnext__update_customer', 3);
+    expect(toEngine).toHaveLength(0);
+    expect(transport.sent).toHaveLength(1);
+    expect((transport.sent[0] as Msg).method).toBe('tools/call');
+  });
+
+  it('queues what the engine says before the transport has started', async () => {
+    const transport = fakeTransport();
+    let release: (() => void) | undefined;
+    transport.start = () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    const link = connectHttpUpstream({
+      url: 'https://example.test/mcp',
+      kind: 'http',
+      onMessage: () => {},
+      onClose: () => {},
+      createTransport: () => transport,
+    });
+    // The engine opens with `initialize` the instant it has a pipe. A handshake
+    // that loses its first frame never recovers.
+    link.send({ jsonrpc: '2.0', id: 1, method: 'initialize' });
+    expect(transport.sent).toHaveLength(0);
+    release?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(transport.sent).toHaveLength(1);
+  });
+
+  it('reports a connection that never opened rather than accepting calls forever', async () => {
+    const transport = fakeTransport();
+    transport.start = async () => {
+      throw new Error('econnrefused');
+    };
+    let reason = '';
+    connectHttpUpstream({
+      url: 'https://example.test/mcp',
+      kind: 'http',
+      onMessage: () => {},
+      onClose: (r) => {
+        reason = r;
+      },
+      createTransport: () => transport,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(reason).toContain('econnrefused');
+  });
+});
+
+describe('shim argv for a hosted upstream', () => {
+  it('accepts --url with no upstream command', () => {
+    const parsed = parseShimArgv(['--allow-all', '--rung', '2', '--url', 'https://example.test/mcp']);
+    expect(parsed?.upstream).toBe('http');
+    expect(parsed?.url).toBe('https://example.test/mcp');
+    expect(parsed?.command).toBeUndefined();
+  });
+
+  it('maps streamable_http onto the same client as http, and sse onto its own', () => {
+    const streamable = parseShimArgv(['--allow-all', '--upstream', 'streamable_http', '--url', 'https://e.test/mcp']);
+    expect(streamable?.upstream).toBe('http');
+    expect(parseShimArgv(['--allow-all', '--upstream', 'sse', '--url', 'https://e.test/mcp'])?.upstream).toBe('sse');
+  });
+
+  it('refuses both upstreams at once rather than quietly picking one', () => {
+    expect(parseShimArgv(['--allow-all', '--url', 'https://e.test/mcp', '--', 'node', 's.js'])).toBeNull();
+  });
+
+  it('refuses a non-http endpoint', () => {
+    expect(parseShimArgv(['--allow-all', '--url', 'file:///etc/passwd'])).toBeNull();
+    expect(parseShimArgv(['--allow-all', '--url', 'not a url'])).toBeNull();
+  });
+
+  it('refuses an unknown --upstream value', () => {
+    expect(parseShimArgv(['--allow-all', '--upstream', 'carrier-pigeon', '--url', 'https://e.test/mcp'])).toBeNull();
+  });
+
+  it('still refuses an empty allowlist on the hosted leg too', () => {
+    expect(parseShimArgv(['--url', 'https://e.test/mcp'])).toBeNull();
+  });
+
+  it('reads request headers from the environment, never from argv', () => {
+    expect(readUpstreamHeaders({ [SHIM_HEADERS_ENV]: '{"Authorization":"Bearer x"}' })).toEqual({
+      Authorization: 'Bearer x',
+    });
+    // A malformed value must not take the shim down - the connector will fail
+    // its own auth and say so, which is the better failure.
+    expect(readUpstreamHeaders({ [SHIM_HEADERS_ENV]: 'not json' })).toEqual({});
+    expect(readUpstreamHeaders({})).toEqual({});
   });
 });
