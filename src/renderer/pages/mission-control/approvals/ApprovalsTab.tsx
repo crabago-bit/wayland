@@ -21,6 +21,7 @@
 import React from 'react';
 import { Button, Select, Tag } from '@arco-design/web-react';
 import { RefreshCw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { AUTONOMY_RUNG_LABELS, toAutonomyRung } from '@/common/jarvis/autonomy';
 import { formatTokenCount, formatUsd } from '@renderer/utils/format/tokens';
 import { isElectronDesktop } from '@renderer/utils/platform';
@@ -48,22 +49,23 @@ const RungBadge: React.FC<{ rung: number }> = ({ rung }) => {
 };
 
 const TierUsageCard: React.FC = () => {
+  const { t } = useTranslation();
   const { byModel } = useCostAnalytics();
   const rows = aggregateTierUsage(byModel);
 
   return (
     <div className={styles.panel} data-testid='tier-usage-card'>
-      <div className={styles.panelTitle}>Tier usage</div>
+      <div className={styles.panelTitle}>{t('missionControl.approvals.tierUsage')}</div>
       {rows.length === 0 ? (
-        <div className={styles.empty}>No recorded usage in this period yet.</div>
+        <div className={styles.empty}>{t('missionControl.approvals.tierEmpty')}</div>
       ) : (
         rows.map((row) => (
           <div key={`${row.kind}:${row.key}`} className={styles.tierRow}>
             <span className={styles.tierName}>
-              {row.key || 'unattributed'}
+              {row.key || t('missionControl.approvals.unattributed')}
               {row.kind === 'tier' && (
                 <Tag size='small' color='orange' className='ml-6px'>
-                  tier
+                  {t('missionControl.approvals.tierTag')}
                 </Tag>
               )}
             </span>
@@ -78,6 +80,7 @@ const TierUsageCard: React.FC = () => {
 };
 
 export const ApprovalsTab: React.FC = () => {
+  const { t } = useTranslation();
   const { rows, agents, filter, setFilter, total, loading, refresh } = useApprovals();
 
   return (
@@ -89,20 +92,20 @@ export const ApprovalsTab: React.FC = () => {
             style={{ width: 140 }}
             value={filter.decision}
             onChange={(decision) => setFilter({ ...filter, decision })}
-            aria-label='Filter by decision'
+            aria-label={t('missionControl.approvals.filterDecision')}
           >
-            <Select.Option value='all'>All decisions</Select.Option>
-            <Select.Option value='refused'>Refused</Select.Option>
-            <Select.Option value='allowed'>Allowed</Select.Option>
+            <Select.Option value='all'>{t('missionControl.approvals.decisionAll')}</Select.Option>
+            <Select.Option value='refused'>{t('missionControl.approvals.decisionRefused')}</Select.Option>
+            <Select.Option value='allowed'>{t('missionControl.approvals.decisionAllowed')}</Select.Option>
           </Select>
           <Select
             size='small'
             style={{ width: 160 }}
             value={filter.agent}
             onChange={(agent) => setFilter({ ...filter, agent })}
-            aria-label='Filter by agent'
+            aria-label={t('missionControl.approvals.filterAgent')}
           >
-            <Select.Option value='all'>All agents</Select.Option>
+            <Select.Option value='all'>{t('missionControl.approvals.agentAll')}</Select.Option>
             {agents.map((agent) => (
               <Select.Option key={agent} value={agent}>
                 {agent}
@@ -111,23 +114,23 @@ export const ApprovalsTab: React.FC = () => {
           </Select>
         </div>
         <Button size='small' icon={<RefreshCw size={14} />} loading={loading} onClick={() => void refresh()}>
-          Refresh
+          {t('missionControl.refresh')}
         </Button>
       </div>
 
       <div className={styles.panel}>
-        <div className={styles.panelTitle}>{`Approvals — showing ${rows.length} of ${total}`}</div>
+        <div className={styles.panelTitle}>{t('missionControl.approvals.title', { shown: rows.length, total })}</div>
         {rows.length === 0 ? (
-          <div className={styles.empty}>
-            Nothing recorded yet. Refusals and write-tool calls at rung 3 or above appear here.
-          </div>
+          <div className={styles.empty}>{t('missionControl.approvals.empty')}</div>
         ) : (
           rows.map((row, index) => (
             <div key={`${row.ts}-${row.tool}-${index}`} className={styles.row}>
               <span className={styles.ts}>{formatTs(row.ts)}</span>
               <span>
                 <Tag size='small' color={row.decision === 'refused' ? 'red' : 'green'}>
-                  {row.decision}
+                  {row.decision === 'refused'
+                    ? t('missionControl.approvals.decisionRefused')
+                    : t('missionControl.approvals.decisionAllowed')}
                 </Tag>
               </span>
               <span>

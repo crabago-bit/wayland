@@ -41,7 +41,8 @@
   },
   "tabs": {
     "operations": "Operations",
-    "cost": "Cost"
+    "cost": "Cost",
+    "approvals": "Aprovações"
   },
   "cost": {
     "periodLabel": "Period",
@@ -110,5 +111,19 @@
       "gateRaised": "Budget raised to {{limit}}",
       "gateError": "Couldn't raise the budget"
     }
+  },
+  "approvals": {
+    "title": "Aprovações — {{shown}} de {{total}}",
+    "empty": "Nada registrado ainda. Recusas e chamadas de ferramentas de escrita a partir do nível 3 aparecem aqui.",
+    "filterDecision": "Filtrar por decisão",
+    "filterAgent": "Filtrar por agente",
+    "decisionAll": "Todas as decisões",
+    "decisionRefused": "Recusada",
+    "decisionAllowed": "Permitida",
+    "agentAll": "Todos os agentes",
+    "tierUsage": "Uso por nível",
+    "tierEmpty": "Nenhum uso registrado neste período ainda.",
+    "tierTag": "nível",
+    "unattributed": "não atribuído"
   }
 }

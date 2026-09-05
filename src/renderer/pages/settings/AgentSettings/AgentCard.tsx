@@ -14,6 +14,7 @@ import { resolveAgentLogo } from '@/renderer/utils/model/agentLogo';
 import { resolveExtensionAssetUrl } from '@/renderer/utils/platform';
 import { getLucideIcon } from '@/renderer/utils/lucideAvatar';
 import type { AcpBackendConfig } from '@/common/types/acpTypes';
+import { AgentRungSelect } from './AutonomyControls';
 
 type DetectedAgent = {
   backend: string;
@@ -142,6 +143,11 @@ const AgentCard: React.FC<AgentCardProps> = (props) => {
         </div>
       </div>
       <div className='flex items-center gap-8px'>
+        {/* Same ladder, same key format as the detected-agent cards: a custom
+            agent is `custom:<id>`, which is what `resolveSpawnAutonomy` reads
+            when it spawns the tool-filter shim for that agent's session. Without
+            this control a custom agent could only ever sit on the default rung. */}
+        <AgentRungSelect agentKey={`custom:${agent.id}`} compact />
         <Switch size='small' checked={agent.enabled !== false} onChange={onToggle} />
         <Button size='small' type='text' icon={<PencilLine size={14} />} onClick={onEdit} />
         <Button size='small' type='text' status='danger' icon={<Trash2 size={14} />} onClick={onDelete} />

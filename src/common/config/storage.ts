@@ -147,7 +147,7 @@ export interface IConfigStorageRefer {
   /**
    * JARVIS autonomy ladder: the rung each agent is on, keyed exactly like
    * `agents.hidden` (plain backend, `custom:uuid`, `remote:uuid`). An agent with
-   * no entry is on rung 1 (SUGGEST) - see `DEFAULT_AUTONOMY_RUNG`. The rung is
+   * no entry is on `DEFAULT_AUTONOMY_RUNG` (3, ACT -> REPORT). The rung is
    * enforced in the MCP tool-filter shim, never only in the UI.
    */
   'agents.autonomy'?: Record<string, import('@/common/jarvis/autonomy').AutonomyRung>;

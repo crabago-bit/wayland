@@ -357,7 +357,7 @@ const MissionControlPage: React.FC = () => {
         {/* Approvals is available on BOTH rails - the ledger reaches a browser
             WebUI over the token-authed GET route - so it is not gated the way
             the cost tab is. */}
-        <Tabs.TabPane key='approvals' title='Approvals'>
+        <Tabs.TabPane key='approvals' title={t('missionControl.tabs.approvals')}>
           <ApprovalsTab />
         </Tabs.TabPane>
         {costTabAvailable && (

@@ -936,11 +936,6 @@
   "webui.changePasswordDesc": "Aktualisieren Sie das Administratorkennwort für diesen Server.",
   "webui.changeUsername": "Change username",
   "webui.changeUsernameDesc": "Update the admin login name for this server.",
-  "agentsPage.autonomy.label": "Autonomiestufe",
-  "agentsPage.autonomy.sectionLabel": "Autonomie",
-  "agentsPage.autonomy.hardFloorTitle": "Harte Grenze",
-  "agentsPage.autonomy.hardFloorDesc": "Tool-Namen, die auf einen dieser Begriffe passen, werden auf jeder Stufe abgelehnt - auch bei AUTONOM. Durchgesetzt im MCP-Tool-Filter, nicht im Modell-Prompt.",
-  "agentsPage.autonomy.hardFloorSource": "Zusätzliche Begriffe (orange) stammen aus {{path}}",
   "agentsPage.flux.remoteConnectCta": "Connect Flux from this device",
   "agentsPage.flux.remoteConnectError": "Could not connect Flux. Please try again.",
   "agentsPage.flux.remoteConnectSuccess": "Flux connected",
@@ -2409,6 +2404,14 @@
     "fuigo": {
       "empty": "No agents detected yet. Fuigo is always available once a model is connected.",
       "lockedTooltip": "Fuigo stays in the toolbar so you always have an agent to chat with."
+    },
+    "autonomy": {
+      "hardFloorSource": "Orange Schlüsselwörter werden in ~/.claude/crew-state/autonomy.md deklariert, als Zeile \"hard-floor-tokens: a, b, c\" oder als hard-floor-Codeblock. Fließtext in dieser Datei wird ignoriert.",
+      "hardFloorNoNotes": "Keine ~/.claude/crew-state/autonomy.md gefunden. Fügen Sie dort eine Zeile \"hard-floor-tokens: a, b, c\" hinzu, um die Untergrenze zu erweitern; Fließtext wird ignoriert.",
+      "label": "Autonomiestufe",
+      "sectionLabel": "Autonomie",
+      "hardFloorTitle": "Harte Grenze",
+      "hardFloorDesc": "Tool-Namen, die auf einen dieser Begriffe passen, werden auf jeder Stufe abgelehnt - auch bei AUTONOM. Durchgesetzt im MCP-Tool-Filter, nicht im Modell-Prompt."
     }
   },
   "slashCommands": {

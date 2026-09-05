@@ -6,7 +6,12 @@
 
 import { ConfigStorage } from '@/common/config/storage';
 import { ipcBridge } from '@/common';
-import { DEFAULT_AUTONOMY_RUNG, toAutonomyRung, type AutonomyRung } from '@/common/jarvis/autonomy';
+import {
+  DEFAULT_AUTONOMY_RUNG,
+  toAutonomyRung,
+  type AutonomyRung,
+  type HardFloorInfo as HardFloorInfoShape,
+} from '@/common/jarvis/autonomy';
 import { useCallback, useMemo } from 'react';
 import useSWR from 'swr';
 
@@ -36,7 +41,7 @@ export function useAgentAutonomy() {
 
   const rungs = useMemo(() => data ?? {}, [data]);
 
-  /** An agent with no entry has never been promoted, so it is on rung 1. */
+  /** An agent with no entry sits on `DEFAULT_AUTONOMY_RUNG` - see that constant. */
   const rungOf = useCallback(
     (agentKey: string): AutonomyRung => toAutonomyRung(rungs[agentKey] ?? DEFAULT_AUTONOMY_RUNG),
     [rungs]
@@ -56,7 +61,7 @@ export function useAgentAutonomy() {
   return { rungs, rungOf, setRung };
 }
 
-export type HardFloorInfo = { pattern: string; keywords: string[]; notesPath: string };
+export type { HardFloorInfo } from '@/common/jarvis/autonomy';
 
 /**
  * The effective hard floor, read from the main process.
@@ -66,8 +71,8 @@ export type HardFloorInfo = { pattern: string; keywords: string[]; notesPath: st
  * editable from settings would let the app talk itself out of its own floor.
  */
 export function useHardFloor() {
-  const { data } = useSWR<HardFloorInfo>(HARD_FLOOR_SWR_KEY, async () => {
+  const { data } = useSWR<HardFloorInfoShape>(HARD_FLOOR_SWR_KEY, async () => {
     return await ipcBridge.jarvis.hardFloor.invoke();
   });
-  return data ?? { pattern: '', keywords: [], notesPath: '' };
+  return data ?? { builtinTokens: [], keywords: [], notesFileFound: false };
 }

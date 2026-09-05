@@ -926,11 +926,6 @@
   "webui.changePasswordDesc": "Оновіть пароль адміністратора для цього сервера.",
   "webui.changeUsername": "Change username",
   "webui.changeUsernameDesc": "Update the admin login name for this server.",
-  "agentsPage.autonomy.label": "Рівень автономії",
-  "agentsPage.autonomy.sectionLabel": "Автономія",
-  "agentsPage.autonomy.hardFloorTitle": "Жорстка межа",
-  "agentsPage.autonomy.hardFloorDesc": "Імена інструментів, що збігаються з будь-яким із цих слів, відхиляються на будь-якому рівні, включно з АВТОНОМНИМ. Застосовується у фільтрі інструментів MCP, а не в промпті моделі.",
-  "agentsPage.autonomy.hardFloorSource": "Додаткові ключові слова (помаранчеві) беруться з {{path}}",
   "agentsPage.flux.remoteConnectCta": "Connect Flux from this device",
   "agentsPage.flux.remoteConnectError": "Could not connect Flux. Please try again.",
   "agentsPage.flux.remoteConnectSuccess": "Flux connected",
@@ -2349,6 +2344,14 @@
     "fuigo": {
       "empty": "No agents detected yet. Fuigo is always available once a model is connected.",
       "lockedTooltip": "Fuigo stays in the toolbar so you always have an agent to chat with."
+    },
+    "autonomy": {
+      "hardFloorSource": "Помаранчеві ключові слова оголошуються у ~/.claude/crew-state/autonomy.md рядком \"hard-floor-tokens: a, b, c\" або блоком hard-floor. Звичайний текст у цьому файлі ігнорується.",
+      "hardFloorNoNotes": "Файл ~/.claude/crew-state/autonomy.md не знайдено. Додайте до нього рядок \"hard-floor-tokens: a, b, c\", щоб розширити межу; звичайний текст ігнорується.",
+      "label": "Рівень автономії",
+      "sectionLabel": "Автономія",
+      "hardFloorTitle": "Жорстка межа",
+      "hardFloorDesc": "Імена інструментів, що збігаються з будь-яким із цих слів, відхиляються на будь-якому рівні, включно з АВТОНОМНИМ. Застосовується у фільтрі інструментів MCP, а не в промпті моделі."
     }
   },
   "commandPalette": {

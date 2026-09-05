@@ -20,10 +20,10 @@
  */
 
 import { ipcBridge } from '@/common';
-import { DEFAULT_HARD_FLOOR_PATTERN } from '@/common/jarvis/autonomy';
+import { DEFAULT_HARD_FLOOR_TOKENS, type HardFloorInfo } from '@/common/jarvis/autonomy';
 import { APPROVALS_PAGE_SIZE, readApprovalsFrom, type ApprovalRecord } from '@process/services/jarvis/approvalsLog';
 import { resolveApprovalsLogPath } from '@process/services/jarvis/approvalsPath';
-import { autonomyNotesPath, readHardFloorKeywords } from '@process/services/jarvis/hardFloor';
+import { hardFloorNotesFound, refreshHardFloor } from '@process/services/jarvis/hardFloor';
 
 /** Shared reader so the IPC provider and the HTTP route cannot diverge. */
 export function listApprovals(limit?: number): ApprovalRecord[] {
@@ -31,12 +31,24 @@ export function listApprovals(limit?: number): ApprovalRecord[] {
   return readApprovalsFrom(resolveApprovalsLogPath(), capped);
 }
 
-/** The effective hard floor, for display. Never a promise the shim doesn't keep. */
-export function describeHardFloor(): { pattern: string; keywords: string[]; notesPath: string } {
+/**
+ * The effective hard floor, for display. Never a promise the shim doesn't keep.
+ *
+ * Forces a re-read of the operator's notes first, so opening the settings card
+ * (or refreshing the Approvals view) shows what the file says NOW rather than
+ * what it said at the first session spawn of this app run.
+ *
+ * Returns `notesFileFound`, NOT the notes path: the identical payload is served
+ * to remote WebUI callers by `GET /api/jarvis/approvals`, and an absolute path
+ * under `$HOME` discloses the desktop user's account name to a paired browser
+ * for no benefit the boolean does not already give.
+ */
+export function describeHardFloor(): HardFloorInfo {
+  const keywords = refreshHardFloor();
   return {
-    pattern: DEFAULT_HARD_FLOOR_PATTERN.source,
-    keywords: readHardFloorKeywords(),
-    notesPath: autonomyNotesPath(),
+    builtinTokens: [...DEFAULT_HARD_FLOOR_TOKENS],
+    keywords,
+    notesFileFound: hardFloorNotesFound(),
   };
 }
 
@@ -55,7 +67,7 @@ export function initJarvisBridge(): void {
       return describeHardFloor();
     } catch (error) {
       console.error('[jarvisBridge] hardFloor error:', error);
-      return { pattern: DEFAULT_HARD_FLOOR_PATTERN.source, keywords: [], notesPath: '' };
+      return { builtinTokens: [...DEFAULT_HARD_FLOOR_TOKENS], keywords: [], notesFileFound: false };
     }
   });
 }

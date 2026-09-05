@@ -41,7 +41,8 @@
   },
   "tabs": {
     "operations": "Operations",
-    "cost": "Cost"
+    "cost": "Cost",
+    "approvals": "Freigaben"
   },
   "cost": {
     "periodLabel": "Period",
@@ -110,5 +111,19 @@
       "gateRaised": "Budget raised to {{limit}}",
       "gateError": "Couldn't raise the budget"
     }
+  },
+  "approvals": {
+    "title": "Freigaben — {{shown}} von {{total}}",
+    "empty": "Noch nichts erfasst. Ablehnungen und Schreib-Tool-Aufrufe ab Stufe 3 erscheinen hier.",
+    "filterDecision": "Nach Entscheidung filtern",
+    "filterAgent": "Nach Agent filtern",
+    "decisionAll": "Alle Entscheidungen",
+    "decisionRefused": "Abgelehnt",
+    "decisionAllowed": "Erlaubt",
+    "agentAll": "Alle Agenten",
+    "tierUsage": "Nutzung nach Stufe",
+    "tierEmpty": "In diesem Zeitraum noch keine Nutzung erfasst.",
+    "tierTag": "Stufe",
+    "unattributed": "nicht zugeordnet"
   }
 }

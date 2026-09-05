@@ -926,11 +926,6 @@
   "webui.changePasswordDesc": "이 서버의 관리자 비밀번호를 변경합니다.",
   "webui.changeUsername": "Change username",
   "webui.changeUsernameDesc": "Update the admin login name for this server.",
-  "agentsPage.autonomy.label": "자율성 단계",
-  "agentsPage.autonomy.sectionLabel": "자율성",
-  "agentsPage.autonomy.hardFloorTitle": "하드 플로어",
-  "agentsPage.autonomy.hardFloorDesc": "이 중 하나라도 일치하는 도구 이름은 AUTONOMOUS를 포함한 모든 단계에서 거부됩니다. 모델 프롬프트가 아니라 MCP 도구 필터에서 강제됩니다.",
-  "agentsPage.autonomy.hardFloorSource": "추가 키워드(주황색)는 {{path}}에서 가져옵니다",
   "agentsPage.flux.remoteConnectCta": "Connect Flux from this device",
   "agentsPage.flux.remoteConnectError": "Could not connect Flux. Please try again.",
   "agentsPage.flux.remoteConnectSuccess": "Flux connected",
@@ -2384,6 +2379,14 @@
     "fuigo": {
       "empty": "No agents detected yet. Fuigo is always available once a model is connected.",
       "lockedTooltip": "Fuigo stays in the toolbar so you always have an agent to chat with."
+    },
+    "autonomy": {
+      "hardFloorSource": "주황색 키워드는 ~/.claude/crew-state/autonomy.md 에서 \"hard-floor-tokens: a, b, c\" 줄이나 hard-floor 코드 블록으로 선언합니다. 해당 파일의 서술형 문장은 무시됩니다.",
+      "hardFloorNoNotes": "~/.claude/crew-state/autonomy.md 를 찾을 수 없습니다. \"hard-floor-tokens: a, b, c\" 줄을 추가하면 하한을 넓힐 수 있습니다. 서술형 문장은 무시됩니다.",
+      "label": "자율성 단계",
+      "sectionLabel": "자율성",
+      "hardFloorTitle": "하드 플로어",
+      "hardFloorDesc": "이 중 하나라도 일치하는 도구 이름은 AUTONOMOUS를 포함한 모든 단계에서 거부됩니다. 모델 프롬프트가 아니라 MCP 도구 필터에서 강제됩니다."
     }
   },
   "commandPalette": {

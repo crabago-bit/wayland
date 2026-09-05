@@ -926,11 +926,6 @@
   "webui.changePasswordDesc": "更新此伺服器的管理員密碼。",
   "webui.changeUsername": "Change username",
   "webui.changeUsernameDesc": "Update the admin login name for this server.",
-  "agentsPage.autonomy.label": "自主層級",
-  "agentsPage.autonomy.sectionLabel": "自主",
-  "agentsPage.autonomy.hardFloorTitle": "硬性底線",
-  "agentsPage.autonomy.hardFloorDesc": "符合其中任一項的工具名稱在所有層級（包括「完全自主」）都會被拒絕。由 MCP 工具篩選器強制執行，而非模型提示詞。",
-  "agentsPage.autonomy.hardFloorSource": "額外關鍵字（橘色）來自 {{path}}",
   "agentsPage.flux.remoteConnectCta": "Connect Flux from this device",
   "agentsPage.flux.remoteConnectError": "Could not connect Flux. Please try again.",
   "agentsPage.flux.remoteConnectSuccess": "Flux connected",
@@ -2384,6 +2379,14 @@
     "fuigo": {
       "empty": "No agents detected yet. Fuigo is always available once a model is connected.",
       "lockedTooltip": "Fuigo stays in the toolbar so you always have an agent to chat with."
+    },
+    "autonomy": {
+      "hardFloorSource": "橘色關鍵字在 ~/.claude/crew-state/autonomy.md 中宣告，可使用 \"hard-floor-tokens: a, b, c\" 行或 hard-floor 程式碼區塊。該檔案中的敘述文字會被忽略。",
+      "hardFloorNoNotes": "找不到 ~/.claude/crew-state/autonomy.md。在其中加入 \"hard-floor-tokens: a, b, c\" 行即可擴大底線；敘述文字會被忽略。",
+      "label": "自主層級",
+      "sectionLabel": "自主",
+      "hardFloorTitle": "硬性底線",
+      "hardFloorDesc": "符合其中任一項的工具名稱在所有層級（包括「完全自主」）都會被拒絕。由 MCP 工具篩選器強制執行，而非模型提示詞。"
     }
   },
   "commandPalette": {

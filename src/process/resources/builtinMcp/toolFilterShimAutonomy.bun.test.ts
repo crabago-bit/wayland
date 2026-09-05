@@ -17,7 +17,7 @@ import { describe, expect, it } from 'bun:test';
 import { createToolFilter } from './toolFilterShim';
 import { parseShimArgv } from './toolFilterShimEntry';
 import type { ApprovalRecord } from '../../services/jarvis/approvalsLog';
-import type { AutonomyRung } from '../../../common/jarvis/autonomy';
+import { DEFAULT_AUTONOMY_RUNG, type AutonomyRung } from '../../../common/jarvis/autonomy';
 
 type Msg = Record<string, unknown>;
 
@@ -199,8 +199,12 @@ describe('shim argv for the ladder', () => {
     expect(parseShimArgv(['--rung', '2', '--', 'node', 'server.js'])).toBeNull();
   });
 
-  it('clamps an out-of-range rung to the SUGGEST default rather than trusting it', () => {
-    expect(parseShimArgv(['--allow-all', '--rung', '9', '--', 'node', 's.js'])?.rung).toBe(1);
+  it('clamps an out-of-range rung to the default rather than trusting it', () => {
+    expect(parseShimArgv(['--allow-all', '--rung', '9', '--', 'node', 's.js'])?.rung).toBe(DEFAULT_AUTONOMY_RUNG);
+  });
+
+  it('keeps an explicitly stored rung 1, which the default no longer is', () => {
+    expect(parseShimArgv(['--allow-all', '--rung', '1', '--', 'node', 's.js'])?.rung).toBe(1);
   });
 
   it('refuses a trailing value-taking flag instead of running unfiltered', () => {

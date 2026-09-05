@@ -936,11 +936,6 @@
   "webui.changePasswordDesc": "Atualize a senha de administrador deste servidor.",
   "webui.changeUsername": "Change username",
   "webui.changeUsernameDesc": "Update the admin login name for this server.",
-  "agentsPage.autonomy.label": "Nível de autonomia",
-  "agentsPage.autonomy.sectionLabel": "Autonomia",
-  "agentsPage.autonomy.hardFloorTitle": "Limite absoluto",
-  "agentsPage.autonomy.hardFloorDesc": "Nomes de ferramentas que correspondam a qualquer um destes são recusados em todos os níveis, inclusive AUTÔNOMO. Aplicado no filtro de ferramentas MCP, não no prompt do modelo.",
-  "agentsPage.autonomy.hardFloorSource": "Palavras-chave adicionais (laranja) vêm de {{path}}",
   "agentsPage.flux.remoteConnectCta": "Connect Flux from this device",
   "agentsPage.flux.remoteConnectError": "Could not connect Flux. Please try again.",
   "agentsPage.flux.remoteConnectSuccess": "Flux connected",
@@ -2409,6 +2404,14 @@
     "fuigo": {
       "empty": "No agents detected yet. Fuigo is always available once a model is connected.",
       "lockedTooltip": "Fuigo stays in the toolbar so you always have an agent to chat with."
+    },
+    "autonomy": {
+      "hardFloorSource": "As palavras-chave em laranja são declaradas em ~/.claude/crew-state/autonomy.md, como uma linha \"hard-floor-tokens: a, b, c\" ou um bloco hard-floor. O texto corrido desse arquivo é ignorado.",
+      "hardFloorNoNotes": "Nenhum ~/.claude/crew-state/autonomy.md encontrado. Adicione lá uma linha \"hard-floor-tokens: a, b, c\" para ampliar o piso; o texto corrido é ignorado.",
+      "label": "Nível de autonomia",
+      "sectionLabel": "Autonomia",
+      "hardFloorTitle": "Limite absoluto",
+      "hardFloorDesc": "Nomes de ferramentas que correspondam a qualquer um destes são recusados em todos os níveis, inclusive AUTÔNOMO. Aplicado no filtro de ferramentas MCP, não no prompt do modelo."
     }
   },
   "slashCommands": {

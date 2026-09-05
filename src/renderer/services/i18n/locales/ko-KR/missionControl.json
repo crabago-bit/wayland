@@ -41,7 +41,8 @@
   },
   "tabs": {
     "operations": "Operations",
-    "cost": "Cost"
+    "cost": "Cost",
+    "approvals": "승인"
   },
   "cost": {
     "periodLabel": "Period",
@@ -110,5 +111,19 @@
       "gateRaised": "Budget raised to {{limit}}",
       "gateError": "Couldn't raise the budget"
     }
+  },
+  "approvals": {
+    "title": "승인 — 전체 {{total}}건 중 {{shown}}건",
+    "empty": "아직 기록이 없습니다. 거부된 호출과 3단계 이상에서의 쓰기 도구 호출이 여기에 표시됩니다.",
+    "filterDecision": "결정으로 필터링",
+    "filterAgent": "에이전트로 필터링",
+    "decisionAll": "모든 결정",
+    "decisionRefused": "거부됨",
+    "decisionAllowed": "허용됨",
+    "agentAll": "모든 에이전트",
+    "tierUsage": "티어별 사용량",
+    "tierEmpty": "이 기간에 기록된 사용량이 아직 없습니다.",
+    "tierTag": "티어",
+    "unattributed": "미할당"
   }
 }
