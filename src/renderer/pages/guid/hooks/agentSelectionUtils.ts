@@ -6,6 +6,7 @@
  * Modified by Ferrox Labs in 2026. Changes are documented in the project history.
  */
 
+import { autonomyAgentKey } from '@/common/jarvis/autonomy';
 import { ConfigStorage } from '@/common/config/storage';
 import type { AcpBackendAll } from '@/common/types/acpTypes';
 import type { AcpBackend } from '../types';
@@ -41,11 +42,10 @@ export async function savePreferredModelId(agentKey: string, modelId: string): P
  * Get agent key for selection.
  * Returns "custom:uuid" for custom agents, "remote:uuid" for remote agents, backend type for others.
  */
-export const getAgentKey = (agent: { backend: AcpBackend; customAgentId?: string; isPreset?: boolean }): string => {
-  if (agent.backend === 'remote' && agent.customAgentId) return `remote:${agent.customAgentId}`;
-  if (agent.customAgentId) return `custom:${agent.customAgentId}`;
-  return agent.backend;
-};
+export const getAgentKey = (agent: { backend: AcpBackend; customAgentId?: string; isPreset?: boolean }): string =>
+  // Delegated so the HOST (which builds the same key to spawn the JARVIS
+  // tool-filter shim) and this page cannot spell the same identity two ways.
+  autonomyAgentKey(agent);
 
 /**
  * Filter the detected agents down to the ones shown in the Guid-page toolbar
