@@ -194,6 +194,7 @@ describe('parseShimArgv - #998', () => {
       agent: '',
       hardFloorKeywords: [],
       logPath: undefined,
+      upstream: 'stdio',
       command: 'npx',
       args: ['-y', 'some-server'],
     });

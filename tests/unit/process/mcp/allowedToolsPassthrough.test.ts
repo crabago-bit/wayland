@@ -77,10 +77,19 @@ describe('#1167 path 1 - ACP session descriptors, stdio', () => {
 });
 
 describe('#1167 path 1b - ACP session descriptors, hosted http/sse', () => {
-  it.each(['http', 'sse'] as const)('refuses an unenforceable explicit subset on %s', (type) => {
-    expect(() => buildAcpSessionMcpServers([httpServer(['alpha'], type)], ALL)).toThrow(
-      UnsupportedHostedAcpToolSelectionError
-    );
+  it.each(['http', 'sse'] as const)('bridges an explicit subset on %s through the stdio filter shim', (type) => {
+    // WarriorHi: the tool-filter shim bridges hosted connectors, so a strict
+    // subset IS enforceable whenever the engine can spawn a stdio server.
+    const [server] = buildAcpSessionMcpServers([httpServer(['alpha'], type)], ALL);
+    expect(server.type).toBe('stdio');
+    expect(JSON.stringify(server)).toContain('builtin-mcp-tool-filter');
+    expect(JSON.stringify(server)).not.toContain('https://example.test/mcp');
+  });
+
+  it.each(['http', 'sse'] as const)('refuses an unenforceable explicit subset on %s without stdio', (type) => {
+    expect(() =>
+      buildAcpSessionMcpServers([httpServer(['alpha'], type)], { stdio: false, http: true, sse: true })
+    ).toThrow(UnsupportedHostedAcpToolSelectionError);
   });
 
   it.each(['http', 'sse'] as const)('omits the key on %s when unset', (type) => {

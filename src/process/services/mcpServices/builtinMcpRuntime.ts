@@ -300,3 +300,54 @@ export function wrapSpawnWithToolFilter(
     env: { ...runtime.env, ...spawn.env },
   };
 }
+
+/** Env var the shim reads its hosted-connector request headers out of. */
+export const TOOL_FILTER_HEADERS_ENV = 'WAYLAND_TOOL_FILTER_HEADERS';
+
+/**
+ * Point the engine at the filtering shim for a HOSTED (http/streamable_http/sse)
+ * connector, with the shim bridging to the real endpoint itself.
+ *
+ * The engine is handed a STDIO descriptor - it never holds the URL. That is the
+ * same process boundary the stdio leg gets, and it is the only shape in which a
+ * rung or a hard floor can apply to a hosted connector at all: the engine would
+ * otherwise connect to the endpoint directly and `tools/call` would never pass
+ * through anything of ours. Enforcing on stdio only, while the settings card
+ * says the floor holds on any connector, is the failure this closes.
+ *
+ * Headers travel in the ENVIRONMENT, not on argv: a hosted connector's bearer
+ * token lives in its headers, and argv is readable from `ps` by anyone on the
+ * box. The URL itself stays on argv - it is not a secret, and having it visible
+ * is what makes a stuck connector diagnosable.
+ */
+export function wrapHostedWithToolFilter(
+  transport: { url: string; type: 'http' | 'streamable_http' | 'sse'; headers?: Record<string, string> },
+  /** `null` = no per-tool selection; the shim is present for the ladder alone. */
+  allowedTools: readonly string[] | null,
+  autonomy?: ToolFilterSpawnAutonomy,
+  deps: BuiltinMcpRuntimeDeps = {}
+): McpStdioSpawnTuple {
+  const runtime = (deps.resolveRuntime ?? resolveJsRuntime)();
+  const scriptPath = (deps.scriptPath ?? getMcpScriptPath)(TOOL_FILTER_SCRIPT);
+  const selection = allowedTools === null ? ['--allow-all'] : allowedTools.flatMap((name) => ['--allow', name]);
+  const ladder = autonomy
+    ? [
+        '--rung',
+        String(autonomy.rung),
+        '--agent',
+        autonomy.agent,
+        '--log',
+        autonomy.logPath,
+        ...autonomy.hardFloorKeywords.flatMap((keyword) => ['--floor', keyword]),
+      ]
+    : [];
+  const env: Record<string, string> = { ...runtime.env };
+  if (transport.headers && Object.keys(transport.headers).length > 0) {
+    env[TOOL_FILTER_HEADERS_ENV] = JSON.stringify(transport.headers);
+  }
+  return {
+    command: runtime.command,
+    args: [scriptPath, ...selection, ...ladder, '--upstream', transport.type, '--url', transport.url],
+    env,
+  };
+}

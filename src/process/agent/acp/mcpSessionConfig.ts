@@ -13,6 +13,7 @@ import {
   hasExplicitToolSelection,
   mergeMcpSpawnEnv,
   resolveSessionMcpStdioSpawn,
+  wrapHostedWithToolFilter,
   wrapSpawnWithToolFilter,
   type ToolFilterSpawnAutonomy,
 } from '@process/services/mcpServices/builtinMcpRuntime';
@@ -155,8 +156,13 @@ export function isServerActiveForSession(server: IMcpServer, activeServerIds?: r
 /**
  * Build the `session/new` `mcpServers` array for an ACP backend.
  *
- * Standard ACP descriptors carry transport only. For stdio, the shim enforces a
- * strict subset. Hosted subsets throw an explicit unsupported-selection error.
+ * Standard ACP descriptors carry transport only, so a strict subset (and an
+ * autonomy rung) can only be enforced by interposing: the engine is handed a
+ * descriptor pointing at our shim instead of at the server. That covers BOTH
+ * transport families - a stdio server is spawned by the shim, and a hosted
+ * http/streamable_http/sse endpoint is bridged by it, so the engine holds
+ * neither the command nor the URL. A hosted strict subset with no stdio
+ * capability to bridge through throws `UnsupportedHostedAcpToolSelectionError`.
  * `allowedTools: []` never reaches this array; `contributesTools` withholds it.
  * Codex's separate native config path uses `enabled_tools`.
  */
@@ -233,27 +239,57 @@ export function buildAcpSessionMcpServers(
           }
           case 'http':
           case 'streamable_http':
-            if (!capabilities.http) return null;
-            if (hasExplicitToolSelection(server)) {
-              throw new UnsupportedHostedAcpToolSelectionError(server.name, 'http');
+          case 'sse': {
+            const hosted = server.transport;
+            const wantsShim = autonomy !== undefined || hasExplicitToolSelection(server);
+            // A rung and a hard floor are rules about `tools/call`, and no engine
+            // wire carries either - so a hosted connector handed over as a raw
+            // URL is a connector the ladder does not reach, however loudly the
+            // settings card says otherwise. Bridge instead: the engine gets a
+            // STDIO descriptor pointing at our shim, and the shim opens the HTTP
+            // connection itself. Same `decideToolCall` verdict as the stdio leg,
+            // and the engine never holds the endpoint.
+            if (wantsShim && capabilities.stdio) {
+              const spawn = wrapHostedWithToolFilter(
+                { url: hosted.url, type: hosted.type, headers: hosted.headers },
+                hasExplicitToolSelection(server) ? (server.allowedTools ?? []) : null,
+                autonomy
+              );
+              return {
+                type: 'stdio',
+                name: server.name,
+                command: spawn.command,
+                args: spawn.args,
+                env: toNameValueEntries(spawn.env) ?? [],
+              };
             }
+            // No stdio capability to bridge THROUGH, and a ladder to enforce.
+            // Withholding the connector is the only fail-closed answer left:
+            // registering it raw would hand the engine an unfiltered endpoint
+            // while the UI promises the floor applies to it.
+            // A strict subset with nothing to enforce it is refused loudly
+            // (upstream #1167), an autonomy-only rung withholds the connector.
+            if (hasExplicitToolSelection(server)) {
+              throw new UnsupportedHostedAcpToolSelectionError(server.name, hosted.type === 'sse' ? 'sse' : 'http');
+            }
+            if (wantsShim) return null;
+            if (hosted.type === 'sse') {
+              if (!capabilities.sse) return null;
+              return {
+                type: 'sse',
+                name: server.name,
+                url: hosted.url,
+                headers: toNameValueEntries(hosted.headers),
+              };
+            }
+            if (!capabilities.http) return null;
             return {
               type: 'http',
               name: server.name,
-              url: server.transport.url,
-              headers: toNameValueEntries(server.transport.headers),
+              url: hosted.url,
+              headers: toNameValueEntries(hosted.headers),
             };
-          case 'sse':
-            if (!capabilities.sse) return null;
-            if (hasExplicitToolSelection(server)) {
-              throw new UnsupportedHostedAcpToolSelectionError(server.name, 'sse');
-            }
-            return {
-              type: 'sse',
-              name: server.name,
-              url: server.transport.url,
-              headers: toNameValueEntries(server.transport.headers),
-            };
+          }
           default:
             return null;
         }
