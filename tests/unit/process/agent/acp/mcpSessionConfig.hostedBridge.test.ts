@@ -61,12 +61,15 @@ function bridged(servers: IMcpServer[], capabilities = caps, ladder: ToolFilterS
 }
 
 describe('hosted connectors are bridged through the tool-filter shim', () => {
-  it('hands the engine a stdio descriptor, never the endpoint URL', () => {
+  it('hands the engine a stdio descriptor that spawns the shim with the URL', () => {
     const descriptor = bridged([hosted()]);
     expect(descriptor.type).toBe('stdio');
     expect(descriptor.name).toBe('hosted');
-    // The URL is the shim's argument, not the engine's. The engine holding it
-    // would mean it could reconnect around us, which is the hole this closes.
+    // The URL is the SHIM's argument. The engine spawns the shim and so does
+    // see it on argv - that is fine, and the reason it is on argv rather than
+    // in the environment is that a stuck connector has to be diagnosable. What
+    // matters is that the descriptor is not the endpoint itself: a raw URL here
+    // meant the engine connected directly and no verdict ever ran.
     expect(descriptor.args).toContain('https://connector.example/mcp');
     expect(descriptor.args.join(' ')).toContain('builtin-mcp-tool-filter');
   });

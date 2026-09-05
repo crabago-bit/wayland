@@ -165,6 +165,12 @@ export function isServerActiveForSession(server: IMcpServer, activeServerIds?: r
  * capability to bridge through throws `UnsupportedHostedAcpToolSelectionError`.
  * `allowedTools: []` never reaches this array; `contributesTools` withholds it.
  * Codex's separate native config path uses `enabled_tools`.
+ *
+ * TWO BACKENDS DO NOT GO THROUGH THIS ARRAY, and the floor does not reach
+ * them yet: Codex loads connectors from the `config.toml` that `codexConfig.ts`
+ * generates (its `enabled_tools` do the per-tool scoping, but no rung applies),
+ * and Gemini from `GeminiAgentManager`. The settings copy on the Hard floor
+ * card says so rather than promising coverage this file cannot deliver.
  */
 export function buildAcpSessionMcpServers(
   mcpServers: IMcpServer[] | undefined | null,

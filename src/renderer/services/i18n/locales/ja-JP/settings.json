@@ -2386,7 +2386,8 @@
       "label": "自律レベル",
       "sectionLabel": "自律",
       "hardFloorTitle": "ハードフロア",
-      "hardFloorDesc": "これらのいずれかに一致するツール名は、AUTONOMOUS を含むすべてのレベルで拒否されます。モデルのプロンプトではなく MCP ツールフィルターで強制されます。"
+      "hardFloorDesc": "これらのいずれかに一致するツール名は、AUTONOMOUS を含むすべてのレベルで拒否されます。ACP コネクターには MCP ツールフィルターで強制されますが、Wayland Core・Codex・Gemini の各バックエンドはコネクターを直接読み込むため、まだ対象外です。",
+      "remoteDenied": "自律レベルはデスクトップアプリからのみ変更できます。ペアリングした端末からは変更できません"
     }
   },
   "commandPalette": {

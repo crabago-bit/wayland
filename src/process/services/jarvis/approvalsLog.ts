@@ -69,18 +69,49 @@ export const APPROVALS_ROTATE_BYTES = 5 * 1024 * 1024;
 const ensuredDirs = new Set<string>();
 
 /**
+ * Bytes this process believes each ledger holds.
+ *
+ * The rotation check was a `statSync` on EVERY append - a second syscall per
+ * recorded decision, asked of a file this process is the one growing. We stat
+ * once, when a path is first appended to, and then count: an append adds
+ * exactly the bytes it wrote, and a rotation resets the count to zero.
+ *
+ * The count is an estimate, and that is fine. Another shim appending
+ * concurrently makes ours an UNDER-count, so the file passes 5 MB before we
+ * notice and rotates a little late - a bounded overshoot, on a bound that was
+ * chosen for being roughly right rather than exact. The one thing it must not
+ * do is rotate EARLY and throw away a generation that still had room, which
+ * under-counting cannot cause.
+ */
+const ledgerBytes = new Map<string, number>();
+
+/** Size on disk now, or 0 when there is no file yet. */
+function statSizeOrZero(logPath: string): number {
+  try {
+    return fs.statSync(logPath).size;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Rename the live ledger out of the way once it passes
  * {@link APPROVALS_ROTATE_BYTES}. Best effort, like everything else here.
+ *
+ * Returns the byte count the caller should carry forward: 0 after a rotation,
+ * the count it passed in otherwise.
  */
-function rotateIfOversized(logPath: string): void {
+function rotateIfOversized(logPath: string, size: number): number {
+  if (size < APPROVALS_ROTATE_BYTES) return size;
   try {
-    if (fs.statSync(logPath).size < APPROVALS_ROTATE_BYTES) return;
     // `rename` over an existing `.1` replaces it on both POSIX and Windows, so
     // the previous generation is dropped rather than accumulating.
     fs.renameSync(logPath, `${logPath}.1`);
+    return 0;
   } catch {
-    // No file yet, or a rename we lost a race for. Either way the append below
-    // is still the right next move.
+    // A rename we lost a race for, or a file that is already gone. Re-stat
+    // rather than guessing - whatever is there now is the truth.
+    return statSizeOrZero(logPath);
   }
 }
 
@@ -97,10 +128,15 @@ export function appendApprovalTo(logPath: string, record: ApprovalRecord): void 
       fs.mkdirSync(dir, { recursive: true });
       ensuredDirs.add(dir);
     }
-    rotateIfOversized(logPath);
-    fs.appendFileSync(logPath, `${JSON.stringify(record)}\n`, 'utf8');
+    // First append to this path is the only one that asks the filesystem.
+    const known = ledgerBytes.get(logPath) ?? statSizeOrZero(logPath);
+    const line = `${JSON.stringify(record)}\n`;
+    const size = rotateIfOversized(logPath, known);
+    fs.appendFileSync(logPath, line, 'utf8');
+    ledgerBytes.set(logPath, size + Buffer.byteLength(line, 'utf8'));
   } catch {
-    // Best effort by design - see above.
+    // Best effort by design - see above. The count is left where it was: the
+    // next append re-derives it from disk only if this path was never counted.
   }
 }
 

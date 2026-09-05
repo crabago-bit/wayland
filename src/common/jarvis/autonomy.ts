@@ -29,6 +29,26 @@
  * working (the namespace simply contributes its own tokens) while costing the
  * false positives nothing.
  *
+ * BUT A TOKEN IS NOT A LEXEME. Whole-token comparison alone let every INFLECTED
+ * spelling of a floor word walk straight past the floor: `stripe_create_payment`,
+ * `payments_create`, `payouts_create`, `transfers_create`, `refunds_create`,
+ * `signing_url_create`, `create_signature_request`, `deletes_batch`,
+ * `removes_member`, `cancellations_create` are all real connector tool names,
+ * and none of them contains the bare token `pay`, `sign`, `delete` or `cancel`.
+ * Combined with a default rung of 3 they ran unattended. So each floor entry
+ * carries an explicit set of accepted token spellings - see
+ * {@link FLOOR_TOKEN_VARIANTS}. The set is DECLARED rather than derived by
+ * prefix, because a bare prefix rule re-opens exactly the false positives above:
+ * `pay` prefixes `payload` and `paypal`, `fire` prefixes `firebase` and
+ * `firestore`, `drop` prefixes `dropbox`.
+ *
+ * AND READ-SHAPED TOOLS ARE EXEMPT. A name whose verb is `get`/`list`/`search`/
+ * `read`/`show`/`fetch`/`describe`/`query`/`find`, with no mutation verb in it,
+ * is never floored and never counted as a write - `list_payments`,
+ * `paypal_list_payments` and `get_signed_url` read, they do not move money or
+ * bind a signature. The read verb must come BEFORE the floored word, so
+ * `pay_and_list` is still refused.
+ *
  * THE OPERATOR'S NOTES FILE. `~/.claude/crew-state/autonomy.md` may WIDEN the
  * hard floor, and it does so through ONE machine-readable form:
  *
@@ -122,29 +142,6 @@ export function tokenizeToolName(toolName: string): string[] {
 }
 
 /**
- * True when `tokens` contains `phrase` - a single token, or a CONTIGUOUS run of
- * them for a multi-word entry like `submit_bid`.
- *
- * Contiguity is the point: a floor entry of `submit_bid` must not fire on
- * `submit_expense_for_bid_review`, which mentions both words and means
- * something else.
- */
-function tokensContainPhrase(tokens: readonly string[], phrase: readonly string[]): boolean {
-  if (phrase.length === 0 || phrase.length > tokens.length) return false;
-  for (let i = 0; i + phrase.length <= tokens.length; i += 1) {
-    let matched = true;
-    for (let j = 0; j < phrase.length; j += 1) {
-      if (tokens[i + j] !== phrase[j]) {
-        matched = false;
-        break;
-      }
-    }
-    if (matched) return true;
-  }
-  return false;
-}
-
-/**
  * Tokens that mean a tool CHANGES something on the other side of a connector.
  *
  * Read/list/get/search tools do not match, and that is the point: rungs 1 and 2
@@ -205,26 +202,35 @@ export const READ_TOOL_TOKENS: readonly string[] = [
   'fetch',
   'describe',
   'query',
+  'find',
 ];
 
 const WRITE_TOKEN_SET: ReadonlySet<string> = new Set(WRITE_TOOL_TOKENS);
+const READ_TOKEN_SET: ReadonlySet<string> = new Set(READ_TOOL_TOKENS);
 
 /**
  * The built-in hard floor: never callable at ANY rung.
  *
  * "Any connector" means any connector the tool-filter shim is interposed on -
  * which, since the hosted-connector bridge, is every stdio and every
- * http/streamable_http/sse connector an ACP session registers. The ONE surface
- * still outside it is a connector Wayland Core loads from its own config.toml
- * `[mcp.servers]` table, which the engine reads at startup without asking us.
+ * http/streamable_http/sse connector an ACP session registers. THREE surfaces
+ * are still outside it, all of them backends that load connectors themselves
+ * rather than from the ACP `session/new` array: Wayland Core's own config.toml
+ * `[mcp.servers]` table, the Codex `config.toml` written by `codexConfig.ts`,
+ * and the Gemini backend's `GeminiAgentManager`. The floor does not reach those
+ * yet, and the settings copy says so.
  *
  * This ships in code rather than only in `~/.claude/crew-state/autonomy.md`
  * because a missing or renamed notes file must not silently remove the floor.
  * The file can only ADD to this list, never shrink it.
  *
- * Entries are whole tokens (or, with `_`, contiguous token runs). That is what
- * separates `sign` from `generate_design` and `get_signed_url`, `pay` from
- * `list_payments`, `fire` from `firebase` and `drop` from `dropbox`.
+ * Entries are whole tokens (or, with `_`, contiguous token runs), matched
+ * against the DECLARED spellings in {@link FLOOR_TOKEN_VARIANTS}. That is what
+ * separates `sign` from `generate_design` while still catching `signing_url_create`,
+ * and `pay` from `payload`/`paypal` while still catching `payments_create`.
+ *
+ * `esign` and `docusign` are their own entries: `sign` is a SUFFIX in both, and
+ * suffix matching would drag in every word that happens to end in those letters.
  */
 export const DEFAULT_HARD_FLOOR_TOKENS: readonly string[] = [
   'pay',
@@ -240,15 +246,75 @@ export const DEFAULT_HARD_FLOOR_TOKENS: readonly string[] = [
   'terminate',
   'submit_bid',
   'sign',
+  'esign',
+  'docusign',
   'cancel',
 ];
 
-/** One floor entry, pre-tokenized. `submit_bid` -> ['submit','bid']. */
-function toFloorPhrases(entries: readonly string[]): string[][] {
-  const phrases: string[][] = [];
+/**
+ * The token spellings each floor entry accepts.
+ *
+ * DECLARED, not derived. A prefix rule (`pay` matches anything starting `pay`)
+ * would be shorter and would floor `payload`, `paypal`, `firebase`, `firestore`
+ * and `dropbox` - the exact false positives whole-token matching was introduced
+ * to kill. A suffix rule would floor every word ending in `sign`. An explicit
+ * list is the only form where what the floor catches can be read off the page,
+ * and the table-driven test in `autonomy.bun.test.ts` pins both halves: the
+ * names that MUST refuse and the names that MUST stay callable.
+ *
+ * `signed` is on the list, so `get_signed_url` would be floored on tokens alone;
+ * it is not, because it is read-shaped - see {@link isReadShapedTool}.
+ */
+const FLOOR_TOKEN_VARIANTS: Readonly<Record<string, readonly string[]>> = {
+  pay: ['pay', 'pays', 'paid', 'payment', 'payments'],
+  payout: ['payout', 'payouts'],
+  payroll: ['payroll', 'payrolls'],
+  transfer: ['transfer', 'transfers', 'transferred'],
+  refund: ['refund', 'refunds', 'refunded'],
+  delete: ['delete', 'deletes', 'deleted', 'deletion', 'deletions'],
+  remove: ['remove', 'removes', 'removed', 'removal', 'removals'],
+  destroy: ['destroy', 'destroys', 'destroyed', 'destruction'],
+  drop: ['drop', 'drops', 'dropped'],
+  fire: ['fire', 'fires', 'fired'],
+  terminate: ['terminate', 'terminates', 'terminated', 'termination', 'terminations'],
+  sign: ['sign', 'signs', 'signed', 'signing', 'signature', 'signatures'],
+  esign: ['esign', 'esigns', 'esigned', 'esignature', 'esignatures'],
+  docusign: ['docusign'],
+  cancel: [
+    'cancel',
+    'cancels',
+    'canceled',
+    'cancelled',
+    'cancelation',
+    'cancelations',
+    'cancellation',
+    'cancellations',
+  ],
+};
+
+/**
+ * Accepted spellings of ONE floor token.
+ *
+ * An operator keyword that is not in the built-in table gets the regular
+ * English plural and nothing else - a rule they can predict from their own
+ * notes file without reading this module.
+ */
+function floorTokenVariants(token: string): string[] {
+  const declared = FLOOR_TOKEN_VARIANTS[token];
+  if (declared) return [...declared];
+  const variants = [token, `${token}s`];
+  if (/(?:s|x|z|ch|sh)$/.test(token)) variants.push(`${token}es`);
+  return variants;
+}
+
+/** One floor entry as a run of accepted-spelling sets. `submit_bid` -> 2 sets. */
+type FloorPhrase = readonly ReadonlySet<string>[];
+
+function toFloorPhrases(entries: readonly string[]): FloorPhrase[] {
+  const phrases: FloorPhrase[] = [];
   for (const entry of entries) {
     const tokens = tokenizeToolName(entry);
-    if (tokens.length > 0) phrases.push(tokens);
+    if (tokens.length > 0) phrases.push(tokens.map((token) => new Set(floorTokenVariants(token))));
   }
   return phrases;
 }
@@ -309,20 +375,86 @@ export function parseHardFloorKeywords(markdown: string): string[] {
   return [...tokens].toSorted();
 }
 
+/**
+ * Index of the first token where `phrase` matches as a CONTIGUOUS run, or -1.
+ *
+ * Contiguity is the point: a floor entry of `submit_bid` must not fire on
+ * `submit_expense_for_bid_review`, which mentions both words and means
+ * something else. The index (rather than a boolean) is what lets
+ * {@link isReadShapedTool} ask whether the read verb came first.
+ */
+function floorPhraseIndex(tokens: readonly string[], phrase: FloorPhrase): number {
+  if (phrase.length === 0 || phrase.length > tokens.length) return -1;
+  for (let i = 0; i + phrase.length <= tokens.length; i += 1) {
+    let matched = true;
+    for (let j = 0; j < phrase.length; j += 1) {
+      if (!phrase[j].has(tokens[i + j])) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) return i;
+  }
+  return -1;
+}
+
+/** Earliest token index any floor phrase matches at, or -1 for none. */
+function firstFloorIndex(tokens: readonly string[], extraKeywords: readonly string[]): number {
+  let earliest = -1;
+  for (const phrase of DEFAULT_HARD_FLOOR_PHRASES) {
+    const at = floorPhraseIndex(tokens, phrase);
+    if (at >= 0 && (earliest === -1 || at < earliest)) earliest = at;
+  }
+  for (const phrase of toFloorPhrases(extraKeywords)) {
+    const at = floorPhraseIndex(tokens, phrase);
+    if (at >= 0 && (earliest === -1 || at < earliest)) earliest = at;
+  }
+  return earliest;
+}
+
+/**
+ * True when `toolName` only reads, and is therefore exempt from BOTH the hard
+ * floor and the write pattern.
+ *
+ * Three conditions, and all three matter:
+ *
+ *   1. No mutation verb anywhere in the name. `get_or_create_invoice` is not a
+ *      read, whatever its first token says.
+ *   2. A read verb somewhere in the name. The verb need not be first, because a
+ *      vendor namespace routinely comes first - `paypal_list_payments`,
+ *      `stripe__list_charges`.
+ *   3. That read verb appears BEFORE the floored word. `list_payments` reads a
+ *      list of payments; `pay_and_list` pays. Without this the exemption would
+ *      be a hole any name could be shaped into.
+ *
+ * `get_signed_url` is exempt by this rule, deliberately: it mints a URL, it does
+ * not bind a signature, and flooring it was one of the original false positives.
+ */
+export function isReadShapedTool(toolName: string, extraKeywords: readonly string[] = []): boolean {
+  const tokens = tokenizeToolName(toolName);
+  if (tokens.length === 0) return false;
+  if (tokens.some((token) => WRITE_TOKEN_SET.has(token))) return false;
+  const readAt = tokens.findIndex((token) => READ_TOKEN_SET.has(token));
+  if (readAt === -1) return false;
+  const floorAt = firstFloorIndex(tokens, extraKeywords);
+  return floorAt === -1 || readAt < floorAt;
+}
+
 /** True when `toolName` is on the hard floor - the built-in list or a keyword. */
 export function isHardFloorTool(toolName: string, extraKeywords: readonly string[] = []): boolean {
   const tokens = tokenizeToolName(toolName);
   if (tokens.length === 0) return false;
-  for (const phrase of DEFAULT_HARD_FLOOR_PHRASES) {
-    if (tokensContainPhrase(tokens, phrase)) return true;
-  }
-  for (const phrase of toFloorPhrases(extraKeywords)) {
-    if (tokensContainPhrase(tokens, phrase)) return true;
-  }
-  return false;
+  if (isReadShapedTool(toolName, extraKeywords)) return false;
+  return firstFloorIndex(tokens, extraKeywords) >= 0;
 }
 
-/** True when `toolName` looks like it changes state on the far side. */
+/**
+ * True when `toolName` looks like it changes state on the far side.
+ *
+ * A read-shaped name can never reach `true` here: rule 1 of
+ * {@link isReadShapedTool} is that the name carries no mutation verb, which is
+ * the only thing this function looks for.
+ */
 export function isWriteTool(toolName: string): boolean {
   return tokenizeToolName(toolName).some((token) => WRITE_TOKEN_SET.has(token));
 }
