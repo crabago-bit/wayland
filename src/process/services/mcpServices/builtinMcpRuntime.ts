@@ -46,6 +46,7 @@
 
 import path from 'node:path';
 import type { IMcpServer } from '@/common/config/storage';
+import type { AutonomyRung } from '@/common/jarvis/autonomy';
 import { isBuiltinCoreMcpArg, isOwnBuiltinWaylandMcpScript } from '@process/resources/builtinMcp/constants';
 import { getMcpScriptPath } from '@process/utils/mcpScriptDir';
 import { resolveJsRuntime, type ResolvedJsRuntime } from '@process/utils/jsRuntime';
@@ -197,6 +198,22 @@ export function applyBuiltinMcpRuntime<
   };
 }
 
+/**
+ * The autonomy ladder the shim must enforce for one spawn.
+ *
+ * Passed on argv rather than read by the shim itself: the shim is a standalone
+ * child with no platform services, so the host is the only side that can resolve
+ * `$DATA_DIR` or the operator's notes file. Handing it a resolved snapshot also
+ * means a connector's enforcement cannot change under it mid-session.
+ */
+export type ToolFilterSpawnAutonomy = {
+  agent: string;
+  rung: AutonomyRung;
+  hardFloorKeywords: readonly string[];
+  /** Absolute path of `$DATA_DIR/jarvis/approvals.jsonl`. */
+  logPath: string;
+};
+
 /** Bundled filename of the per-tool filtering shim (#998). */
 export const TOOL_FILTER_SCRIPT = 'builtin-mcp-tool-filter.js';
 
@@ -236,16 +253,36 @@ export function hasExplicitToolSelection(server: Pick<IMcpServer, 'allowedTools'
  */
 export function wrapSpawnWithToolFilter(
   spawn: McpStdioSpawnTuple,
-  allowedTools: readonly string[],
+  /** `null` = no per-tool selection; the shim is present for the ladder alone. */
+  allowedTools: readonly string[] | null,
+  autonomy?: ToolFilterSpawnAutonomy,
   deps: BuiltinMcpRuntimeDeps = {}
 ): McpStdioSpawnTuple {
   const runtime = (deps.resolveRuntime ?? resolveJsRuntime)();
   const scriptPath = (deps.scriptPath ?? getMcpScriptPath)(TOOL_FILTER_SCRIPT);
+  const selection =
+    allowedTools === null
+      ? ['--allow-all']
+      : // One `--allow` per tool. A comma-joined list would be fail-OPEN: a tool
+        // name containing a comma would split into entries that were never allowed.
+        allowedTools.flatMap((name) => ['--allow', name]);
+  // Same reasoning for the floor: one `--floor` per keyword, no delimiter to
+  // corrupt. Absent autonomy emits nothing, so the shim behaves exactly as it
+  // did before the ladder existed.
+  const ladder = autonomy
+    ? [
+        '--rung',
+        String(autonomy.rung),
+        '--agent',
+        autonomy.agent,
+        '--log',
+        autonomy.logPath,
+        ...autonomy.hardFloorKeywords.flatMap((keyword) => ['--floor', keyword]),
+      ]
+    : [];
   return {
     command: runtime.command,
-    // One `--allow` per tool. A comma-joined list would be fail-OPEN: a tool
-    // name containing a comma would split into entries that were never allowed.
-    args: [scriptPath, ...allowedTools.flatMap((name) => ['--allow', name]), '--', spawn.command, ...spawn.args],
+    args: [scriptPath, ...selection, ...ladder, '--', spawn.command, ...spawn.args],
     // Runtime env first so the server's own values win a collision - the server
     // is the one whose process actually needs them.
     env: { ...runtime.env, ...spawn.env },

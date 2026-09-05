@@ -14,6 +14,7 @@ import { useIsPopoutMode } from '@/renderer/hooks/system/useIsPopoutMode';
 import { isElectronDesktop } from '@/renderer/utils/platform';
 import { useMissionControl } from './useMissionControl';
 import { CostTab } from './cost/CostTab';
+import { ApprovalsTab } from './approvals/ApprovalsTab';
 import PageShell from '@/renderer/components/layout/PageShell';
 import {
   CatalogPaginationControls,
@@ -325,7 +326,7 @@ const MissionControlPage: React.FC = () => {
   useEffect(() => {
     const tab = searchParams.get('tab');
     if (tab === 'cost' && costTabAvailable) setActiveTab(tab);
-    else if (tab === 'operations') setActiveTab(tab);
+    else if (tab === 'operations' || tab === 'approvals') setActiveTab(tab);
   }, [searchParams, costTabAvailable]);
 
   // Hide the pop-out trigger when this page is itself rendered inside a pop-out
@@ -354,6 +355,12 @@ const MissionControlPage: React.FC = () => {
       <Tabs activeTab={activeTab} onChange={setActiveTab} className={styles.tabs}>
         <Tabs.TabPane key='operations' title={t('missionControl.tabs.operations')}>
           <OperationsView />
+        </Tabs.TabPane>
+        {/* Approvals is available on BOTH rails - the ledger reaches a browser
+            WebUI over the token-authed GET route - so it is not gated the way
+            the cost tab is. */}
+        <Tabs.TabPane key='approvals' title='Approvals'>
+          <ApprovalsTab />
         </Tabs.TabPane>
         {costTabAvailable && (
           <Tabs.TabPane key='cost' title={t('missionControl.tabs.cost')}>

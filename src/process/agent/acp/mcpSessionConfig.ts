@@ -15,6 +15,7 @@ import {
   mergeMcpSpawnEnv,
   resolveSessionMcpStdioSpawn,
   wrapSpawnWithToolFilter,
+  type ToolFilterSpawnAutonomy,
 } from '@process/services/mcpServices/builtinMcpRuntime';
 import { sanitizeMcpServerName } from '@process/services/mcpServices/validateMcpServer';
 
@@ -144,7 +145,8 @@ export function buildAcpSessionMcpServers(
   mcpServers: IMcpServer[] | undefined | null,
   capabilities: AcpMcpCapabilities,
   activeServerIds?: readonly string[],
-  allowConciergeDiag: boolean = false
+  allowConciergeDiag: boolean = false,
+  autonomy?: ToolFilterSpawnAutonomy
 ): AcpSessionMcpServer[] {
   if (!Array.isArray(mcpServers) || mcpServers.length === 0) {
     return [];
@@ -187,9 +189,21 @@ export function buildAcpSessionMcpServers(
             // subset stops being state the engine is asked to respect and
             // becomes a boundary it cannot cross: it never holds the real
             // server's descriptor.
-            const spawn = hasExplicitToolSelection(server)
-              ? wrapSpawnWithToolFilter(resolved, server.allowedTools ?? [])
-              : resolved;
+            // The ladder (JARVIS autonomy rungs) needs the SAME interposition
+            // for the same reason: a rung is a rule about `tools/call`, and no
+            // engine wire carries one. So the shim is spawned whenever EITHER a
+            // strict subset or a ladder has to be enforced, and it is handed
+            // `null` for the selection when only the ladder applies - `[]` would
+            // mean "allow nothing" and silently mute an unscoped connector.
+            const spawn = autonomy
+              ? wrapSpawnWithToolFilter(
+                  resolved,
+                  hasExplicitToolSelection(server) ? (server.allowedTools ?? []) : null,
+                  autonomy
+                )
+              : hasExplicitToolSelection(server)
+                ? wrapSpawnWithToolFilter(resolved, server.allowedTools ?? [])
+                : resolved;
             return {
               type: 'stdio',
               name: server.name,
@@ -261,7 +275,8 @@ export function buildAcpSessionMcpServers(
 export function buildWCoreUserStdioMcpServers(
   mcpServers: IMcpServer[] | undefined | null,
   activeServerIds?: readonly string[],
-  excludeNames?: ReadonlySet<string>
+  excludeNames?: ReadonlySet<string>,
+  autonomy?: ToolFilterSpawnAutonomy
 ): AcpSessionMcpServerStdio[] {
   if (!Array.isArray(mcpServers) || mcpServers.length === 0) {
     return [];
@@ -281,9 +296,15 @@ export function buildWCoreUserStdioMcpServers(
         // #998: same interposition as the ACP path - Core's `add_mcp_server`
         // carries no per-tool field, so a strict subset reaches the engine only by
         // the engine talking to our shim instead of to the server.
-        const spawn = hasExplicitToolSelection(server)
-          ? wrapSpawnWithToolFilter({ ...resolved, env: {} }, server.allowedTools ?? [])
-          : { ...resolved, env: {} as Record<string, string> };
+        const spawn = autonomy
+          ? wrapSpawnWithToolFilter(
+              { ...resolved, env: {} },
+              hasExplicitToolSelection(server) ? (server.allowedTools ?? []) : null,
+              autonomy
+            )
+          : hasExplicitToolSelection(server)
+            ? wrapSpawnWithToolFilter({ ...resolved, env: {} }, server.allowedTools ?? [])
+            : { ...resolved, env: {} as Record<string, string> };
         return {
           type: 'stdio',
           name: sanitizeMcpServerName(server.name),

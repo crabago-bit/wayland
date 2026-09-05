@@ -23,6 +23,7 @@ import { SqliteBudgetRepository } from '@process/services/cost/SqliteBudgetRepos
 import { CostAnalyticsService } from '@process/services/cost/CostAnalyticsService';
 import { BudgetController, setBudgetController } from '@process/services/cost/BudgetController';
 import { initCostBridge, initCostBudgetBridge } from '@process/bridge/costBridge';
+import { initJarvisBridge } from '@process/bridge/jarvisBridge';
 import { CostRecorder, setCostRecorder } from '@process/services/cost/CostRecorder';
 import { getModelPricing } from '@process/services/cost/ModelPricing';
 import { getDatabase } from '@process/services/database';
@@ -215,6 +216,13 @@ ensureUsageProviderRegistered();
 // handler currently throws "not yet implemented" - real implementations land
 // in W2 (state endpoints) and W5 (autonomous dispatch). See SPEC §6.
 registerWorkflowBridge();
+
+// JARVIS autonomy ladder reads (approvals ledger + hard floor). Registered
+// eagerly and unconditionally: unlike the cost providers these need no database,
+// only the JSONL ledger the tool-filter shim appends to, so gating them on the
+// SQLite bootstrap would leave Mission Control's Approvals section dead on any
+// install where the DB is slow or unavailable.
+initJarvisBridge();
 // Cross-audit MED-4: usage_events is append-only, so prune rows older than
 // the aggregator's lookback window on startup to keep the table bounded on
 // long-lived installs. Aggregator only queries the last 7 days; 90 days is

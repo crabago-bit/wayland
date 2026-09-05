@@ -140,6 +140,13 @@ export interface IConfigStorageRefer {
    * Absent or empty means every detected agent is shown.
    */
   'agents.hidden'?: string[];
+  /**
+   * JARVIS autonomy ladder: the rung each agent is on, keyed exactly like
+   * `agents.hidden` (plain backend, `custom:uuid`, `remote:uuid`). An agent with
+   * no entry is on rung 1 (SUGGEST) - see `DEFAULT_AUTONOMY_RUNG`. The rung is
+   * enforced in the MCP tool-filter shim, never only in the UI.
+   */
+  'agents.autonomy'?: Record<string, import('@/common/jarvis/autonomy').AutonomyRung>;
   /** Preset assistant configurations (isPreset === true, prompt-only, no CLI). */
   assistants?: AcpBackendConfig[];
   /**

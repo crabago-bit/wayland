@@ -10,6 +10,9 @@ import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 import { ipcBridge } from '@/common';
 import { useHiddenAgents } from '@renderer/hooks/assistant/useHiddenAgents';
+import { useAgentAutonomy } from '@renderer/hooks/assistant/useAgentAutonomy';
+import type { AutonomyRung } from '@/common/jarvis/autonomy';
+import { AutonomyRungSelect, HardFloorCard } from './AutonomyControls';
 import { resolveAgentLogo } from '@renderer/utils/model/agentLogo';
 import { resolveExtensionAssetUrl } from '@renderer/utils/platform';
 import SettingsPageShell from '@renderer/pages/settings/components/SettingsPageShell';
@@ -109,7 +112,9 @@ const AgentCard: React.FC<{
   shown: boolean;
   locked: boolean;
   onToggle: (shown: boolean) => void;
-}> = ({ agent, hero, shown, locked, onToggle }) => {
+  rung: AutonomyRung;
+  onRungChange: (rung: AutonomyRung) => void;
+}> = ({ agent, hero, shown, locked, onToggle, rung, onRungChange }) => {
   const { t } = useTranslation();
   const scope = resolveAgentScope(agent.backend);
   const logo = agentLogo(agent);
@@ -136,6 +141,7 @@ const AgentCard: React.FC<{
             {t(hero ? 'settings.agentsPage.badge.active' : 'settings.agentsPage.badge.detected')}
           </span>
           <ToolbarToggle backend={agent.backend} shown={shown} locked={locked} onChange={onToggle} />
+          <AutonomyRungSelect agentKey={agent.backend} rung={rung} onChange={onRungChange} />
         </div>
       </div>
     </div>
@@ -146,11 +152,13 @@ const AgentCard: React.FC<{
  * One compact tile for a detected agent in the "More detected" grid
  * (prototype `.mtile`). Shows only the agent and its plain-language scope.
  */
-const AgentTile: React.FC<{ agent: DetectedAgent; shown: boolean; onToggle: (shown: boolean) => void }> = ({
-  agent,
-  shown,
-  onToggle,
-}) => {
+const AgentTile: React.FC<{
+  agent: DetectedAgent;
+  shown: boolean;
+  onToggle: (shown: boolean) => void;
+  rung: AutonomyRung;
+  onRungChange: (rung: AutonomyRung) => void;
+}> = ({ agent, shown, onToggle, rung, onRungChange }) => {
   const { t } = useTranslation();
   const scope = resolveAgentScope(agent.backend);
   const logo = agentLogo(agent);
@@ -167,6 +175,7 @@ const AgentTile: React.FC<{ agent: DetectedAgent; shown: boolean; onToggle: (sho
           <FluxCompatChip backend={agent.backend} />
         </div>
       </div>
+      <AutonomyRungSelect agentKey={agent.backend} rung={rung} onChange={onRungChange} compact />
       <ToolbarToggle backend={agent.backend} shown={shown} locked={false} onChange={onToggle} />
     </div>
   );
@@ -188,6 +197,9 @@ const AgentTile: React.FC<{ agent: DetectedAgent; shown: boolean; onToggle: (sho
 const AgentsSettings: React.FC = () => {
   const { t } = useTranslation();
   const { isHidden, setAgentHidden } = useHiddenAgents();
+  // JARVIS autonomy ladder. Read here and passed down so both card shapes show
+  // the SAME rung the tool-filter shim will actually be spawned with.
+  const { rungOf, setRung } = useAgentAutonomy();
 
   // Detected agents - built-in backends and extension-contributed agents,
   // excluding remote and user-custom agents (those have their own surfaces).
@@ -267,6 +279,8 @@ const AgentsSettings: React.FC = () => {
                 shown={agent.backend === 'wcore' ? true : !isHidden(agent.backend)}
                 locked={agent.backend === 'wcore'}
                 onToggle={(shown) => void setAgentHidden(agent.backend, !shown)}
+                rung={rungOf(agent.backend)}
+                onRungChange={(rung) => void setRung(agent.backend, rung)}
               />
             ))}
           </div>
@@ -287,11 +301,19 @@ const AgentsSettings: React.FC = () => {
                 agent={agent}
                 shown={!isHidden(agent.backend)}
                 onToggle={(shown) => void setAgentHidden(agent.backend, !shown)}
+                rung={rungOf(agent.backend)}
+                onRungChange={(rung) => void setRung(agent.backend, rung)}
               />
             ))}
           </div>
         </>
       )}
+
+      {/* ---- Autonomy: the hard floor no rung can buy past ---- */}
+      <div className={styles.sectionLabel}>
+        {t('settings.agentsPage.autonomy.sectionLabel', { defaultValue: 'Autonomy' })}
+      </div>
+      <HardFloorCard />
 
       {/* ---- Available to install (D3: below More detected) ---- */}
       <AvailableToInstall />

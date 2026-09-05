@@ -292,6 +292,12 @@ const REMOTE_DENIED_PREFIXES: readonly string[] = [
   // later. byConversation/series in particular disclose per-conversation usage
   // and a fine-grained activity timeline. Local-renderer-only surface.
   'cost.',
+  // JARVIS autonomy ladder (jarvis.approvals / jarvis.hardFloor). The ledger is
+  // a per-agent record of what was attempted and refused - a map of which write
+  // tools exist and which agent may reach them, i.e. exactly the reconnaissance
+  // a remote attacker wants. A remote WebUI reads it over the token-authed
+  // GET /api/jarvis/approvals route, which is the rail that has an auth story.
+  'jarvis.',
   // #645 Terminal mode. terminal.open spawns a real PTY running the chat's agent
   // CLI on a TTY; terminal.input writes keystrokes into it. A paired-device WS
   // token proves a remote browser, NOT the local trusted user, so the ENTIRE
