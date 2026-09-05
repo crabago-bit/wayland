@@ -427,6 +427,14 @@ export interface AcpBackendConfig {
   /** Standing Company flag - always-on multi-role org (kind === 'team'). */
   standing?: boolean;
 
+  /**
+   * Read-only provenance carried by rows seeded from a drop-in assistant pack
+   * (see `@process/utils/userCatalog`). `tier` and `workspace` are declared by
+   * the pack author and surfaced in the assistant editor; nothing in the app
+   * enforces them, so they must never be treated as a spawn contract.
+   */
+  packMeta?: { pack?: string; tier?: string; workspace?: string };
+
   /** SuggestionEngine kickoff cards shown on the new-chat empty state. */
   kickoffs?: Array<{
     id: string;

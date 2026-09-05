@@ -262,6 +262,29 @@ const AssistantEditDrawer: React.FC<AssistantEditDrawerProps> = ({
             </div>
           </div>
 
+          {/* Assistant-pack provenance (read-only) */}
+          {(activeAssistant?.packMeta?.tier || activeAssistant?.packMeta?.workspace) && (
+            <div className='flex-shrink-0'>
+              <Typography.Text bold>
+                {t('settings.assistantPackMeta', { defaultValue: 'From assistant pack' })}
+              </Typography.Text>
+              <div className='mt-10px flex flex-wrap items-center gap-8px'>
+                {activeAssistant.packMeta?.pack && <Tag size='small'>{activeAssistant.packMeta.pack}</Tag>}
+                {activeAssistant.packMeta?.tier && (
+                  <Tag size='small' color='arcoblue'>
+                    {t('settings.assistantPackTier', { defaultValue: 'Tier' })}: {activeAssistant.packMeta.tier}
+                  </Tag>
+                )}
+                {activeAssistant.packMeta?.workspace && (
+                  <Tag size='small' color='gray'>
+                    {t('settings.assistantPackWorkspace', { defaultValue: 'Workspace' })}:{' '}
+                    {activeAssistant.packMeta.workspace}
+                  </Tag>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Description */}
           <div className='flex-shrink-0'>
             <Typography.Text bold>

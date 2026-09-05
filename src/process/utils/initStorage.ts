@@ -73,6 +73,7 @@ import { getMcpScriptPath, inspectMcpScripts } from './mcpScriptDir';
 import { cleanupLegacyBundledExtensionCopies } from '../extensions/lifecycle/legacyBundledCopyCleanup';
 import { getBuiltinCatalogAssistants } from './builtinCatalog';
 import { seedHermesProfileAssistants } from '../services/skills/hermesProfileSeeder';
+import { applyAssistantPacks } from './userCatalog';
 // Platform and architecture types (moved from deleted updateConfig)
 type PlatformType = 'win32' | 'darwin' | 'linux';
 type ArchitectureType = 'x64' | 'arm64' | 'ia32' | 'arm';
@@ -85,6 +86,7 @@ const STORAGE_PATH = {
   chat: 'wayland-chat.txt',
   env: '.wayland-env',
   assistants: 'assistants',
+  assistantPacks: 'assistant-packs',
   skills: 'skills',
   builtinSkills: 'builtin-skills',
   cronSkills: 'cron-skills',
@@ -557,6 +559,14 @@ const chatMessageFile = conversationHistoryProxy(_chatMessageFile, cacheDir);
  */
 const getAssistantsDir = () => {
   return path.join(cacheDir, STORAGE_PATH.assistants);
+};
+
+/**
+ * Drop-in directory for user assistant packs (`*.pack.json`). Created on first
+ * boot by applyAssistantPacks so the path always exists for the user to find.
+ */
+const getAssistantPacksDir = () => {
+  return path.join(cacheDir, STORAGE_PATH.assistantPacks);
 };
 
 /**
@@ -1649,6 +1659,31 @@ const initStorage = async () => {
   }
   mark('5.4 hermes profile assistants');
 
+  // 5.5 Drop-in assistant packs (<userData>/config/assistant-packs/*.pack.json).
+  // Isolated like 5.4 so a malformed pack can never blank the builtin block, and
+  // last so it reads the freshly-persisted assistants list.
+  try {
+    await applyAssistantPacks({
+      packsDir: getAssistantPacksDir(),
+      assistantsDir: getAssistantsDir(),
+      getAssistants: async () => (await configFile.get('assistants').catch((): undefined => undefined)) ?? [],
+      setAssistants: async (next) => {
+        await configFile.set('assistants', next);
+      },
+      getApplied: async () => await configFile.get('assistantPacks.applied').catch((): undefined => undefined),
+      setApplied: async (next) => {
+        await configFile.set('assistantPacks.applied', next);
+      },
+      getAutonomy: async () => await configFile.get('agents.autonomy').catch((): undefined => undefined),
+      setAutonomy: async (next) => {
+        await configFile.set('agents.autonomy', next);
+      },
+    });
+  } catch (error) {
+    console.error('[Wayland] Failed to apply assistant packs:', error);
+  }
+  mark('5.5 assistant packs');
+
   // 6. Initialize the database (better-sqlite3)
   try {
     await getDatabase();
@@ -1701,6 +1736,7 @@ export const getSystemDir = () => {
  */
 export {
   getAssistantsDir,
+  getAssistantPacksDir,
   getSkillsDir,
   getBuiltinSkillsCopyDir,
   getAutoSkillsDir,

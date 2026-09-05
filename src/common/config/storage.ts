@@ -150,6 +150,13 @@ export interface IConfigStorageRefer {
   /** Preset assistant configurations (isPreset === true, prompt-only, no CLI). */
   assistants?: AcpBackendConfig[];
   /**
+   * Drop-in assistant packs already applied, as `{ <pack name>: <version> }`.
+   * A pack whose file version is <= the recorded one is skipped entirely, which
+   * is what makes a user's edit (and their delete) survive the next boot. See
+   * `@process/utils/userCatalog`.
+   */
+  'assistantPacks.applied'?: Record<string, number>;
+  /**
    * Per-assistant execution-backend overrides keyed by assistant id. Used for
    * vendored/extension-contributed specialists (ext-*) that have no persisted
    * record in `assistants` or `acp.customAgents` to mutate directly. The custom

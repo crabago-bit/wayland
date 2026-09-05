@@ -1,0 +1,49 @@
+{
+  "pack": "sample",
+  "version": 1,
+  "generatedAt": "2026-09-05T00:00:00.000Z",
+  "assistants": [
+    {
+      "id": "sample-scout",
+      "name": "Sample Scout",
+      "description": "Finds the thing before anyone asks for it.",
+      "avatar": "🔭",
+      "presetAgentType": "claude",
+      "promptFile": "sample-scout.en-US.md",
+      "prompts": ["Scout the repo and tell me what changed."],
+      "enabledSkills": ["deepsearch"],
+      "tier": "jarvis-cheap",
+      "autonomyRung": 2,
+      "workspace": "/tmp/sample-workspace"
+    },
+    {
+      "id": "sample-editor",
+      "name": "Sample Editor",
+      "description": "Cuts the draft down to what is true.",
+      "avatar": "✂️",
+      "presetAgentType": "claude",
+      "promptFile": "sample-editor.en-US.md",
+      "tier": "jarvis-default",
+      "autonomyRung": 1
+    }
+  ],
+  "teams": [
+    {
+      "id": "sample-desk",
+      "name": "Sample Desk",
+      "workspace": "/tmp/sample-workspace",
+      "workspaceMode": "shared",
+      "leader": "sample-scout",
+      "members": ["sample-scout", "sample-editor"],
+      "tasks": [
+        { "subject": "Survey", "description": "Collect the raw material.", "owner": "sample-scout" },
+        {
+          "subject": "Cut",
+          "description": "Reduce it to the publishable core.",
+          "owner": "sample-editor",
+          "blockedBy": ["Survey"]
+        }
+      ]
+    }
+  ]
+}
