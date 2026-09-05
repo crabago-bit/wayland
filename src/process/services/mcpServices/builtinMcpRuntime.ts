@@ -296,12 +296,16 @@ export const TOOL_FILTER_HEADERS_ENV = 'WAYLAND_TOOL_FILTER_HEADERS';
  * Point the engine at the filtering shim for a HOSTED (http/streamable_http/sse)
  * connector, with the shim bridging to the real endpoint itself.
  *
- * The engine is handed a STDIO descriptor - it never holds the URL. That is the
- * same process boundary the stdio leg gets, and it is the only shape in which a
- * rung or a hard floor can apply to a hosted connector at all: the engine would
- * otherwise connect to the endpoint directly and `tools/call` would never pass
- * through anything of ours. Enforcing on stdio only, while the settings card
- * says the floor holds on any connector, is the failure this closes.
+ * The engine is handed a STDIO descriptor: it SPAWNS the shim, with the URL on
+ * argv and the headers in the child's environment, and it talks to the shim
+ * over stdio rather than to the endpoint over HTTP. The engine process is
+ * therefore not the boundary being defended, and never was - it is the model
+ * that is, and the model only ever sees the tools the shim advertises and the
+ * verdicts it returns. What this shape buys is that `tools/call` passes through
+ * `decideToolCall` at all: a raw URL in the descriptor meant the engine
+ * connected to the endpoint directly and no rung and no floor could apply.
+ * Enforcing on stdio only, while the settings card says the floor holds on any
+ * connector, is the failure this closes.
  *
  * Headers travel in the ENVIRONMENT, not on argv: a hosted connector's bearer
  * token lives in its headers, and argv is readable from `ps` by anyone on the

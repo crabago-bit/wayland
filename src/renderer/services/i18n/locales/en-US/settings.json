@@ -2550,7 +2550,8 @@
       "label": "Autonomy rung",
       "sectionLabel": "Autonomy",
       "hardFloorTitle": "Hard floor",
-      "hardFloorDesc": "Tool names matching any of these are refused at every rung, including AUTONOMOUS. Enforced in the MCP tool filter, not in the model prompt."
+      "hardFloorDesc": "Tool names matching any of these are refused at every rung, including AUTONOMOUS. Enforced on ACP connectors through the MCP tool filter; Wayland Core, Codex and Gemini backends load connectors directly and are not covered yet.",
+      "remoteDenied": "Autonomy can only be changed from the desktop app, not a paired device"
     }
   },
   "wcoreConfig": {

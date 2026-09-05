@@ -2367,7 +2367,8 @@
       "label": "自主層級",
       "sectionLabel": "自主",
       "hardFloorTitle": "硬性底線",
-      "hardFloorDesc": "符合其中任一項的工具名稱在所有層級（包括「完全自主」）都會被拒絕。由 MCP 工具篩選器強制執行，而非模型提示詞。"
+      "hardFloorDesc": "符合其中任一項的工具名稱在所有層級（包括「完全自主」）都會被拒絕。透過 MCP 工具篩選器對 ACP 連接器強制執行；Wayland Core、Codex 與 Gemini 後端直接載入連接器，目前尚未涵蓋。",
+      "remoteDenied": "自主層級只能在桌面應用程式中變更，無法在已配對的裝置上變更"
     }
   },
   "commandPalette": {

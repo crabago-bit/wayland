@@ -2392,7 +2392,8 @@
       "label": "Nivel de autonomía",
       "sectionLabel": "Autonomía",
       "hardFloorTitle": "Límite absoluto",
-      "hardFloorDesc": "Los nombres de herramientas que coincidan con alguno de estos se rechazan en todos los niveles, incluido AUTÓNOMO. Se aplica en el filtro de herramientas MCP, no en el prompt del modelo."
+      "hardFloorDesc": "Los nombres de herramientas que coincidan con alguno de estos se rechazan en todos los niveles, incluido AUTÓNOMO. Se aplica a los conectores ACP mediante el filtro de herramientas MCP; los backends Wayland Core, Codex y Gemini cargan los conectores directamente y todavía no están cubiertos.",
+      "remoteDenied": "La autonomía solo se puede cambiar desde la aplicación de escritorio, no desde un dispositivo emparejado"
     }
   },
   "wcoreConfig": {

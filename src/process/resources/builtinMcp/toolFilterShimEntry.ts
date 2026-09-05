@@ -25,8 +25,10 @@
  * enforcement layer does not keep is worse than no promise: it is the reason
  * somebody stops checking. So the shim bridges - it is the stdio server the
  * engine sees, and the HTTP client the hosted server sees, with the SAME
- * `decideToolCall` verdict in between. The engine never holds the URL, which is
- * the same process boundary the stdio leg gets.
+ * `decideToolCall` verdict in between. The engine still spawns this process and
+ * hands it the URL on argv and the headers in its environment; the adversary
+ * the ladder is written against is the MODEL, which sees only the tools this
+ * shim lists and the refusals it returns.
  *
  * Bundled by `scripts/build-mcp-servers.js` into a self-contained CJS file, so
  * it imports nothing outside node builtins and its one sibling module - a
@@ -315,11 +317,25 @@ function defaultTransport(options: HttpUpstreamOptions): UpstreamTransport {
  * pipe, and an MCP handshake that loses its first frame does not recover - it
  * waits forever for a reply to a request nobody received.
  *
+ * The queue is CAPPED at {@link PRE_START_QUEUE_LIMIT}. A handshake needs a
+ * handful of frames; a queue still growing past that means the transport is not
+ * coming up, and holding every frame the engine sends in the meantime turns a
+ * connector that will never connect into unbounded memory in a process that is
+ * about to be killed anyway. Overflow is dropped with a stderr line, which is
+ * the same visibility the send-failure path gets.
+ *
  * A send that rejects is reported on stderr and otherwise swallowed. The engine
  * is already waiting on its own request timeout for that id, and inventing a
  * JSON-RPC error here would race the transport's own reply if the send actually
  * landed.
  */
+/**
+ * How many pre-start frames are held. An MCP handshake is `initialize` plus
+ * `notifications/initialized` plus the engine's first `tools/list`; 64 is far
+ * more headroom than that and still a bound.
+ */
+export const PRE_START_QUEUE_LIMIT = 64;
+
 export function connectHttpUpstream(options: HttpUpstreamOptions): UpstreamLink {
   const transport = (options.createTransport ?? defaultTransport)(options);
   let ready = false;
@@ -370,8 +386,17 @@ export function connectHttpUpstream(options: HttpUpstreamOptions): UpstreamLink 
   return {
     send: (message) => {
       if (closed) return;
-      if (ready) deliver(message);
-      else pending.push(message);
+      if (ready) {
+        deliver(message);
+        return;
+      }
+      if (pending.length >= PRE_START_QUEUE_LIMIT) {
+        process.stderr.write(
+          `[wayland-tool-filter] upstream still starting; dropping frame beyond ${PRE_START_QUEUE_LIMIT} queued\n`
+        );
+        return;
+      }
+      pending.push(message);
     },
     close: () => {
       closed = true;
@@ -465,7 +490,15 @@ export function main(argv: readonly string[] = process.argv.slice(2)): void {
   });
 
   process.stdin.on('data', createLineReader(filter.fromEngine));
-  process.stdin.on('end', () => link?.close());
+  // The engine closing stdin IS the shutdown signal on the hosted leg - there is
+  // no child process whose exit would carry us out. Close the transport, then
+  // exit deliberately: an open HTTP/SSE connection keeps the event loop alive,
+  // so a shim that only closed the link would linger as an orphan for as long
+  // as the socket took to notice, one per connector per session.
+  process.stdin.on('end', () => {
+    link?.close();
+    process.exit(0);
+  });
 }
 
 if (require.main === module) main();

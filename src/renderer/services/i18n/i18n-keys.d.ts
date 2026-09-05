@@ -2632,6 +2632,7 @@ export type I18nKey =
   | 'settings.agentsPage.autonomy.hardFloorSource'
   | 'settings.agentsPage.autonomy.hardFloorTitle'
   | 'settings.agentsPage.autonomy.label'
+  | 'settings.agentsPage.autonomy.remoteDenied'
   | 'settings.agentsPage.autonomy.sectionLabel'
   | 'settings.agentsPage.badge.active'
   | 'settings.agentsPage.badge.detected'

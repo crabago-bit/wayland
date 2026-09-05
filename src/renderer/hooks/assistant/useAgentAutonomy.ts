@@ -12,7 +12,9 @@ import {
   type AutonomyRung,
   type HardFloorInfo as HardFloorInfoShape,
 } from '@/common/jarvis/autonomy';
+import { Message } from '@arco-design/web-react';
 import { useCallback, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 
 /** SWR key for the persisted per-agent rung map (single source of truth). */
@@ -34,6 +36,7 @@ export const HARD_FLOOR_SWR_KEY = 'jarvis.hardFloor';
  * the shim is later spawned with.
  */
 export function useAgentAutonomy() {
+  const { t } = useTranslation();
   const { data, mutate } = useSWR<Record<string, AutonomyRung>>(AGENT_AUTONOMY_SWR_KEY, async () => {
     const stored = await ConfigStorage.get('agents.autonomy');
     return stored ?? {};
@@ -47,15 +50,37 @@ export function useAgentAutonomy() {
     [rungs]
   );
 
+  /**
+   * Persist one agent's rung.
+   *
+   * `agents.autonomy` is on `REMOTE_DENIED_CONFIG_KEY_PREFIXES`, so this write
+   * REJECTS when the page is being served to a paired device - a peer that
+   * could set its own rung to 4 would be promoting itself past the ladder. The
+   * rejection has to be caught here: an unhandled one leaves the Select showing
+   * the rung the user picked while the store still holds the old value, which
+   * is the one failure mode a security control cannot afford - it looks like it
+   * worked. On failure the cache is left alone, so the control snaps back to
+   * the rung that is actually in force.
+   */
   const setRung = useCallback(
     async (agentKey: string, rung: AutonomyRung) => {
-      const current = (await ConfigStorage.get('agents.autonomy')) ?? {};
-      const next = { ...current, [agentKey]: rung };
-      await ConfigStorage.set('agents.autonomy', next);
-      // Bound mutate so every consumer of this key revalidates without a reload.
-      await mutate(next, { revalidate: false });
+      try {
+        const current = (await ConfigStorage.get('agents.autonomy')) ?? {};
+        const next = { ...current, [agentKey]: rung };
+        await ConfigStorage.set('agents.autonomy', next);
+        // Bound mutate so every consumer of this key revalidates without a reload.
+        await mutate(next, { revalidate: false });
+      } catch {
+        Message.error(
+          t(
+            'settings.agentsPage.autonomy.remoteDenied',
+            'Autonomy can only be changed from the desktop app, not a paired device'
+          )
+        );
+        await mutate();
+      }
     },
-    [mutate]
+    [mutate, t]
   );
 
   return { rungs, rungOf, setRung };

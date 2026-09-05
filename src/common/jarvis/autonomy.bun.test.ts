@@ -21,6 +21,7 @@ import {
   WRITE_TOOL_TOKENS,
   decideToolCall,
   isHardFloorTool,
+  isReadShapedTool,
   isWriteTool,
   parseHardFloorKeywords,
   toAutonomyRung,
@@ -208,5 +209,117 @@ describe('decideToolCall order', () => {
 
   it('refuses a newly-recognised mutation verb at rung 2', () => {
     expect(decideToolCall({ toolName: 'clickup__approve_task', rung: 2 }).decision).toBe('refused');
+  });
+});
+
+/**
+ * The regression table for the INFLECTION hole.
+ *
+ * Whole-token matching fixed the substring false positives and opened a false
+ * negative in their place: every one of the MUST-REFUSE names below is a real
+ * connector tool that moves money, binds a signature or destroys a record, and
+ * not one of them contains the bare token `pay`, `sign`, `delete`, `remove` or
+ * `cancel`. At the shipped default rung of 3 they ran unattended.
+ *
+ * Both halves are the test. Fixing the false negatives by matching prefixes
+ * would have re-floored `payload`, `paypal`, `firebase`, `firestore` and
+ * `dropbox`, so the MUST-ALLOW half is not decoration - it is the other wall of
+ * the corridor.
+ */
+describe('hard floor covers inflected forms without re-opening the false positives', () => {
+  const mustRefuse = [
+    'stripe_create_payment',
+    'create_payment_intent',
+    'payments_create',
+    'send_payment',
+    'payouts_create',
+    'transfers_create',
+    'refunds_create',
+    'docusign_envelope_send',
+    'signing_url_create',
+    'create_signature_request',
+    'esign_send',
+    'deletes_batch',
+    'removes_member',
+    'cancellations_create',
+  ];
+  for (const name of mustRefuse) {
+    it(`refuses ${name} at every rung`, () => {
+      expect(isHardFloorTool(name)).toBe(true);
+      for (const rung of [1, 2, 3, 4] as const) {
+        expect(decideToolCall({ toolName: name, rung }).decision).toBe('refused');
+      }
+    });
+  }
+
+  const mustAllow = [
+    'generate_design',
+    'create_design',
+    'assign_task',
+    'resolve_assignees',
+    'get_signed_url',
+    'firebase_read_document',
+    'firestore_query_collection',
+    'dropbox_list_files',
+    'payload_inspect',
+    'paypal_list_payments',
+    'paypal_list_invoices',
+    'list_payments',
+    'get_notebook',
+    'facebook_page_insights',
+    'get_tool_inputs',
+  ];
+  for (const name of mustAllow) {
+    it(`does not floor ${name}`, () => {
+      expect(isHardFloorTool(name)).toBe(false);
+      expect(decideToolCall({ toolName: name, rung: 3 }).decision).toBe('allowed');
+    });
+  }
+
+  it('keeps the namespaced spelling of every refused name refused', () => {
+    for (const name of mustRefuse) {
+      expect(isHardFloorTool(`connector__${name}`)).toBe(true);
+    }
+  });
+
+  it('keeps the namespaced spelling of every allowed name allowed', () => {
+    for (const name of mustAllow) {
+      expect(isHardFloorTool(`connector__${name}`)).toBe(false);
+    }
+  });
+});
+
+describe('read-shaped tools are exempt from the floor and from the write pattern', () => {
+  const reads = ['list_payments', 'paypal_list_payments', 'get_signed_url', 'search_refunds', 'find_transfers'];
+  for (const name of reads) {
+    it(`treats ${name} as read-shaped`, () => {
+      expect(isReadShapedTool(name)).toBe(true);
+      expect(isHardFloorTool(name)).toBe(false);
+      expect(isWriteTool(name)).toBe(false);
+    });
+  }
+
+  it('does not exempt a name whose read verb comes AFTER the floored word', () => {
+    // The exemption is "reads a list of payments", not "pays, then lists".
+    expect(isReadShapedTool('pay_and_list')).toBe(false);
+    expect(isHardFloorTool('pay_and_list')).toBe(true);
+  });
+
+  it('does not exempt a read verb that shares a name with a mutation verb', () => {
+    expect(isReadShapedTool('get_or_create_payment')).toBe(false);
+    expect(isHardFloorTool('get_or_create_payment')).toBe(true);
+  });
+
+  it('applies the same exemption to an operator keyword', () => {
+    expect(isHardFloorTool('list_wire_transfers', ['wire'])).toBe(false);
+    expect(isHardFloorTool('wire_funds', ['wire'])).toBe(true);
+  });
+});
+
+describe('operator keywords inflect predictably', () => {
+  it('accepts the regular plural of a declared keyword', () => {
+    expect(isHardFloorTool('create_wires', ['wire'])).toBe(true);
+    // ...and still not the word that merely starts with it.
+    expect(isHardFloorTool('create_wireframe', ['wire'])).toBe(false);
   });
 });

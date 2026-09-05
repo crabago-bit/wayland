@@ -2366,7 +2366,8 @@
       "label": "自主级别",
       "sectionLabel": "自主",
       "hardFloorTitle": "硬性底线",
-      "hardFloorDesc": "匹配其中任意一项的工具名称在所有级别（包括“完全自主”）都会被拒绝。由 MCP 工具过滤器强制执行，而非模型提示词。"
+      "hardFloorDesc": "匹配其中任意一项的工具名称在所有级别（包括“完全自主”）都会被拒绝。通过 MCP 工具过滤器对 ACP 连接器强制执行；Wayland Core、Codex 和 Gemini 后端直接加载连接器，目前尚未覆盖。",
+      "remoteDenied": "自主级别只能在桌面应用中更改，不能在已配对的设备上更改"
     }
   },
   "commandPalette": {

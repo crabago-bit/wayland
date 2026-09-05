@@ -2367,7 +2367,8 @@
       "label": "자율성 단계",
       "sectionLabel": "자율성",
       "hardFloorTitle": "하드 플로어",
-      "hardFloorDesc": "이 중 하나라도 일치하는 도구 이름은 AUTONOMOUS를 포함한 모든 단계에서 거부됩니다. 모델 프롬프트가 아니라 MCP 도구 필터에서 강제됩니다."
+      "hardFloorDesc": "이 중 하나라도 일치하는 도구 이름은 AUTONOMOUS를 포함한 모든 단계에서 거부됩니다. ACP 커넥터에는 MCP 도구 필터로 강제되지만, Wayland Core·Codex·Gemini 백엔드는 커넥터를 직접 로드하므로 아직 적용되지 않습니다.",
+      "remoteDenied": "자율성 단계는 데스크톱 앱에서만 변경할 수 있으며, 페어링된 기기에서는 변경할 수 없습니다"
     }
   },
   "commandPalette": {

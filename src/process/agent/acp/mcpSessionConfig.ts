@@ -139,11 +139,16 @@ export function isServerActiveForSession(server: IMcpServer, activeServerIds?: r
  * only be enforced by interposing: the engine is handed a descriptor pointing at
  * our shim instead of at the server. That now covers BOTH transport families -
  * a stdio server is spawned by the shim, and a hosted http/streamable_http/sse
- * endpoint is bridged by it, so the engine holds neither the command nor the
- * URL. `allowedTools: []` is handled a rung earlier, by withholding the server -
- * see `contributesTools`. Codex is the exception and does NOT rely on this array
- * for scoping - its `enabled_tools` are written into the generated `config.toml`
- * by `buildCodexMcpServerTable`.
+ * endpoint is bridged by it, so every `tools/call` the MODEL makes passes
+ * through `decideToolCall`. `allowedTools: []` is handled a rung earlier, by
+ * withholding the server - see `contributesTools`.
+ *
+ * THREE BACKENDS DO NOT GO THROUGH THIS ARRAY, and the floor does not reach
+ * them yet: Wayland Core loads connectors from its own `config.toml`
+ * `[mcp.servers]` table, Codex from the `config.toml` that `codexConfig.ts`
+ * generates (its `enabled_tools` do the per-tool scoping, but no rung applies),
+ * and Gemini from `GeminiAgentManager`. The settings copy on the Hard floor
+ * card says so rather than promising coverage this file cannot deliver.
  */
 export function buildAcpSessionMcpServers(
   mcpServers: IMcpServer[] | undefined | null,
