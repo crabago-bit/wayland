@@ -41,7 +41,8 @@
   },
   "tabs": {
     "operations": "Operations",
-    "cost": "Cost"
+    "cost": "Cost",
+    "approvals": "審批"
   },
   "cost": {
     "periodLabel": "Period",
@@ -110,5 +111,19 @@
       "gateRaised": "Budget raised to {{limit}}",
       "gateError": "Couldn't raise the budget"
     }
+  },
+  "approvals": {
+    "title": "審批 — 共 {{total}} 筆，顯示 {{shown}} 筆",
+    "empty": "尚無紀錄。被拒絕的呼叫，以及第 3 級以上的寫入工具呼叫會顯示在這裡。",
+    "filterDecision": "依結果篩選",
+    "filterAgent": "依代理篩選",
+    "decisionAll": "全部結果",
+    "decisionRefused": "已拒絕",
+    "decisionAllowed": "已允許",
+    "agentAll": "全部代理",
+    "tierUsage": "依級距統計用量",
+    "tierEmpty": "此期間內尚無用量紀錄。",
+    "tierTag": "級距",
+    "unattributed": "未歸屬"
   }
 }

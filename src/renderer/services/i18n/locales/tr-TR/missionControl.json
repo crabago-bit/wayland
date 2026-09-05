@@ -41,7 +41,8 @@
   },
   "tabs": {
     "operations": "Operations",
-    "cost": "Cost"
+    "cost": "Cost",
+    "approvals": "Onaylar"
   },
   "cost": {
     "periodLabel": "Period",
@@ -110,5 +111,19 @@
       "gateRaised": "Budget raised to {{limit}}",
       "gateError": "Couldn't raise the budget"
     }
+  },
+  "approvals": {
+    "title": "Onaylar — {{total}} kaydın {{shown}} tanesi",
+    "empty": "Henüz kayıt yok. Reddedilen çağrılar ve 3. basamak ve üzerindeki yazma aracı çağrıları burada görünür.",
+    "filterDecision": "Karara göre filtrele",
+    "filterAgent": "Aracıya göre filtrele",
+    "decisionAll": "Tüm kararlar",
+    "decisionRefused": "Reddedildi",
+    "decisionAllowed": "İzin verildi",
+    "agentAll": "Tüm aracılar",
+    "tierUsage": "Katmana göre kullanım",
+    "tierEmpty": "Bu dönemde henüz kayıtlı kullanım yok.",
+    "tierTag": "katman",
+    "unattributed": "atanmamış"
   }
 }

@@ -950,11 +950,6 @@
   "webui.changePasswordDesc": "Update the admin password for this server.",
   "webui.changeUsername": "Change username",
   "webui.changeUsernameDesc": "Update the admin login name for this server.",
-  "agentsPage.autonomy.label": "Autonomy rung",
-  "agentsPage.autonomy.sectionLabel": "Autonomy",
-  "agentsPage.autonomy.hardFloorTitle": "Hard floor",
-  "agentsPage.autonomy.hardFloorDesc": "Tool names matching any of these are refused at every rung, including AUTONOMOUS. Enforced in the MCP tool filter, not in the model prompt.",
-  "agentsPage.autonomy.hardFloorSource": "Extra keywords (orange) come from {{path}}",
   "agentsPage.flux.remoteConnectCta": "Connect Flux from this device",
   "agentsPage.flux.remoteConnectError": "Could not connect Flux. Please try again.",
   "agentsPage.flux.remoteConnectSuccess": "Flux connected",
@@ -2548,6 +2543,14 @@
         "confirm": "Install",
         "cancel": "Cancel"
       }
+    },
+    "autonomy": {
+      "hardFloorSource": "Orange keywords are declared in ~/.claude/crew-state/autonomy.md, as a \"hard-floor-tokens: a, b, c\" line or a fenced hard-floor block. Prose in that file is ignored.",
+      "hardFloorNoNotes": "No ~/.claude/crew-state/autonomy.md found. Add a \"hard-floor-tokens: a, b, c\" line there to widen the floor; prose in that file is ignored.",
+      "label": "Autonomy rung",
+      "sectionLabel": "Autonomy",
+      "hardFloorTitle": "Hard floor",
+      "hardFloorDesc": "Tool names matching any of these are refused at every rung, including AUTONOMOUS. Enforced in the MCP tool filter, not in the model prompt."
     }
   },
   "wcoreConfig": {

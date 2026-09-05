@@ -927,11 +927,6 @@
   "webui.changePasswordDesc": "Bu sunucunun yönetici parolasını güncelleyin.",
   "webui.changeUsername": "Change username",
   "webui.changeUsernameDesc": "Update the admin login name for this server.",
-  "agentsPage.autonomy.label": "Özerklik basamağı",
-  "agentsPage.autonomy.sectionLabel": "Özerklik",
-  "agentsPage.autonomy.hardFloorTitle": "Kesin sınır",
-  "agentsPage.autonomy.hardFloorDesc": "Bunlardan herhangi biriyle eşleşen araç adları, OTONOM dahil her basamakta reddedilir. Model isteminde değil, MCP araç filtresinde uygulanır.",
-  "agentsPage.autonomy.hardFloorSource": "Ek anahtar kelimeler (turuncu) şuradan gelir: {{path}}",
   "agentsPage.flux.remoteConnectCta": "Connect Flux from this device",
   "agentsPage.flux.remoteConnectError": "Could not connect Flux. Please try again.",
   "agentsPage.flux.remoteConnectSuccess": "Flux connected",
@@ -2363,6 +2358,14 @@
         "confirm": "Kur",
         "cancel": "İptal"
       }
+    },
+    "autonomy": {
+      "hardFloorSource": "Turuncu anahtar kelimeler ~/.claude/crew-state/autonomy.md içinde \"hard-floor-tokens: a, b, c\" satırı veya hard-floor bloğu olarak tanımlanır. Bu dosyadaki düz metin yok sayılır.",
+      "hardFloorNoNotes": "~/.claude/crew-state/autonomy.md bulunamadı. Tabanı genişletmek için oraya \"hard-floor-tokens: a, b, c\" satırı ekleyin; düz metin yok sayılır.",
+      "label": "Özerklik basamağı",
+      "sectionLabel": "Özerklik",
+      "hardFloorTitle": "Kesin sınır",
+      "hardFloorDesc": "Bunlardan herhangi biriyle eşleşen araç adları, OTONOM dahil her basamakta reddedilir. Model isteminde değil, MCP araç filtresinde uygulanır."
     }
   },
   "commandPalette": {

@@ -927,11 +927,6 @@
   "webui.changePasswordDesc": "このサーバーの管理者パスワードを更新します。",
   "webui.changeUsername": "Change username",
   "webui.changeUsernameDesc": "Update the admin login name for this server.",
-  "agentsPage.autonomy.label": "自律レベル",
-  "agentsPage.autonomy.sectionLabel": "自律",
-  "agentsPage.autonomy.hardFloorTitle": "ハードフロア",
-  "agentsPage.autonomy.hardFloorDesc": "これらのいずれかに一致するツール名は、AUTONOMOUS を含むすべてのレベルで拒否されます。モデルのプロンプトではなく MCP ツールフィルターで強制されます。",
-  "agentsPage.autonomy.hardFloorSource": "追加のキーワード（オレンジ）は {{path}} から取得されます",
   "agentsPage.flux.remoteConnectCta": "Connect Flux from this device",
   "agentsPage.flux.remoteConnectError": "Could not connect Flux. Please try again.",
   "agentsPage.flux.remoteConnectSuccess": "Flux connected",
@@ -2365,6 +2360,14 @@
         "confirm": "インストール",
         "cancel": "キャンセル"
       }
+    },
+    "autonomy": {
+      "hardFloorSource": "オレンジのキーワードは ~/.claude/crew-state/autonomy.md で宣言します。\"hard-floor-tokens: a, b, c\" の行、または hard-floor のコードブロックを使います。同ファイル内の文章は無視されます。",
+      "hardFloorNoNotes": "~/.claude/crew-state/autonomy.md が見つかりません。\"hard-floor-tokens: a, b, c\" の行を追加すると下限を広げられます。文章は無視されます。",
+      "label": "自律レベル",
+      "sectionLabel": "自律",
+      "hardFloorTitle": "ハードフロア",
+      "hardFloorDesc": "これらのいずれかに一致するツール名は、AUTONOMOUS を含むすべてのレベルで拒否されます。モデルのプロンプトではなく MCP ツールフィルターで強制されます。"
     }
   },
   "commandPalette": {

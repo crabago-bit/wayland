@@ -310,9 +310,7 @@ const AgentsSettings: React.FC = () => {
       )}
 
       {/* ---- Autonomy: the hard floor no rung can buy past ---- */}
-      <div className={styles.sectionLabel}>
-        {t('settings.agentsPage.autonomy.sectionLabel', { defaultValue: 'Autonomy' })}
-      </div>
+      <div className={styles.sectionLabel}>{t('settings.agentsPage.autonomy.sectionLabel')}</div>
       <HardFloorCard />
 
       {/* ---- Available to install (D3: below More detected) ---- */}

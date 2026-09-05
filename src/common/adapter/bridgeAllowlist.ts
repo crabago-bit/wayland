@@ -906,6 +906,14 @@ const REMOTE_DENIED_CONFIG_KEY_PREFIXES: readonly string[] = [
   // paired peer plants an arbitrary stdio spec through the declarative path,
   // then any later local connect runs it. Guard the persisted key too.
   'mcp.config',
+  // The JARVIS autonomy ladder. `agents.autonomy` is the per-agent rung map the
+  // host reads when it spawns the MCP tool-filter shim, so writing it IS the
+  // promotion: a paired peer setting `{"claude":4}` moves every write tool on
+  // every connector from "refused, draft it and ask" to "runs, logged". There is
+  // deliberately no remote write rail for the ladder (jarvisRoutes.ts is
+  // read-only and the `jarvis.` IPC prefix is remote-denied), so the generic
+  // config setter is the only door left and it gets the #671 treatment.
+  'agents.autonomy',
 ];
 
 /**

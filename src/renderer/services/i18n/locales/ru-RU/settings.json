@@ -919,11 +919,6 @@
   "webui.changePasswordDesc": "Измените пароль администратора для этого сервера.",
   "webui.changeUsername": "Change username",
   "webui.changeUsernameDesc": "Update the admin login name for this server.",
-  "agentsPage.autonomy.label": "Уровень автономии",
-  "agentsPage.autonomy.sectionLabel": "Автономия",
-  "agentsPage.autonomy.hardFloorTitle": "Жёсткий предел",
-  "agentsPage.autonomy.hardFloorDesc": "Имена инструментов, совпадающие с любым из этих слов, отклоняются на любом уровне, включая АВТОНОМНЫЙ. Применяется в фильтре инструментов MCP, а не в промпте модели.",
-  "agentsPage.autonomy.hardFloorSource": "Дополнительные ключевые слова (оранжевые) взяты из {{path}}",
   "agentsPage.flux.remoteConnectCta": "Connect Flux from this device",
   "agentsPage.flux.remoteConnectError": "Could not connect Flux. Please try again.",
   "agentsPage.flux.remoteConnectSuccess": "Flux connected",
@@ -2365,6 +2360,14 @@
         "confirm": "Установить",
         "cancel": "Отмена"
       }
+    },
+    "autonomy": {
+      "hardFloorSource": "Оранжевые ключевые слова объявляются в ~/.claude/crew-state/autonomy.md строкой \"hard-floor-tokens: a, b, c\" или блоком hard-floor. Обычный текст в этом файле игнорируется.",
+      "hardFloorNoNotes": "Файл ~/.claude/crew-state/autonomy.md не найден. Добавьте в него строку \"hard-floor-tokens: a, b, c\", чтобы расширить нижнюю границу; обычный текст игнорируется.",
+      "label": "Уровень автономии",
+      "sectionLabel": "Автономия",
+      "hardFloorTitle": "Жёсткий предел",
+      "hardFloorDesc": "Имена инструментов, совпадающие с любым из этих слов, отклоняются на любом уровне, включая АВТОНОМНЫЙ. Применяется в фильтре инструментов MCP, а не в промпте модели."
     }
   },
   "commandPalette": {

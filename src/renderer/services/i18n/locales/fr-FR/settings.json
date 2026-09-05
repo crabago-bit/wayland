@@ -937,11 +937,6 @@
   "webui.changePasswordDesc": "Mettez à jour le mot de passe administrateur de ce serveur.",
   "webui.changeUsername": "Change username",
   "webui.changeUsernameDesc": "Update the admin login name for this server.",
-  "agentsPage.autonomy.label": "Niveau d'autonomie",
-  "agentsPage.autonomy.sectionLabel": "Autonomie",
-  "agentsPage.autonomy.hardFloorTitle": "Plancher absolu",
-  "agentsPage.autonomy.hardFloorDesc": "Les noms d'outils correspondant à l'un de ces termes sont refusés à tous les niveaux, y compris AUTONOME. Appliqué dans le filtre d'outils MCP, pas dans le prompt du modèle.",
-  "agentsPage.autonomy.hardFloorSource": "Les mots-clés supplémentaires (en orange) proviennent de {{path}}",
   "agentsPage.flux.remoteConnectCta": "Connect Flux from this device",
   "agentsPage.flux.remoteConnectError": "Could not connect Flux. Please try again.",
   "agentsPage.flux.remoteConnectSuccess": "Flux connected",
@@ -2390,6 +2385,14 @@
         "confirm": "Installer",
         "cancel": "Annuler"
       }
+    },
+    "autonomy": {
+      "hardFloorSource": "Les mots-clés en orange sont déclarés dans ~/.claude/crew-state/autonomy.md, via une ligne \"hard-floor-tokens: a, b, c\" ou un bloc hard-floor. Le texte libre de ce fichier est ignoré.",
+      "hardFloorNoNotes": "Aucun ~/.claude/crew-state/autonomy.md trouvé. Ajoutez-y une ligne \"hard-floor-tokens: a, b, c\" pour élargir le plancher ; le texte libre est ignoré.",
+      "label": "Niveau d'autonomie",
+      "sectionLabel": "Autonomie",
+      "hardFloorTitle": "Plancher absolu",
+      "hardFloorDesc": "Les noms d'outils correspondant à l'un de ces termes sont refusés à tous les niveaux, y compris AUTONOME. Appliqué dans le filtre d'outils MCP, pas dans le prompt du modèle."
     }
   },
   "wcoreConfig": {

@@ -41,7 +41,8 @@
   },
   "tabs": {
     "operations": "Operations",
-    "cost": "Cost"
+    "cost": "Cost",
+    "approvals": "Одобрения"
   },
   "cost": {
     "periodLabel": "Period",
@@ -110,5 +111,19 @@
       "gateRaised": "Budget raised to {{limit}}",
       "gateError": "Couldn't raise the budget"
     }
+  },
+  "approvals": {
+    "title": "Одобрения — {{shown}} из {{total}}",
+    "empty": "Пока ничего не записано. Здесь появятся отказы и вызовы изменяющих инструментов на уровне 3 и выше.",
+    "filterDecision": "Фильтр по решению",
+    "filterAgent": "Фильтр по агенту",
+    "decisionAll": "Все решения",
+    "decisionRefused": "Отказано",
+    "decisionAllowed": "Разрешено",
+    "agentAll": "Все агенты",
+    "tierUsage": "Использование по уровням",
+    "tierEmpty": "За этот период использование ещё не зафиксировано.",
+    "tierTag": "уровень",
+    "unattributed": "без привязки"
   }
 }

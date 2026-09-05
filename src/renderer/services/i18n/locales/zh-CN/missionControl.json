@@ -41,7 +41,8 @@
   },
   "tabs": {
     "operations": "Operations",
-    "cost": "Cost"
+    "cost": "Cost",
+    "approvals": "审批"
   },
   "cost": {
     "periodLabel": "Period",
@@ -110,5 +111,19 @@
       "gateRaised": "Budget raised to {{limit}}",
       "gateError": "Couldn't raise the budget"
     }
+  },
+  "approvals": {
+    "title": "审批 — 共 {{total}} 条，显示 {{shown}} 条",
+    "empty": "暂无记录。被拒绝的调用，以及第 3 级及以上的写入工具调用会显示在这里。",
+    "filterDecision": "按结果筛选",
+    "filterAgent": "按智能体筛选",
+    "decisionAll": "全部结果",
+    "decisionRefused": "已拒绝",
+    "decisionAllowed": "已允许",
+    "agentAll": "全部智能体",
+    "tierUsage": "按档位统计用量",
+    "tierEmpty": "此时间段内暂无用量记录。",
+    "tierTag": "档位",
+    "unattributed": "未归属"
   }
 }

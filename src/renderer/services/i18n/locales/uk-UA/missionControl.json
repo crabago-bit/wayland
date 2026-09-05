@@ -41,7 +41,8 @@
   },
   "tabs": {
     "operations": "Operations",
-    "cost": "Cost"
+    "cost": "Cost",
+    "approvals": "Схвалення"
   },
   "cost": {
     "periodLabel": "Period",
@@ -110,5 +111,19 @@
       "gateRaised": "Budget raised to {{limit}}",
       "gateError": "Couldn't raise the budget"
     }
+  },
+  "approvals": {
+    "title": "Схвалення — {{shown}} з {{total}}",
+    "empty": "Поки що нічого не записано. Тут з'являться відмови та виклики інструментів запису на рівні 3 і вище.",
+    "filterDecision": "Фільтр за рішенням",
+    "filterAgent": "Фільтр за агентом",
+    "decisionAll": "Усі рішення",
+    "decisionRefused": "Відмовлено",
+    "decisionAllowed": "Дозволено",
+    "agentAll": "Усі агенти",
+    "tierUsage": "Використання за рівнями",
+    "tierEmpty": "За цей період використання ще не зафіксовано.",
+    "tierTag": "рівень",
+    "unattributed": "без прив'язки"
   }
 }

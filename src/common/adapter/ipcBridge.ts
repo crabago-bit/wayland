@@ -3615,12 +3615,19 @@ export const cost = {
 // reads the ledger over the token-authed GET /api/jarvis/approvals route instead.
 export const jarvis = {
   /** Newest-first page of the approvals ledger (capped at APPROVALS_PAGE_SIZE). */
-  approvals: buildProvider<
-    import('@process/services/jarvis/approvalsLog').ApprovalRecord[],
-    { limit?: number }
-  >('jarvis.approvals'),
-  /** The effective hard floor: the built-in pattern source plus operator keywords. */
-  hardFloor: buildProvider<{ pattern: string; keywords: string[]; notesPath: string }, void>('jarvis.hardFloor'),
+  approvals: buildProvider<import('@process/services/jarvis/approvalsLog').ApprovalRecord[], { limit?: number }>(
+    'jarvis.approvals'
+  ),
+  /**
+   * The effective hard floor: the built-in token list plus operator keywords.
+   *
+   * `notesFileFound` is a BOOLEAN, never the path. The same shape is served to
+   * remote WebUI callers by `GET /api/jarvis/approvals`, and the notes file
+   * lives in the operator's home directory - handing a paired browser the
+   * absolute path discloses the desktop user's account name for no gain, since
+   * the only thing the UI needs to say is whether the file was there.
+   */
+  hardFloor: buildProvider<import('@/common/jarvis/autonomy').HardFloorInfo, void>('jarvis.hardFloor'),
 };
 
 // ==================== Memory Archive (v0.6.4) ====================

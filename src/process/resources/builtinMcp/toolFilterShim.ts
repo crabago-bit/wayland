@@ -126,15 +126,27 @@ export function createToolFilter(options: ToolFilterOptions): ToolFilter {
   const idKey = (id: unknown): string => `${typeof id}:${String(id)}`;
 
   const fromEngine = (message: JsonRpcMessage): void => {
-    const method = message.method;
+    // Normalized before comparison: a method arriving as ` Tools/Call ` is the
+    // same request, and a case- or whitespace-sensitive equality check is a
+    // fail-OPEN bug - it would relay the call unexamined.
+    const method = typeof message.method === 'string' ? message.method.trim().toLowerCase() : '';
 
-    if (method === 'tools/list' && message.id !== undefined) {
-      pendingToolLists.add(idKey(message.id));
+    if (method === 'tools/list') {
+      // Only a REQUEST has a reply to filter. A malformed id-less `tools/list`
+      // still relays rather than being refused: it is not call-shaped, so the
+      // ladder has no business answering it.
+      if (message.id !== undefined) pendingToolLists.add(idKey(message.id));
       options.sendToUpstream(message);
       return;
     }
 
-    if (method === 'tools/call') {
+    // Anything else under `tools/` is treated as CALL-SHAPED and subjected to
+    // the verdict. The MCP spec may add methods here, and a shim that only knew
+    // the two names it shipped with would relay a future `tools/invoke`
+    // unexamined - the wrong direction to be wrong in. A method that carries no
+    // `params.name` fails the allowlist check below and is refused, which is
+    // also the right answer for a method we do not understand.
+    if (method.startsWith('tools/')) {
       const params = isRecord(message.params) ? message.params : undefined;
       const name = typeof params?.name === 'string' ? params.name : undefined;
       if (name === undefined || (!allowAll && !allowed.has(name))) {

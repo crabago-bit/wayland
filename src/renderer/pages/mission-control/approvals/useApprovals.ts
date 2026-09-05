@@ -11,7 +11,7 @@ import { isElectronDesktop } from '@renderer/utils/platform';
 import type { ApprovalRecord } from '@process/services/jarvis/approvalsLog';
 import type { HardFloorInfo } from '@renderer/hooks/assistant/useAgentAutonomy';
 
-const EMPTY_FLOOR: HardFloorInfo = { pattern: '', keywords: [], notesPath: '' };
+const EMPTY_FLOOR: HardFloorInfo = { builtinTokens: [], keywords: [], notesFileFound: false };
 
 export type ApprovalsFilter = { decision: 'all' | 'refused' | 'allowed'; agent: string };
 

@@ -41,7 +41,8 @@
   },
   "tabs": {
     "operations": "Operations",
-    "cost": "Cost"
+    "cost": "Cost",
+    "approvals": "承認"
   },
   "cost": {
     "periodLabel": "Period",
@@ -110,5 +111,19 @@
       "gateRaised": "Budget raised to {{limit}}",
       "gateError": "Couldn't raise the budget"
     }
+  },
+  "approvals": {
+    "title": "承認 — {{total}} 件中 {{shown}} 件を表示",
+    "empty": "まだ記録はありません。拒否と、段階 3 以上での書き込みツール呼び出しがここに表示されます。",
+    "filterDecision": "判定で絞り込む",
+    "filterAgent": "エージェントで絞り込む",
+    "decisionAll": "すべての判定",
+    "decisionRefused": "拒否",
+    "decisionAllowed": "許可",
+    "agentAll": "すべてのエージェント",
+    "tierUsage": "ティア別の使用量",
+    "tierEmpty": "この期間に記録された使用量はまだありません。",
+    "tierTag": "ティア",
+    "unattributed": "未割り当て"
   }
 }

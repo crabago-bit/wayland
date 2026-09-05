@@ -42,7 +42,8 @@
   },
   "tabs": {
     "operations": "Operations",
-    "cost": "Cost"
+    "cost": "Cost",
+    "approvals": "Approvals"
   },
   "cost": {
     "periodLabel": "Period",
@@ -111,5 +112,19 @@
       "gateRaised": "Budget raised to {{limit}}",
       "gateError": "Couldn't raise the budget"
     }
+  },
+  "approvals": {
+    "title": "Approvals — showing {{shown}} of {{total}}",
+    "empty": "Nothing recorded yet. Refusals and write-tool calls at rung 3 or above appear here.",
+    "filterDecision": "Filter by decision",
+    "filterAgent": "Filter by agent",
+    "decisionAll": "All decisions",
+    "decisionRefused": "Refused",
+    "decisionAllowed": "Allowed",
+    "agentAll": "All agents",
+    "tierUsage": "Tier usage",
+    "tierEmpty": "No recorded usage in this period yet.",
+    "tierTag": "tier",
+    "unattributed": "unattributed"
   }
 }
