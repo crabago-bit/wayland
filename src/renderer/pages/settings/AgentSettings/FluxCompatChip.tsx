@@ -53,7 +53,12 @@ const FluxCompatChip: React.FC<{ backend: string; interactive?: boolean }> = ({ 
     // so the button would open a modal that can only fail.
     if (
       interactive &&
-      (backend === 'opencode' || backend === 'codex' || backend === 'kimi' || backend === 'openclaw-gateway')
+      (backend === 'opencode' ||
+        backend === 'codex' ||
+        backend === 'kimi' ||
+        backend === 'openclaw-gateway' ||
+        // WarriorHi local patch: Hermes has a live Flux connector (connectors/hermes.ts)
+        backend === 'hermes')
     ) {
       return (
         <>

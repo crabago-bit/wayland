@@ -67,68 +67,6 @@ function agentLogo(agent: DetectedAgent): string | null {
 }
 
 /**
- * Small per-agent Flux status chip. Driven by the backend's `fluxCompat`
- * classification in the registry (single source of truth via `getFluxCompat`):
- *  - 'env'    -> "Flux ready" (positive tone)
- *  - 'setup'  -> "Flux setup" (neutral tone)
- *  - 'vendor' -> "Native only" (muted tone) with a tooltip explaining why.
- * Renders nothing when the backend has no Flux classification.
- */
-const FluxCompatChip: React.FC<{ backend: string }> = ({ backend }) => {
-  const { t } = useTranslation();
-  const [setupOpen, setSetupOpen] = React.useState(false);
-  const compat = getFluxCompat(backend);
-  if (!compat) return null;
-
-  if (compat === 'env') {
-    return (
-      <span className={`${styles.fluxChip} ${styles.fluxChipReady}`}>
-        <CheckOne theme='filled' size={11} />
-        {t('settings.agentsPage.fluxCompat.ready')}
-      </span>
-    );
-  }
-
-  if (compat === 'setup') {
-    // opencode, codex and hermes have live connectors (a one-time config write
-    // routes them through Flux). Render their chip as a clickable button that
-    // opens the setup modal for the matching backend; other `setup` backends stay
-    // informational.
-    //
-    // LOCAL ADDITION: hermes. It was already classified `fluxCompat: 'setup'` in
-    // acpTypes, so it rendered a "Setup" chip — but there was no connector behind
-    // it and this gate excluded it, so the chip was inert. Both are now wired.
-    if (backend === 'opencode' || backend === 'codex' || backend === 'hermes') {
-      return (
-        <>
-          <Button
-            type='text'
-            size='mini'
-            className={`${styles.fluxChip} ${styles.fluxChipSetup} ${styles.fluxChipButton}`}
-            onClick={() => setSetupOpen(true)}
-            data-testid='flux-setup-chip'
-          >
-            {t('settings.agentsPage.fluxCompat.setup')}
-          </Button>
-          <FluxSetupModal visible={setupOpen} onClose={() => setSetupOpen(false)} backend={backend} />
-        </>
-      );
-    }
-    return (
-      <span className={`${styles.fluxChip} ${styles.fluxChipSetup}`}>{t('settings.agentsPage.fluxCompat.setup')}</span>
-    );
-  }
-
-  return (
-    <Tooltip content={t('settings.agentsPage.fluxCompat.nativeOnlyTooltip')}>
-      <span className={`${styles.fluxChip} ${styles.fluxChipNative}`}>
-        {t('settings.agentsPage.fluxCompat.nativeOnly')}
-      </span>
-    </Tooltip>
-  );
-};
-
-/**
  * Per-agent "show in toolbar" toggle. Flipping it off removes the agent from
  * the Guid-page toolbar strip (it stays detected and listed here); flipping it
  * on restores it. Wayland Core is the always-available default backend, so its

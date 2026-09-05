@@ -6,7 +6,7 @@
  * Modified by Ferrox Labs in 2026. Changes are documented in the project history.
  */
 
-import { ArrowUp, Brain, FolderOpen, Shield } from 'lucide-react';
+import { ArrowUp, Brain, Folder, FolderOpen, FolderPlus, PenLine, Shield } from 'lucide-react';
 import { ipcBridge } from '@/common';
 import ComposerAddMenu, {
   type ComposerUploadItem,
@@ -21,7 +21,7 @@ import { iconColors } from '@/renderer/styles/colors';
 import { isElectronDesktop } from '@/renderer/utils/platform';
 import type { AcpBackend, AcpBackendConfig, AvailableAgent } from '../types';
 import PresetAgentTag, { type AgentSwitcherItem } from './PresetAgentTag';
-import { Button, Message, Tooltip } from '@arco-design/web-react';
+import { Button, Dropdown, Input, Menu, Message, Modal, Tooltip } from '@arco-design/web-react';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styles from '../index.module.css';
@@ -149,6 +149,67 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
 
   const isWebUI = !isElectronDesktop();
 
+  // WarriorHi local patch: recent folders share the localStorage key used by
+  // WorkspaceFolderSelect so cron/team dialogs and the composer agree.
+  const RECENT_WS_KEY = 'wayland:recent-workspaces';
+  const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(RECENT_WS_KEY) ?? '[]');
+      return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
+  const selectWorkspaceAndRemember = useCallback(
+    (dir: string) => {
+      onSelectWorkspace(dir);
+      try {
+        const next = [dir, ...recentWorkspaces.filter((d) => d !== dir)].slice(0, 5);
+        localStorage.setItem(RECENT_WS_KEY, JSON.stringify(next));
+        setRecentWorkspaces(next);
+      } catch {
+        // localStorage unavailable: selection still applies, just not remembered
+      }
+    },
+    [onSelectWorkspace, recentWorkspaces]
+  );
+  const browseServerFolder = useCallback(() => {
+    ipcBridge.dialog.showOpen
+      .invoke({ properties: ['openDirectory', 'createDirectory'] })
+      .then((dirs) => {
+        if (dirs && dirs[0]) {
+          selectWorkspaceAndRemember(dirs[0]);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to open directory dialog:', error);
+      });
+  }, [selectWorkspaceAndRemember]);
+  const promptForFolderPath = useCallback(() => {
+    let typedPath = '';
+    Modal.confirm({
+      title: t('conversation.welcome.specifyWorkspace'),
+      content: (
+        <Input
+          autoFocus
+          placeholder='/home/forge/repos/my-project'
+          onChange={(value) => {
+            typedPath = value;
+          }}
+        />
+      ),
+      onOk: () => {
+        const dir = typedPath.trim();
+        if (!dir.startsWith('/')) {
+          Message.error('Enter an absolute path on the server (starting with /).');
+          return Promise.reject(new Error('invalid workspace path'));
+        }
+        selectWorkspaceAndRemember(dir);
+        return Promise.resolve();
+      },
+    });
+  }, [selectWorkspaceAndRemember, t]);
+
   const openHostFilePicker = useCallback(() => {
     ipcBridge.dialog.showOpen
       .invoke({ properties: ['openFile', 'multiSelections'] })
@@ -207,24 +268,64 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
           )}
         </div>
 
-        {!isWebUI && (
-          <Button
-            className='sendbox-model-btn'
-            shape='round'
-            size='small'
-            onClick={() => {
-              ipcBridge.dialog.showOpen
-                .invoke({ properties: ['openDirectory', 'createDirectory'] })
-                .then((dirs) => {
-                  if (dirs && dirs[0]) {
-                    onSelectWorkspace(dirs[0]);
+        {/*
+          WarriorHi local patch (os.warriorhi.com): upstream hides "Chat in Folder" in the
+          WebUI because it assumes a native OS picker. The standalone server already routes
+          `dialog.showOpen` to the in-browser DirectorySelectionModal (/api/directory/browse,
+          mounted in Layout.tsx), so the picker works remotely. Expose it, plus the recent
+          folders shared with WorkspaceFolderSelect and a plain "type a path" fallback.
+        */}
+        {isWebUI ? (
+          <Dropdown
+            trigger='click'
+            position='tl'
+            droplist={
+              <Menu
+                onClickMenuItem={(key) => {
+                  if (key === '__browse') {
+                    browseServerFolder();
+                  } else if (key === '__type') {
+                    promptForFolderPath();
+                  } else if (key.startsWith('recent:')) {
+                    selectWorkspaceAndRemember(key.slice('recent:'.length));
                   }
-                })
-                .catch((error) => {
-                  console.error('Failed to open directory dialog:', error);
-                });
-            }}
+                }}
+              >
+                {recentWorkspaces.map((dir) => (
+                  <Menu.Item key={`recent:${dir}`}>
+                    <span className='flex items-center gap-8px'>
+                      <Folder size={14} style={{ flexShrink: 0 }} />
+                      <span className='truncate' style={{ maxWidth: 320 }} title={dir}>
+                        {dir}
+                      </span>
+                    </span>
+                  </Menu.Item>
+                ))}
+                {recentWorkspaces.length > 0 && <Menu.Item key='__divider' disabled style={{ height: 1, padding: 0, margin: '4px 0', background: 'var(--color-border-2)' }} />}
+                <Menu.Item key='__browse'>
+                  <span className='flex items-center gap-8px'>
+                    <FolderPlus size={14} style={{ flexShrink: 0 }} />
+                    <span>Browse server folders…</span>
+                  </span>
+                </Menu.Item>
+                <Menu.Item key='__type'>
+                  <span className='flex items-center gap-8px'>
+                    <PenLine size={14} style={{ flexShrink: 0 }} />
+                    <span>Type a path…</span>
+                  </span>
+                </Menu.Item>
+              </Menu>
+            }
           >
+            <Button className='sendbox-model-btn' shape='round' size='small'>
+              <span className='flex items-center gap-6px leading-none'>
+                <FolderOpen size={14} style={{ lineHeight: 0, flexShrink: 0 }} />
+                <span>{t('conversation.welcome.specifyWorkspace')}</span>
+              </span>
+            </Button>
+          </Dropdown>
+        ) : (
+          <Button className='sendbox-model-btn' shape='round' size='small' onClick={browseServerFolder}>
             <span className='flex items-center gap-6px leading-none'>
               <FolderOpen size={14} style={{ lineHeight: 0, flexShrink: 0 }} />
               <span>{t('conversation.welcome.specifyWorkspace')}</span>
