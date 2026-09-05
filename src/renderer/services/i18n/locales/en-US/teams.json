@@ -66,6 +66,7 @@
     "specialistNotFound": "(missing specialist)",
     "backendPickerPlaceholder": "Backend",
     "goalLabel": "Describe what you're doing - I'll suggest a roster",
+    "kickoffLabel": "Kickoff brief - edit it before you launch",
     "goalPlaceholder": "e.g. We're launching a paid book funnel and need a small team to ship it in two weeks.",
     "suggestCta": "Suggest",
     "suggestSuccess": "Roster suggested",

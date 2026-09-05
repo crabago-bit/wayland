@@ -66,6 +66,7 @@
     "specialistNotFound": "[TODO:translate] (missing specialist)",
     "backendPickerPlaceholder": "[TODO:translate] Backend",
     "goalLabel": "[TODO:translate] Describe what you're doing - I'll suggest a roster",
+    "kickoffLabel": "[TODO:translate] Kickoff brief - edit it before you launch",
     "goalPlaceholder": "[TODO:translate] e.g. We're launching a paid book funnel and need a small team to ship it in two weeks.",
     "suggestCta": "[TODO:translate] Suggest",
     "suggestSuccess": "[TODO:translate] Roster suggested",

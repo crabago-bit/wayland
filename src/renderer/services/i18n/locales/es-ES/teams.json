@@ -66,6 +66,7 @@
     "specialistNotFound": "(especialista no encontrado)",
     "backendPickerPlaceholder": "Backend",
     "goalLabel": "Describe lo que estás haciendo y te sugeriré una plantilla",
+    "kickoffLabel": "[TODO:translate] Kickoff brief - edit it before you launch",
     "goalPlaceholder": "p. ej. Vamos a lanzar un embudo de libro de pago y necesitamos un equipo pequeño para entregarlo en dos semanas.",
     "suggestCta": "Sugerir",
     "suggestSuccess": "Plantilla sugerida",

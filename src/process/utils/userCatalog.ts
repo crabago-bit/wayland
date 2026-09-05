@@ -40,9 +40,9 @@
  * instead would fork the prompt the moment a user edited it in the UI.
  */
 
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { AcpBackendConfig } from '@/common/types/acpTypes';
+import { ACP_BACKENDS_ALL, type AcpBackendConfig } from '@/common/types/acpTypes';
 import { resolvePresetAgentType } from '@/common/config/presets/assistantDefaults';
 import { autonomyAgentKey, type AutonomyRung } from '@/common/jarvis/autonomy';
 
@@ -66,6 +66,36 @@ const SAFE_SLUG = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 /** A promptFile is joined onto the packs dir, so it must be a plain file name. */
 const SAFE_PROMPT_FILE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 
+/**
+ * A pack file is a hand-authored catalog, not a data dump; a `.pack.json` this
+ * big is a mistake or a hostile drop, and either way parsing it would block the
+ * boot path. Same for a prompt body, which is a system prompt, not a corpus.
+ */
+export const MAX_PACK_FILE_BYTES = 1024 * 1024;
+export const MAX_PROMPT_FILE_BYTES = 512 * 1024;
+
+/**
+ * The highest rung a pack file may hand out. Rung 4 is AUTONOMOUS - write tools
+ * run end to end, logged rather than asked - and that is a promotion the person
+ * at the keyboard makes, never a JSON file they copied into a folder. Anything
+ * above the cap lands on 3 (ACT -> REPORT), which is also the app-wide default.
+ */
+export const MAX_PACK_AUTONOMY_RUNG = 3;
+
+/**
+ * Backend ids a pack may name in `presetAgentType`. Built from the static ACP
+ * backend table (no detection, no IO) plus the two non-ACP engines that are
+ * handled outside it. An unknown value is not passed through: it would be
+ * written verbatim into the record and surface as an assistant bound to an
+ * engine that does not exist.
+ */
+const KNOWN_PRESET_AGENT_TYPES: ReadonlySet<string> = new Set<string>([
+  ...Object.keys(ACP_BACKENDS_ALL).filter((id) => id !== 'custom'),
+  'gemini',
+  'wcore',
+  'wayland-core',
+]);
+
 export type AssistantPackAssistant = {
   id: string;
   name: string;
@@ -78,6 +108,13 @@ export type AssistantPackAssistant = {
   tier?: string;
   autonomyRung?: number;
   workspace?: string;
+  /**
+   * The record DECLARED a promptFile, but it was not a plain file name. Carried
+   * (rather than silently reduced to "no promptFile") so the loader can drop the
+   * record exactly as it drops one whose prompt is unreadable - an assistant
+   * asking for a prompt it cannot get is broken, not promptless.
+   */
+  promptFileInvalid?: boolean;
 };
 
 export type AssistantPackTask = {
@@ -138,19 +175,20 @@ export function packAssistantId(packName: string, recordId: string): string {
   return `${ASSISTANT_PACK_ID_PREFIX}${packName}-${packBareId(packName, recordId)}`;
 }
 
-/** True when the id belongs to some assistant pack. */
-export function isPackAssistantId(id: unknown): id is string {
-  return typeof id === 'string' && id.startsWith(ASSISTANT_PACK_ID_PREFIX);
-}
-
 /**
  * Validate and normalize one pack file's text. Never throws: malformed JSON, a
  * bad pack name or a non-positive version reject the WHOLE file (an unusable
  * header makes every row below it unattributable), while an individual bad
  * assistant/team row is dropped and the rest of the pack still applies.
  * Duplicate ids keep the first occurrence.
+ *
+ * `warn` receives one line per field that was corrected rather than accepted
+ * verbatim (an out-of-range rung, an unknown backend). Optional so the pure
+ * parse stays callable without an IO seam.
  */
-export function parseAssistantPack(text: string): AssistantPackParseResult {
+export function parseAssistantPack(text: string, warn?: (line: string) => void): AssistantPackParseResult {
+  const note = warn ?? ((): undefined => undefined);
+
   let raw: unknown;
   try {
     raw = JSON.parse(text) as unknown;
@@ -181,18 +219,39 @@ export function parseAssistantPack(text: string): AssistantPackParseResult {
     seen.add(resolved);
 
     const promptFile = str(entry.promptFile);
-    const rung = typeof entry.autonomyRung === 'number' ? Math.trunc(entry.autonomyRung) : undefined;
+    const promptFileOk = promptFile !== undefined && SAFE_PROMPT_FILE.test(promptFile);
+
+    // Clamp rather than drop: a pack that asks for rung 9 clearly wants the
+    // agent as high as it may go, and dropping the field would silently seat it
+    // on the default anyway - the difference is that the clamp says so.
+    const declaredRung =
+      typeof entry.autonomyRung === 'number' && Number.isFinite(entry.autonomyRung) ? entry.autonomyRung : undefined;
+    let rung = declaredRung === undefined ? undefined : Math.trunc(declaredRung);
+    if (rung !== undefined && (rung < 1 || rung > MAX_PACK_AUTONOMY_RUNG)) {
+      const clamped = Math.min(Math.max(rung, 1), MAX_PACK_AUTONOMY_RUNG);
+      note(`${packName}: ${resolved} autonomyRung ${rung} is out of range - clamped to ${clamped}`);
+      rung = clamped;
+    }
+
+    const declaredType = str(entry.presetAgentType);
+    let presetAgentType = declaredType;
+    if (declaredType !== undefined && !KNOWN_PRESET_AGENT_TYPES.has(declaredType)) {
+      note(`${packName}: ${resolved} presetAgentType "${declaredType}" is not a known backend - using the default`);
+      presetAgentType = undefined;
+    }
+
     assistants.push({
       id: resolved,
       name,
       description: str(entry.description),
       avatar: str(entry.avatar),
-      presetAgentType: str(entry.presetAgentType),
-      promptFile: promptFile && SAFE_PROMPT_FILE.test(promptFile) ? promptFile : undefined,
+      presetAgentType,
+      promptFile: promptFileOk ? promptFile : undefined,
+      promptFileInvalid: promptFile !== undefined && !promptFileOk ? true : undefined,
       prompts: strArray(entry.prompts),
       enabledSkills: strArray(entry.enabledSkills),
       tier: str(entry.tier),
-      autonomyRung: rung !== undefined && rung >= 1 && rung <= 4 ? rung : undefined,
+      autonomyRung: rung,
       workspace: str(entry.workspace),
     });
   }
@@ -284,6 +343,52 @@ export function renderTeamTaskPrefill(team: AssistantPackTeam): string {
   lines.push('');
   lines.push('Do not start a task until every task it is blocked by has been reported complete.');
   return lines.join('\n');
+}
+
+/**
+ * Outcome of checking a team's roster against the assistants that actually
+ * survived this run. `team: null` means the team must not be built at all.
+ */
+export type TeamRosterResolution = {
+  /** The team to build, or null when it must not be built at all. */
+  team: AssistantPackTeam | null;
+  /** Set (with `team: null`) when the team's declared leader has no record. */
+  leaderMissing?: string;
+  /** Member ids that named no usable assistant and were removed. */
+  droppedMembers: string[];
+  /** Task owner ids that named no usable assistant and were cleared. */
+  droppedOwners: string[];
+};
+
+/**
+ * Bind a team to the assistants that are really there. A pack can name an
+ * assistant its own file dropped (bad promptFile, invalid slug) or never
+ * declared at all, and a launcher whose roster points at ids with no record
+ * spawns nothing recognizable - the /teams page shows raw `pack-...` strings
+ * and the leader has no prompt. So members and task owners are filtered to the
+ * usable set, and a team whose LEADER is gone is refused outright: the leader is
+ * the agent the kickoff is addressed to, and there is no sensible stand-in.
+ */
+export function resolveTeamRoster(team: AssistantPackTeam, usableIds: ReadonlySet<string>): TeamRosterResolution {
+  if (team.leader !== undefined && !usableIds.has(team.leader)) {
+    return { team: null, leaderMissing: team.leader, droppedMembers: [], droppedOwners: [] };
+  }
+  const members = team.members ?? [];
+  const keptMembers = members.filter((m) => usableIds.has(m));
+  const droppedMembers = members.filter((m) => !usableIds.has(m));
+
+  const droppedOwners: string[] = [];
+  const tasks = team.tasks?.map((task) => {
+    if (task.owner === undefined || usableIds.has(task.owner)) return task;
+    droppedOwners.push(task.owner);
+    return { ...task, owner: undefined };
+  });
+
+  return {
+    team: { ...team, members: keptMembers, tasks },
+    droppedMembers,
+    droppedOwners,
+  };
 }
 
 /** Build the `kind:'team'` launcher row for one pack team. */
@@ -457,44 +562,97 @@ export async function applyAssistantPacks(io: AssistantPackIo): Promise<Assistan
   let autonomyChanged = false;
   let appliedChanged = false;
   const summaries: AssistantPackSummary[] = [];
+  // Two files can both declare `pack: "warrior"`. They would share one
+  // `applied` entry and one id namespace, so the second silently overwrites the
+  // first's rows on any version bump. Refuse the second instead.
+  const packNameToFile = new Map<string, string>();
 
   for (const file of files) {
     const fullPath = path.join(io.packsDir, file);
     let text: string;
     try {
+      const size = (await stat(fullPath)).size;
+      if (size > MAX_PACK_FILE_BYTES) {
+        warn(`[assistantPacks] ${file}: skipped - ${size} bytes exceeds the ${MAX_PACK_FILE_BYTES} byte limit`);
+        continue;
+      }
       text = await readFile(fullPath, 'utf-8');
     } catch (error) {
       warn(`[assistantPacks] ${file}: unreadable (${(error as Error).message})`);
       continue;
     }
 
-    const parsed = parseAssistantPack(text);
+    const parsed = parseAssistantPack(text, (line) => warn(`[assistantPacks] ${line}`));
     if ('error' in parsed) {
       warn(`[assistantPacks] ${file}: ${parsed.error}`);
       continue;
     }
     const pack = parsed.pack;
 
+    const firstFile = packNameToFile.get(pack.pack);
+    if (firstFile !== undefined) {
+      warn(`[assistantPacks] ${file}: skipped - pack name "${pack.pack}" already declared by ${firstFile}`);
+      continue;
+    }
+    packNameToFile.set(pack.pack, file);
+
     // Resolve prompt bodies before building rows: an assistant that DECLARES a
     // promptFile which cannot be read is a broken entry, not a promptless one.
     const usable: AssistantPackAssistant[] = [];
     const prompts = new Map<string, string>();
     for (const record of pack.assistants) {
+      if (record.promptFileInvalid) {
+        warn(`[assistantPacks] ${pack.pack}: ${record.id} skipped - promptFile is not a plain file name`);
+        continue;
+      }
       if (!record.promptFile) {
         usable.push(record);
         continue;
       }
+      const promptPath = path.join(io.packsDir, record.promptFile);
       try {
-        prompts.set(record.id, await readFile(path.join(io.packsDir, record.promptFile), 'utf-8'));
+        const size = (await stat(promptPath)).size;
+        if (size > MAX_PROMPT_FILE_BYTES) {
+          warn(
+            `[assistantPacks] ${pack.pack}: ${record.id} skipped - promptFile "${record.promptFile}" is ${size} bytes, ` +
+              `over the ${MAX_PROMPT_FILE_BYTES} byte limit`
+          );
+          continue;
+        }
+        prompts.set(record.id, await readFile(promptPath, 'utf-8'));
         usable.push(record);
       } catch {
         warn(`[assistantPacks] ${pack.pack}: ${record.id} skipped - promptFile "${record.promptFile}" not readable`);
       }
     }
 
+    // Teams may only reference assistants this run actually produced.
+    const usableIds = new Set(usable.map((record) => record.id));
+    const teams: AssistantPackTeam[] = [];
+    for (const team of pack.teams) {
+      const resolution = resolveTeamRoster(team, usableIds);
+      if (!resolution.team) {
+        warn(
+          `[assistantPacks] ${pack.pack}: ${team.id} skipped - leader "${resolution.leaderMissing}" is not a usable assistant`
+        );
+        continue;
+      }
+      if (resolution.droppedMembers.length > 0) {
+        warn(
+          `[assistantPacks] ${pack.pack}: ${team.id} dropped unknown members ${resolution.droppedMembers.join(', ')}`
+        );
+      }
+      if (resolution.droppedOwners.length > 0) {
+        warn(
+          `[assistantPacks] ${pack.pack}: ${team.id} dropped unknown task owners ${resolution.droppedOwners.join(', ')}`
+        );
+      }
+      teams.push(resolution.team);
+    }
+
     const rows = [
       ...usable.map((record) => buildPackAssistant(pack, record)),
-      ...pack.teams.map((team) => buildPackTeam(pack, team)),
+      ...teams.map((team) => buildPackTeam(pack, team)),
     ];
     const result = reconcilePackAssistants(assistants, rows, {
       packVersion: pack.version,
@@ -534,9 +692,11 @@ export async function applyAssistantPacks(io: AssistantPackIo): Promise<Assistan
       pack: pack.pack,
       version: pack.version,
       assistants: usable.length,
-      teams: pack.teams.length,
+      teams: teams.length,
       added: result.added.length,
-      unchanged: rows.length - result.added.length,
+      // One source of truth for the count: recomputing it here drifted from
+      // `reconcilePackAssistants` the moment either side changed.
+      unchanged: result.unchanged,
       skipped: result.skipped,
     };
     summaries.push(summary);

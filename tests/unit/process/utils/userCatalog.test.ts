@@ -28,6 +28,9 @@ import {
   parseAssistantPack,
   reconcilePackAssistants,
   renderTeamTaskPrefill,
+  resolveTeamRoster,
+  MAX_PACK_FILE_BYTES,
+  MAX_PROMPT_FILE_BYTES,
   type AssistantPack,
 } from '@process/utils/userCatalog';
 
@@ -181,7 +184,7 @@ describe('parseAssistantPack', () => {
     expect('pack' in result && result.pack.assistants[0].name).toBe('First');
   });
 
-  it('drops a promptFile that is not a plain file name', () => {
+  it('flags a promptFile that is not a plain file name instead of silently clearing it', () => {
     const result = parseAssistantPack(
       JSON.stringify({
         pack: 'warrior',
@@ -190,13 +193,93 @@ describe('parseAssistantPack', () => {
       })
     );
     expect('pack' in result && result.pack.assistants[0].promptFile).toBeUndefined();
+    // The flag is what makes the loader DROP the record rather than build a
+    // promptless assistant out of it.
+    expect('pack' in result && result.pack.assistants[0].promptFileInvalid).toBe(true);
   });
 
-  it('ignores an out-of-range autonomy rung', () => {
+  it('clamps an autonomy rung above 3 down to 3 and warns', () => {
+    const warns: string[] = [];
     const result = parseAssistantPack(
-      JSON.stringify({ pack: 'w', version: 1, assistants: [{ id: 'a', name: 'A', autonomyRung: 9 }] })
+      JSON.stringify({ pack: 'w', version: 1, assistants: [{ id: 'a', name: 'A', autonomyRung: 9 }] }),
+      (line) => warns.push(line)
     );
-    expect('pack' in result && result.pack.assistants[0].autonomyRung).toBeUndefined();
+    expect('pack' in result && result.pack.assistants[0].autonomyRung).toBe(3);
+    expect(warns.join('\n')).toContain('clamped to 3');
+  });
+
+  it('refuses to let a pack hand out rung 4 (AUTONOMOUS)', () => {
+    const result = parseAssistantPack(
+      JSON.stringify({ pack: 'w', version: 1, assistants: [{ id: 'a', name: 'A', autonomyRung: 4 }] })
+    );
+    expect('pack' in result && result.pack.assistants[0].autonomyRung).toBe(3);
+  });
+
+  it('clamps a rung below 1 up to 1 and leaves an in-range rung alone', () => {
+    const parse = (rung: number) =>
+      parseAssistantPack(
+        JSON.stringify({ pack: 'w', version: 1, assistants: [{ id: 'a', name: 'A', autonomyRung: rung }] })
+      );
+    expect('pack' in parse(0) && parse(0).pack.assistants[0].autonomyRung).toBe(1);
+    expect('pack' in parse(2) && parse(2).pack.assistants[0].autonomyRung).toBe(2);
+  });
+
+  it('keeps a known presetAgentType and defaults an unknown one with a warning', () => {
+    const warns: string[] = [];
+    const result = parseAssistantPack(
+      JSON.stringify({
+        pack: 'w',
+        version: 1,
+        assistants: [
+          { id: 'a', name: 'A', presetAgentType: 'claude' },
+          { id: 'b', name: 'B', presetAgentType: 'gemini' },
+          { id: 'c', name: 'C', presetAgentType: 'wayland-core' },
+          { id: 'd', name: 'D', presetAgentType: 'totally-made-up' },
+        ],
+      }),
+      (line) => warns.push(line)
+    );
+    const types = 'pack' in result ? result.pack.assistants.map((a) => a.presetAgentType) : [];
+    expect(types).toEqual(['claude', 'gemini', 'wayland-core', undefined]);
+    expect(warns.join('\n')).toContain('"totally-made-up" is not a known backend');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Team roster binding
+// ---------------------------------------------------------------------------
+
+describe('resolveTeamRoster', () => {
+  const team = {
+    id: 'pack-w-desk',
+    name: 'Desk',
+    leader: 'pack-w-editor',
+    members: ['pack-w-scout', 'pack-w-editor', 'pack-w-ghost'],
+    tasks: [
+      { subject: 'Survey', owner: 'pack-w-scout' },
+      { subject: 'Cut', owner: 'pack-w-ghost' },
+    ],
+  };
+
+  it('drops members and task owners with no usable assistant', () => {
+    const result = resolveTeamRoster(team, new Set(['pack-w-scout', 'pack-w-editor']));
+    expect(result.team?.members).toEqual(['pack-w-scout', 'pack-w-editor']);
+    expect(result.droppedMembers).toEqual(['pack-w-ghost']);
+    expect(result.droppedOwners).toEqual(['pack-w-ghost']);
+    expect(result.team?.tasks?.[0].owner).toBe('pack-w-scout');
+    // The task itself survives - only the owner it could not bind is cleared.
+    expect(result.team?.tasks?.[1]).toMatchObject({ subject: 'Cut', owner: undefined });
+  });
+
+  it('refuses the whole team when the leader is gone', () => {
+    const result = resolveTeamRoster(team, new Set(['pack-w-scout']));
+    expect(result.team).toBeNull();
+    expect(result.leaderMissing).toBe('pack-w-editor');
+  });
+
+  it('accepts a leaderless team', () => {
+    const result = resolveTeamRoster({ id: 'pack-w-desk', name: 'Desk' }, new Set());
+    expect(result.team).not.toBeNull();
   });
 });
 
@@ -424,6 +507,90 @@ describe('applyAssistantPacks', () => {
     await applyAssistantPacks(io(store));
 
     expect(store.autonomy?.['custom:pack-warrior-scout']).toBe(4);
+  });
+
+  it('drops an assistant whose promptFile is not a plain file name', async () => {
+    const store = makeStore();
+    await writePack({
+      ...PACK,
+      assistants: [{ ...PACK.assistants[0], promptFile: '../../etc/passwd' }, PACK.assistants[1]],
+    });
+    await applyAssistantPacks(io(store));
+
+    expect(store.assistants.map((a) => a.id)).not.toContain('pack-warrior-scout');
+    expect(store.assistants.map((a) => a.id)).toContain('pack-warrior-editor');
+    expect(store.warns.join('\n')).toContain('promptFile is not a plain file name');
+  });
+
+  it('skips the second of two files declaring the same pack name', async () => {
+    const store = makeStore();
+    await writePack(PACK, 'a-warrior.pack.json');
+    await writePack({ ...PACK, version: 9, assistants: [], teams: [] }, 'b-warrior.pack.json');
+    await applyAssistantPacks(io(store));
+
+    // Both filenames appear in the warning so the user can tell which two collided.
+    expect(store.warns.join('\n')).toContain('b-warrior.pack.json');
+    expect(store.warns.join('\n')).toContain('a-warrior.pack.json');
+    // The loser must not touch `applied` - otherwise its version would gate the winner.
+    expect(store.applied).toEqual({ warrior: 1 });
+    expect(store.assistants).toHaveLength(3);
+  });
+
+  it('skips a pack file over the size cap without reading it', async () => {
+    const store = makeStore();
+    await writePack('x'.repeat(MAX_PACK_FILE_BYTES + 1), 'huge.pack.json');
+    await writePack(PACK);
+    await applyAssistantPacks(io(store));
+
+    expect(store.warns.join('\n')).toContain('huge.pack.json');
+    expect(store.warns.join('\n')).toContain('exceeds');
+    expect(store.assistants).toHaveLength(3);
+  });
+
+  it('skips an assistant whose prompt body is over the size cap', async () => {
+    const store = makeStore();
+    await writeFile(path.join(packsDir, 'warrior-scout.en-US.md'), 'x'.repeat(MAX_PROMPT_FILE_BYTES + 1), 'utf-8');
+    await writePack(PACK);
+    await applyAssistantPacks(io(store));
+
+    expect(store.assistants.map((a) => a.id)).not.toContain('pack-warrior-scout');
+    expect(store.warns.join('\n')).toContain('over the');
+  });
+
+  it('skips a team whose leader was dropped and prunes members that were', async () => {
+    const store = makeStore();
+    await writePack({
+      ...PACK,
+      // Scout survives; the editor (the team's leader) loses its prompt file.
+      assistants: [PACK.assistants[0], { ...PACK.assistants[1], promptFile: 'gone.md' }],
+    });
+    await applyAssistantPacks(io(store));
+
+    expect(store.assistants.map((a) => a.id)).toEqual(['pack-warrior-scout']);
+    expect(store.warns.join('\n')).toContain('pack-warrior-desk skipped');
+    expect(store.warns.join('\n')).toContain('pack-warrior-editor');
+  });
+
+  it('prunes an unknown member from a team the leader still anchors', async () => {
+    const store = makeStore();
+    await writePack({
+      ...PACK,
+      teams: [{ ...PACK.teams[0], members: ['warrior-scout', 'warrior-editor', 'warrior-ghost'] }],
+    });
+    await applyAssistantPacks(io(store));
+
+    const desk = store.assistants.find((a) => a.id === 'pack-warrior-desk');
+    expect(desk?.teammates).toEqual(['pack-warrior-editor', 'pack-warrior-scout']);
+    expect(store.warns.join('\n')).toContain('dropped unknown members pack-warrior-ghost');
+  });
+
+  it('clamps a pack-authored rung of 4 before it reaches the autonomy ladder', async () => {
+    const store = makeStore();
+    await writePack({ ...PACK, assistants: [{ ...PACK.assistants[0], autonomyRung: 4 }, PACK.assistants[1]] });
+    await applyAssistantPacks(io(store));
+
+    expect(store.autonomy?.['custom:pack-warrior-scout']).toBe(3);
+    expect(store.warns.join('\n')).toContain('clamped to 3');
   });
 
   it('loads the shipped sample fixture pack', async () => {

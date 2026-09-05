@@ -5334,6 +5334,7 @@ export type I18nKey =
   | 'teams.launcher.emptyRoster'
   | 'teams.launcher.goalLabel'
   | 'teams.launcher.goalPlaceholder'
+  | 'teams.launcher.kickoffLabel'
   | 'teams.launcher.launchCta'
   | 'teams.launcher.launchError'
   | 'teams.launcher.launchingCta'

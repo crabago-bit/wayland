@@ -73,12 +73,12 @@ directory.
 | `name`            | yes      | Shown in the library.                                                                               |
 | `description`     | no       |                                                                                                     |
 | `avatar`          | no       | Emoji, a `lucide:Name` reference, or a `data:` URI.                                                 |
-| `presetAgentType` | no       | e.g. `claude`. Resolved through the same defaulting as the built-in catalog.                        |
+| `presetAgentType` | no       | A known backend id (`claude`, `gemini`, `codex`, `wcore`, `hermes`, …). Unknown → default, warned.  |
 | `promptFile`      | no       | Plain file name, relative to the packs directory. Its content becomes the system prompt.            |
 | `prompts`         | no       | Quick-prompt chips.                                                                                 |
 | `enabledSkills`   | no       | Skill names to enable for this assistant.                                                           |
 | `tier`            | no       | `jarvis-heavy` \| `jarvis-default` \| `jarvis-cheap`. Recorded and shown read-only.                 |
-| `autonomyRung`    | no       | 1–4. Seeds the JARVIS ladder **only when no rung is stored yet** for that assistant.                |
+| `autonomyRung`    | no       | 1–3. Seeds the JARVIS ladder **only when no rung is stored yet** for that assistant.                |
 | `workspace`       | no       | Absolute path. Recorded and shown read-only.                                                        |
 
 `tier` and `workspace` are provenance, not behaviour: they are stored on the record as
@@ -86,8 +86,16 @@ directory.
 them today.
 
 If an assistant declares a `promptFile` that cannot be read, that assistant is **skipped**
-(with a warning) rather than created without a prompt. A `promptFile` containing a path
-separator is ignored.
+(with a warning) rather than created without a prompt. A `promptFile` that is not a plain
+file name (a path separator, `..`, an absolute path) is treated the same way: the whole
+record is dropped, not silently created promptless.
+
+### Autonomy is capped at rung 3
+
+A pack may seed rungs 1–3 (SUGGEST, DRAFT → APPROVE, ACT → REPORT). Rung **4**
+(AUTONOMOUS) is not available to a pack: a file you copied into a folder must not be able
+to promote an agent to running write tools end to end without asking. A pack asking for 4
+or higher is **clamped to 3** with a warning; anything below 1 is clamped to 1.
 
 ### Teams
 
@@ -102,6 +110,11 @@ separator is ignored.
 
 A team becomes a `kind: 'team'` launcher record — the same shape the built-in team
 launchers use — with `teammates` set to leader-first member ids.
+
+`leader`, `members` and task `owner`s are checked against the assistants the pack actually
+produced. A member or owner naming an assistant that does not exist (typo, or a record that
+was itself skipped) is dropped with a warning; a team whose **leader** is missing is
+skipped entirely, because the leader is who the kickoff is addressed to.
 
 > **Tasks are a kickoff, not database rows.** Wayland's `team_tasks` table is keyed by a
 > live `teams` row, which only exists once a launcher is actually launched, so a catalog
@@ -137,6 +150,18 @@ Each pack logs one line at startup:
 
 Problems are logged as warnings on the same prefix — a malformed pack is skipped and the
 remaining packs still load.
+
+## Limits
+
+| Limit                       | Behaviour                                                              |
+| --------------------------- | ---------------------------------------------------------------------- |
+| `.pack.json` over **1 MB**  | File skipped with a warning; other packs still load.                   |
+| Prompt file over **512 KB** | That assistant is skipped, same as an unreadable prompt.               |
+| Two files, same `pack` name | The first (alphabetically) wins; the second is skipped with a warning. |
+
+Two files declaring the same `pack` name would share one `assistantPacks.applied` entry and
+one id namespace, so the second would quietly overwrite the first's rows on the next version
+bump. Rename one of them.
 
 ## Sample
 
