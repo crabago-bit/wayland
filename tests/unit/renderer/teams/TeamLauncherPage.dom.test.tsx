@@ -247,7 +247,10 @@ describe('TeamLauncherPage', () => {
       expect(screen.queryByTestId('launcher-standing-badge')).not.toBeNull();
     });
 
-    it('does not show the goal text-box on pre-configured', async () => {
+    // A pre-configured launcher shows the goal box only when it authored a
+    // kickoff prefill to seed it with (covered in
+    // TeamLauncherPage.kickoffPrefill.dom.test.tsx). This launcher has none.
+    it('does not show the goal text-box on a pre-configured launcher with no kickoff', async () => {
       renderPreconfigured('marketing-agency');
       await waitFor(() => screen.getByTestId('launcher-roster-card'));
       expect(screen.queryByTestId('launcher-goal-card')).toBeNull();

@@ -66,6 +66,7 @@
     "specialistNotFound": "(especialista ausente)",
     "backendPickerPlaceholder": "Backend",
     "goalLabel": "Descreva o que você está fazendo - eu sugiro um elenco",
+    "kickoffLabel": "[TODO:translate] Kickoff brief - edit it before you launch",
     "goalPlaceholder": "ex.: Estamos lançando um funil de livro pago e precisamos de uma pequena equipe para entregá-lo em duas semanas.",
     "suggestCta": "Sugerir",
     "suggestSuccess": "Elenco sugerido",

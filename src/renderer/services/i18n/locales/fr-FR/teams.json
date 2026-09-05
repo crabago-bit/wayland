@@ -66,6 +66,7 @@
     "specialistNotFound": "(spécialiste manquant)",
     "backendPickerPlaceholder": "Backend",
     "goalLabel": "Décrivez ce que vous faites - je vous suggérerai un effectif",
+    "kickoffLabel": "[TODO:translate] Kickoff brief - edit it before you launch",
     "goalPlaceholder": "ex. Nous lançons un tunnel de vente de livre payant et avons besoin d'une petite équipe pour le livrer en deux semaines.",
     "suggestCta": "Suggérer",
     "suggestSuccess": "Effectif suggéré",

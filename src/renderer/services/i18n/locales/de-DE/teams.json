@@ -66,6 +66,7 @@
     "specialistNotFound": "(Spezialist fehlt)",
     "backendPickerPlaceholder": "Backend",
     "goalLabel": "Beschreibe, was du vorhast - ich schlage eine Aufstellung vor",
+    "kickoffLabel": "[TODO:translate] Kickoff brief - edit it before you launch",
     "goalPlaceholder": "z. B. Wir starten einen kostenpflichtigen Buch-Funnel und brauchen ein kleines Team, das ihn in zwei Wochen liefert.",
     "suggestCta": "Vorschlagen",
     "suggestSuccess": "Aufstellung vorgeschlagen",

@@ -11,9 +11,11 @@
  *   { name, leader, teammates, goalText? }
  *
  * Pre-configured load reads the bundle launcher's `_teammates` array,
- * promotes the first specialist to leader and the remainder to teammates.
+ * promotes the first specialist to leader and the remainder to teammates, and
+ * seeds `goalText` from the launcher's first kickoff `prefill` (see
+ * `launcherGoalPrefill`) so an authored pipeline is shown, editable, and sent.
  * Build-my-own starts empty; the user picks a leader, adds teammates, and
- * the optional goal text-box is a placeholder for W3c.
+ * describes the goal to get a suggested roster.
  *
  * Launch CTA invokes `ipcBridge.team.create.invoke` with a single
  * `agents: TeamAgent[]` array (leader first, teammates after). The existing
@@ -37,10 +39,7 @@ import { useAuth } from '@/renderer/hooks/context/AuthContext';
 import type { AssistantListItem } from '@/renderer/pages/settings/AssistantSettings/types';
 import { isSelectableSpecialist } from '@/renderer/pages/settings/AssistantSettings/assistantUtils';
 import type { TTeam, TeamAgent } from '@/common/types/teamTypes';
-import type {
-  SuggestRosterResult,
-  SuggestSpecialist,
-} from '@process/team/suggestRoster';
+import type { SuggestRosterResult, SuggestSpecialist } from '@process/team/suggestRoster';
 import { resolveExtensionAssetUrl } from '@/renderer/utils/platform';
 import { isImageAvatar } from '@/renderer/utils/avatar';
 import AssistantIconTile from '@/renderer/pages/guid/components/AssistantIconTile';
@@ -72,6 +71,22 @@ const BUILTIN_PREFIX = 'builtin-';
 function idCandidates(raw: string): string[] {
   if (raw.startsWith(SPECIALIST_PREFIX) || raw.startsWith(BUILTIN_PREFIX)) return [raw];
   return [raw, `${BUILTIN_PREFIX}${raw}`, `${SPECIALIST_PREFIX}${raw}`];
+}
+
+/**
+ * The brief a pre-configured launcher starts with.
+ *
+ * A team launcher's first kickoff carries a `prefill` - the ordered, owner-
+ * tagged pipeline the author wrote for the leader's first turn (assistant packs
+ * render their `tasks` into exactly this, and the built-in launchers author it
+ * by hand). Nothing read it: the launcher hydrated `goalText: ''` and the
+ * pipeline died in the config record, so every pre-configured team launched
+ * onto an empty "Describe your goal" screen. Seeding the goal box from it makes
+ * the pipeline visible, editable before launch, and - because launch already
+ * posts `goalText` to the leader - the actual kickoff.
+ */
+export function launcherGoalPrefill(launcher: Pick<AssistantListItem, '_kickoffs'> | null | undefined): string {
+  return launcher?._kickoffs?.[0]?.prefill?.trim() ?? '';
 }
 
 const TeamLauncherPage: React.FC = () => {
@@ -138,8 +153,13 @@ const TeamLauncherPage: React.FC = () => {
       if (!leader) leader = entry;
       else teammates.push(entry);
     }
-    return { name: launcherName, leader, teammates, goalText: '' };
+    return { name: launcherName, leader, teammates, goalText: launcherGoalPrefill(launcher) };
   }, [isBuildMyOwn, launcher, localeKey, recommend, specialistsById, teamId]);
+
+  // Whether the goal box is on screen is decided by the launcher, not by the
+  // live value - otherwise clearing the prefilled text would make the box the
+  // user is typing in disappear mid-edit.
+  const hasGoalBox = isBuildMyOwn || initialState.goalText.length > 0;
 
   const [state, setState] = useState<LauncherState>(initialState);
   // Re-hydrate state when the bundle resolves async on cold start. We only
@@ -280,9 +300,7 @@ const TeamLauncherPage: React.FC = () => {
       })) as SuggestRosterResult & { __bridgeError?: boolean; message?: string };
 
       if (result && result.__bridgeError) {
-        Message.error(
-          result.message ?? t('teams.launcher.suggestError', { defaultValue: 'Failed to suggest roster' })
-        );
+        Message.error(result.message ?? t('teams.launcher.suggestError', { defaultValue: 'Failed to suggest roster' }));
         return;
       }
 
@@ -321,9 +339,7 @@ const TeamLauncherPage: React.FC = () => {
     if (launchingRef.current) return;
     const trimmedName = state.name.trim();
     if (!trimmedName) {
-      Message.warning(
-        t('teams.launcher.nameRequired', { defaultValue: 'Please enter a team name' })
-      );
+      Message.warning(t('teams.launcher.nameRequired', { defaultValue: 'Please enter a team name' }));
       return;
     }
     if (!state.leader) {
@@ -383,9 +399,7 @@ const TeamLauncherPage: React.FC = () => {
       })) as TTeam & { __bridgeError?: boolean; message?: string };
 
       if (team && team.__bridgeError) {
-        Message.error(
-          team.message ?? t('teams.launcher.launchError', { defaultValue: 'Failed to launch the team.' })
-        );
+        Message.error(team.message ?? t('teams.launcher.launchError', { defaultValue: 'Failed to launch the team.' }));
         resetForRetry();
         return;
       }
@@ -426,14 +440,10 @@ const TeamLauncherPage: React.FC = () => {
       : teamId || '';
   const subtitle = isBuildMyOwn
     ? t('teams.launcher.buildMyOwnSubtitle', {
-        defaultValue:
-          'Pick a leader, add teammates, choose backends. Save and reuse as your own template later.',
+        defaultValue: 'Pick a leader, add teammates, choose backends. Save and reuse as your own template later.',
       })
     : launcher
-      ? launcher.descriptionI18n?.[localeKey] ||
-        launcher.descriptionI18n?.['en-US'] ||
-        launcher.description ||
-        ''
+      ? launcher.descriptionI18n?.[localeKey] || launcher.descriptionI18n?.['en-US'] || launcher.description || ''
       : '';
 
   const headerAvatarValue = launcher?.avatar?.trim();
@@ -552,12 +562,16 @@ const TeamLauncherPage: React.FC = () => {
             onPickLeader={handleOpenPickLeader}
           />
 
-          {isBuildMyOwn && (
+          {hasGoalBox && (
             <div className={styles.goalCard} data-testid='launcher-goal-card'>
               <label className={styles.goalLabel} htmlFor='launcher-goal-input'>
-                {t('teams.launcher.goalLabel', {
-                  defaultValue: "Describe what you're doing - I'll suggest a roster",
-                })}
+                {isBuildMyOwn
+                  ? t('teams.launcher.goalLabel', {
+                      defaultValue: "Describe what you're doing - I'll suggest a roster",
+                    })
+                  : t('teams.launcher.kickoffLabel', {
+                      defaultValue: 'Kickoff brief - edit it before you launch',
+                    })}
               </label>
               <Input.TextArea
                 id='launcher-goal-input'
@@ -570,18 +584,22 @@ const TeamLauncherPage: React.FC = () => {
                 })}
                 data-testid='launcher-goal-input'
               />
-              <div className={styles.goalActions}>
-                <Button
-                  type='outline'
-                  size='small'
-                  loading={suggesting}
-                  disabled={state.goalText.trim().length === 0 || suggesting}
-                  onClick={handleSuggest}
-                  data-testid='launcher-suggest-btn'
-                >
-                  {t('teams.launcher.suggestCta', { defaultValue: 'Suggest' })}
-                </Button>
-              </div>
+              {/* Roster suggestion is a build-my-own affordance; a pre-configured
+                  launcher already has its roster and only wants the brief. */}
+              {isBuildMyOwn && (
+                <div className={styles.goalActions}>
+                  <Button
+                    type='outline'
+                    size='small'
+                    loading={suggesting}
+                    disabled={state.goalText.trim().length === 0 || suggesting}
+                    onClick={handleSuggest}
+                    data-testid='launcher-suggest-btn'
+                  >
+                    {t('teams.launcher.suggestCta', { defaultValue: 'Suggest' })}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 
