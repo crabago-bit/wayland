@@ -41,6 +41,7 @@ import { AcpConnection } from './AcpConnection';
 import { AcpApprovalStore, createAcpApprovalKey } from './ApprovalStore';
 import { CLAUDE_YOLO_SESSION_MODE, CODEBUDDY_YOLO_SESSION_MODE, QWEN_YOLO_SESSION_MODE } from './constants';
 import { buildAcpModelInfo } from './modelInfo';
+import { autonomyAgentKey } from '@/common/jarvis/autonomy';
 import { resolveSpawnAutonomy } from '@process/services/jarvis/autonomySettings';
 import { buildAcpSessionMcpServers, buildTeamMcpServer, type AcpSessionMcpServer } from './mcpSessionConfig';
 import { getClaudeModelSlot } from './utils';
@@ -109,6 +110,13 @@ export interface AcpAgentConfig {
     pendingConfigOptions?: Record<string, string>;
     /** True when this session may receive the Concierge-only diagnostics MCP server. */
     allowConciergeDiag?: boolean;
+    /**
+     * Id of the user-defined or remote agent behind this session, if any.
+     * Only used to build the JARVIS autonomy key (`custom:<id>` / `remote:<id>`)
+     * so a rung set on a custom agent's card is the rung actually enforced -
+     * keying on the bare backend would collapse every custom agent onto one.
+     */
+    customAgentId?: string;
   };
   onStreamEvent: (data: IResponseMessage) => void;
   onSignalEvent?: (data: IResponseMessage) => void; // New: emit signal only, does not update UI
@@ -151,6 +159,13 @@ export class AcpAgent {
     activeMcpServers?: string[];
     /** True when this session may receive the Concierge-only diagnostics MCP server. */
     allowConciergeDiag?: boolean;
+    /**
+     * Id of the user-defined or remote agent behind this session, if any.
+     * Only used to build the JARVIS autonomy key (`custom:<id>` / `remote:<id>`)
+     * so a rung set on a custom agent's card is the rung actually enforced -
+     * keying on the bare backend would collapse every custom agent onto one.
+     */
+    customAgentId?: string;
   };
   private connection: AcpConnection;
   private adapter: AcpAdapter;
@@ -1724,7 +1739,9 @@ export class AcpAgent {
               // JARVIS autonomy ladder: the rung this agent is on plus the hard
               // floor, resolved host-side and handed to the filtering shim. The
               // agent key matches `agents.hidden` / the Agents settings page.
-              await resolveSpawnAutonomy(this.extra.backend)
+              await resolveSpawnAutonomy(
+                autonomyAgentKey({ backend: this.extra.backend, customAgentId: this.extra.customAgentId })
+              )
             )
           );
         }

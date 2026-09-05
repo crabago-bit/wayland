@@ -2038,6 +2038,10 @@ ${collectedResponses.join('\n')}`;
           // can gate the diag server (it's a builtin and would otherwise inject for
           // every assistant). Mirrors the Gemini path in GeminiAgentManager.
           allowConciergeDiag: isConciergeAssistant(data.presetAssistantId) || isConciergeAssistant(data.customAgentId),
+          // JARVIS autonomy: the id half of the agent key the rung is stored
+          // under. Without it every `custom:<id>` agent would read the bare
+          // `custom` backend's rung and the per-agent selector would be inert.
+          customAgentId: data.customAgentId,
           // Forward team MCP stdio config so AcpAgent.loadBuiltinSessionMcpServers() can inject it
           teamMcpStdioConfig: (data as unknown as Record<string, unknown>).teamMcpStdioConfig as
             | { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> }

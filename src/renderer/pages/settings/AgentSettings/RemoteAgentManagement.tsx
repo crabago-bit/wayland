@@ -12,6 +12,7 @@ import type { RemoteAgentConfig, RemoteAgentInput } from '@process/agent/remote/
 import EmojiPicker from '@/renderer/components/chat/EmojiPicker';
 import { openExternalUrl } from '@/renderer/utils/platform';
 import { getLucideIcon } from '@/renderer/utils/lucideAvatar';
+import { autonomyAgentKey } from '@/common/jarvis/autonomy';
 import { AgentRungSelect } from './AutonomyControls';
 import {
   Avatar,
@@ -545,7 +546,10 @@ const RemoteAgentManagement: React.FC = () => {
                     leaving it off this card would have left the one agent class
                     running on somebody else's machine stuck on the default rung. */}
                 <div className='mb-10px flex justify-center'>
-                  <AgentRungSelect agentKey={`remote:${agent.id}`} compact />
+                  <AgentRungSelect
+                    agentKey={autonomyAgentKey({ backend: 'remote', customAgentId: agent.id })}
+                    compact
+                  />
                 </div>
 
                 <div className='mt-auto grid grid-cols-2 gap-8px'>

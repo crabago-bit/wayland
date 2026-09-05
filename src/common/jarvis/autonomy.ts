@@ -328,6 +328,23 @@ export function isWriteTool(toolName: string): boolean {
 }
 
 /**
+ * The key one agent's rung is stored under, in the SAME format the renderer's
+ * `getAgentKey` produces: `custom:<id>` for a user-defined agent, `remote:<id>`
+ * for a paired remote one, and the bare backend for everything else.
+ *
+ * It lives here rather than next to `getAgentKey` because the HOST has to build
+ * the identical string when it spawns the tool-filter shim, and `getAgentKey`
+ * is renderer-only. Two spellings of the same identity would mean the rung a
+ * user picks on a custom agent's card is written under one key and read under
+ * another - the control would appear to work and enforce nothing.
+ */
+export function autonomyAgentKey(agent: { backend: string; customAgentId?: string }): string {
+  if (agent.backend === 'remote' && agent.customAgentId) return `remote:${agent.customAgentId}`;
+  if (agent.customAgentId) return `custom:${agent.customAgentId}`;
+  return agent.backend;
+}
+
+/**
  * The connector half of an engine-namespaced tool name (`server__tool`).
  * Returns `''` when the name carries no namespace - the shim logs the empty
  * string rather than guessing a connector it was never told.
