@@ -155,6 +155,34 @@ export async function chatgptRefreshToken(): Promise<ChatGptOAuthResult> {
  * returns the result, or `null` to fall through to the full PKCE flow. Mirrors
  * the xAI `tryReuseGrokCli()` path.
  */
+/**
+ * Headless reuse of the Codex CLI login (`~/.codex/auth.json`) with NO browser
+ * and NO loopback listener - for the WebUI server, where `chatgpt.auth.login`
+ * is remote-denied and there is no desktop to click. Registers the
+ * `chatgpt-subscription` provider from the CLI bundle; when the CLI access
+ * token has expired it is refreshed with the CLI's refresh token first, and
+ * the refreshed bundle is written back so the Codex CLI stays in sync.
+ * Returns `null` when no usable CLI login exists (file absent, no account id,
+ * or expired with no refresh token); never throws, never opens anything.
+ */
+export async function chatgptReuseCliLogin(): Promise<ChatGptOAuthResult | null> {
+  try {
+    const bundle = await readCodexAuthFile();
+    if (!bundle || !bundle.accountId) return null;
+    if (!isTokenExpired(bundle)) return await registerChatGptSubscription(bundle);
+    if (!bundle.refreshToken) return null;
+
+    const tokens = await refreshAccessToken(bundle.refreshToken, resolveClientId());
+    if ('error' in tokens) return { ok: false, error: tokens.error };
+    if (!tokens.refreshToken) tokens.refreshToken = bundle.refreshToken;
+    if (!tokens.accountId) tokens.accountId = bundle.accountId;
+    if (!tokens.planType) tokens.planType = bundle.planType;
+    return await registerChatGptSubscription(tokens);
+  } catch {
+    return { ok: false, error: 'unknown' };
+  }
+}
+
 async function tryReuseCodexCli(): Promise<ChatGptOAuthResult | null> {
   const bundle = await readCodexAuthFile();
   if (!bundle || !bundle.accountId) return null;
