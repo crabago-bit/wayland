@@ -141,11 +141,18 @@ export function detectHttps(req?: Request): boolean {
     return true;
   }
 
-  if (process.env.SERVER_BASE_URL?.startsWith('https://')) {
-    return true;
+  // With a request in hand, the request's own protocol is authoritative.
+  // `req.secure` is true for a TLS-terminating trusted proxy (X-Forwarded-Proto
+  // honoured via setupTrustProxy) and false for a direct plain-HTTP connection
+  // such as an operator listener on the tailnet (WAYLAND_EXTRA_LISTEN). Issuing a
+  // `Secure` cookie on that plain-HTTP origin would make the browser drop it and
+  // every authenticated call after login would 401. The SERVER_BASE_URL hint
+  // below only applies when no request context exists.
+  if (req) {
+    return Boolean(req.secure);
   }
 
-  if (req?.secure) {
+  if (process.env.SERVER_BASE_URL?.startsWith('https://')) {
     return true;
   }
 
