@@ -21,6 +21,7 @@ import {
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { PACKAGED_CONSTITUTION_FS_AUTHORITY } from './constitutionFsAuthority.generated';
 import { fileSyncFlags } from '@process/utils/durabilitySync';
 
@@ -88,9 +89,23 @@ export function createTestOnlyConstitutionFsBinaryAuthority(
   return Object.freeze({ ...input, [TRUSTED_AUTHORITY]: true as const });
 }
 
+/**
+ * Electron sets `process.resourcesPath`; the headless WebUI server (bun, no
+ * Electron) does not. There the packaged helper lives under the project-root
+ * `resources/` directory, exactly like the bundled wayland-core binary
+ * (see `agent/wcore/binaryResolver.ts`, step 2). Same authority check applies:
+ * the embedded sha256 must still match, so a stray binary cannot be picked up.
+ */
+function packagedResourcesPath(): string | undefined {
+  const fromElectron = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  if (fromElectron) return fromElectron;
+  const devRoot = path.join(process.cwd(), 'resources');
+  return existsSync(devRoot) ? devRoot : undefined;
+}
+
 /** Resolves the exact helper whose independently generated authority is compiled inside the ASAR. */
 export function verifyPackagedConstitutionFsBinary(
-  resourcesPath = process.resourcesPath
+  resourcesPath = packagedResourcesPath()
 ): VerifiedConstitutionFsBinary {
   const embedded = PACKAGED_CONSTITUTION_FS_AUTHORITY as PackagedConstitutionFsAuthority;
   if (!embedded.supported || embedded.platform !== process.platform || embedded.arch !== process.arch) {
@@ -398,7 +413,7 @@ export function withHeldVerifiedConstitutionFsBinary<T>(
 /** Resolves only the packaged helper location; development callers must pass explicit verified paths. */
 export function resolvePackagedConstitutionFsBinary(
   authority: TrustedConstitutionFsBinaryAuthority,
-  resourcesPath = process.resourcesPath
+  resourcesPath = packagedResourcesPath()
 ): VerifiedConstitutionFsBinary {
   if (!resourcesPath) {
     throw new ConstitutionFsBinaryError('CONSTITUTION_FS_BINARY_MISSING', 'Electron resources path is unavailable.');
