@@ -121,6 +121,18 @@ async function main(): Promise<void> {
     console.error('[server] Env-key import failed:', error);
   }
 
+  // Reuse headless CLI logins (Codex -> chatgpt-subscription, Grok -> xai) into
+  // the model registry. The native OAuth buttons are remote-denied in the WebUI,
+  // so on a server this is the only way those tiles ever connect. Same guard as
+  // the env-key import: never blocks boot, never logs token values.
+  try {
+    const { importCliOAuthOnBoot, scheduleCliOAuthRefresh } = await import('./process/utils/importCliOAuthOnBoot');
+    await importCliOAuthOnBoot();
+    scheduleCliOAuthRefresh();
+  } catch (error) {
+    console.error('[server] CLI OAuth reuse failed:', error);
+  }
+
   // Start the WebServer
   const instance = await startWebServerWithInstance(PORT, ALLOW_REMOTE);
   // Expose to the top-level shutdown handler

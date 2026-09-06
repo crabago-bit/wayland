@@ -178,6 +178,44 @@ function grokAuthJsonPath(): string {
  * return a success result. Returns `null` when the file is missing, malformed,
  * or its token is expired (so the caller proceeds to the browser flow).
  */
+/**
+ * Headless reuse of the Grok CLI login (`~/.grok/auth.json`) with NO browser
+ * and NO loopback listener - for the WebUI server, where `xai.auth.login` is
+ * remote-denied. Registers the `xai` provider from the CLI bundle; when the
+ * CLI access token has expired it is refreshed with the CLI's refresh token
+ * first (the engine store is rewritten by `registerTokens`). Returns `null`
+ * when no usable CLI login exists; never throws, never opens anything.
+ */
+export async function xaiReuseCliLogin(): Promise<XaiOAuthResult | null> {
+  try {
+    const reused = await tryReuseGrokCli();
+    if (reused) return reused;
+
+    let raw: string;
+    try {
+      raw = await fs.readFile(grokAuthJsonPath(), 'utf-8');
+    } catch {
+      return null;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+    const tokens = parseGrokAuthJson(parsed);
+    if (!tokens?.refreshToken) return null;
+
+    const endpoints = await fetchXaiEndpoints();
+    const fresh = await refreshAccessToken(endpoints.tokenUrl, tokens.refreshToken, resolveClientId());
+    if ('error' in fresh) return { ok: false, error: fresh.error };
+    if (!fresh.refreshToken) fresh.refreshToken = tokens.refreshToken;
+    return await registerTokens(fresh, true);
+  } catch {
+    return { ok: false, error: 'unknown' };
+  }
+}
+
 async function tryReuseGrokCli(): Promise<XaiOAuthResult | null> {
   let raw: string;
   try {
