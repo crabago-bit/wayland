@@ -67,6 +67,7 @@ const shutdown = (signal: string) => {
         if (serverInstance) {
           serverInstance.wss.clients.forEach((ws) => ws.terminate());
           serverInstance.wss.close();
+          for (const extra of serverInstance.extraServers ?? []) extra.close();
           serverInstance.server.close(() => process.exit(0));
         }
       } catch (e) {
