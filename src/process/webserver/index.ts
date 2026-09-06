@@ -246,6 +246,81 @@ export interface WebServerInstance {
   wss: import('ws').WebSocketServer;
   port: number;
   allowRemote: boolean;
+  /** Additional operator-network listeners opened from WAYLAND_EXTRA_LISTEN (see startExtraListeners). */
+  extraServers: import('http').Server[];
+}
+
+/**
+ * Operator-network bind allowlist for WAYLAND_EXTRA_LISTEN. Only loopback and
+ * the Tailscale CGNAT range (100.64.0.0/10) may be bound: a tailnet peer landing
+ * on a tailnet-bound local address is what `classifyClientTrust` treats as
+ * operator when a trusted proxy is declared (Traefik on loopback). Anything
+ * else is refused here so this env var can never expose a public interface.
+ */
+export function isAllowedExtraListenAddress(raw: string): boolean {
+  const ip = raw.trim();
+  if (!ip) return false;
+  if (ip === '127.0.0.1' || ip === '::1') return true;
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
+  if (!m) return false;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  return a === 100 && b >= 64 && b <= 127;
+}
+
+/** Parse WAYLAND_EXTRA_LISTEN (comma-separated) into {allowed, refused}. */
+export function parseExtraListen(value: string | undefined): { allowed: string[]; refused: string[] } {
+  const allowed: string[] = [];
+  const refused: string[] = [];
+  for (const part of (value ?? '').split(',')) {
+    const ip = part.trim();
+    if (!ip) continue;
+    (isAllowedExtraListenAddress(ip) ? allowed : refused).push(ip);
+  }
+  return { allowed, refused };
+}
+
+/**
+ * Open additional listeners on operator-network addresses, sharing the same
+ * Express app and WebSocket upgrade handler as the main listener. Bind failures
+ * (e.g. Tailscale not up yet at boot) warn and retry once after 30 s; they never
+ * affect the main listener. Deliberately NOT routed through announceLanExposure:
+ * a tailnet bind is not LAN exposure, and the allowlist above guarantees that.
+ */
+function startExtraListeners(
+  app: express.Express,
+  handleUpgrade: (req: import('http').IncomingMessage, socket: import('stream').Duplex, head: Buffer) => void,
+  port: number
+): import('http').Server[] {
+  const { allowed, refused } = parseExtraListen(process.env.WAYLAND_EXTRA_LISTEN);
+  for (const ip of refused) {
+    console.warn(
+      `[WebUI] WAYLAND_EXTRA_LISTEN refused ${ip}: only loopback or Tailscale (100.64.0.0/10) addresses may be bound.`
+    );
+  }
+  const servers: import('http').Server[] = [];
+  for (const ip of allowed) {
+    const extra = createServer(app);
+    extra.on('upgrade', handleUpgrade);
+    let retried = false;
+    const tryListen = () => {
+      extra.listen(port, ip, () => {
+        console.log(`[WebUI] Operator listener bound at http://${ip}:${port} (WAYLAND_EXTRA_LISTEN)`);
+      });
+    };
+    extra.on('error', (err: NodeJS.ErrnoException) => {
+      if (!retried && (err.code === 'EADDRNOTAVAIL' || err.code === 'EADDRINUSE')) {
+        retried = true;
+        console.warn(`[WebUI] Extra listener ${ip}:${port} failed (${err.code}); retrying in 30 s`);
+        setTimeout(tryListen, 30_000).unref();
+        return;
+      }
+      console.warn(`[WebUI] Extra listener ${ip}:${port} disabled: ${err.message}`);
+    });
+    tryListen();
+    servers.push(extra);
+  }
+  return servers;
 }
 
 /**
@@ -270,7 +345,7 @@ export async function startWebServerWithInstance(port: number, allowRemote = fal
   // enter an infinite reconnect loop and never finish loading.
   const wss = new WebSocketServer({ noServer: true });
   const isDevMode = resolveRendererPath() === null;
-  server.on('upgrade', (req, socket, head) => {
+  const handleUpgrade = (req: import('http').IncomingMessage, socket: import('stream').Duplex, head: Buffer) => {
     const protocolHeader = req.headers['sec-websocket-protocol'];
     const protocols = (Array.isArray(protocolHeader) ? protocolHeader.join(',') : protocolHeader || '')
       .split(',')
@@ -309,7 +384,8 @@ export async function startWebServerWithInstance(port: number, allowRemote = fal
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit('connection', ws, req);
     });
-  });
+  };
+  server.on('upgrade', handleUpgrade);
 
   // Initialize default admin account
   const initialCredentials = await initializeDefaultAdmin();
@@ -389,11 +465,13 @@ export async function startWebServerWithInstance(port: number, allowRemote = fal
       // Initialize WebSocket adapter
       initWebAdapter(wss);
 
+      const extraServers = startExtraListeners(app, handleUpgrade, boundPort);
       resolve({
         server,
         wss,
         port: boundPort,
         allowRemote,
+        extraServers,
       });
     });
 
