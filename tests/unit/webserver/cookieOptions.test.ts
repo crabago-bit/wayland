@@ -80,6 +80,20 @@ describe('getCookieOptions', () => {
     });
   });
 
+  it('issues a plain cookie for a direct plain-HTTP request even when SERVER_BASE_URL is https', () => {
+    // An operator listener on the tailnet (WAYLAND_EXTRA_LISTEN) serves plain HTTP
+    // beside a TLS-terminating proxy. The request's own protocol must win, or the
+    // browser drops the Secure cookie and every call after login returns 401.
+    process.env.SERVER_BASE_URL = 'https://aion.example.com';
+    const req = buildRequest({ secure: false });
+
+    expect(getCookieOptions(req)).toEqual({
+      httpOnly: true,
+      secure: false,
+      sameSite: 'strict',
+    });
+  });
+
   it('honours req.secure for deployments that enable Express trust proxy', () => {
     const req = buildRequest({ secure: true });
 
