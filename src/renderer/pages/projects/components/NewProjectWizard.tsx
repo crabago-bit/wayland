@@ -11,6 +11,7 @@ import { Check, FolderOpen, Sparkles, X } from 'lucide-react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import KnowledgeWizard from './KnowledgeWizard';
+import { isElectronDesktop } from '@renderer/utils/platform';
 
 const PROJECT_COLORS = ['#FF6A00', '#3B82F6', '#10B981', '#8B5CF6', '#EC4899', '#F59E0B'];
 
@@ -48,6 +49,8 @@ const NewProjectWizard: React.FC<{
     setWizardOpen(false);
     setSubmitting(false);
   }, [visible]);
+
+  const isDesktop = isElectronDesktop();
 
   const chooseFolder = useCallback(() => {
     ipcBridge.dialog.showOpen
@@ -145,7 +148,19 @@ const NewProjectWizard: React.FC<{
                   {t('projects.modal.workspaceLabel')}{' '}
                   <span className='text-t-tertiary font-400'>{t('projects.newWizard.workspaceOptional')}</span>
                 </span>
-                {workspace ? (
+                {!isDesktop ? (
+                  // WebUI has no native folder dialog (dialogBridge is Electron-only,
+                  // see initBridgeStandalone), so the browser types the absolute path
+                  // on the host instead - the same fallback WorkspaceFolderSelect uses.
+                  // Deliberately NOT swapped for the chip once non-empty: this input
+                  // is being typed into, and replacing it mid-keystroke would strand
+                  // the caret after the first character.
+                  <Input
+                    value={workspace}
+                    onChange={setWorkspace}
+                    placeholder={t('projects.modal.workspacePathPlaceholder', '/absolute/path/on/the/server')}
+                  />
+                ) : workspace ? (
                   <div className='flex items-center gap-8px bg-fill-1 rd-8px px-12px py-8px border border-solid border-2'>
                     <FolderOpen size={14} className='flex-shrink-0 text-t-secondary' />
                     <span className='text-13px truncate flex-1' title={workspace}>
@@ -205,7 +220,10 @@ const NewProjectWizard: React.FC<{
         </div>
 
         <div className='flex items-center justify-between gap-10px pt-4px'>
-          <span className='text-12px text-t-tertiary cursor-pointer underline underline-offset-2 hover:text-t-secondary' onClick={() => void finish()}>
+          <span
+            className='text-12px text-t-tertiary cursor-pointer underline underline-offset-2 hover:text-t-secondary'
+            onClick={() => void finish()}
+          >
             {t('projects.newWizard.skip')}
           </span>
           <div className='flex items-center gap-8px'>

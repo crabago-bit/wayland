@@ -7,6 +7,7 @@
 import { ipcBridge } from '@/common';
 import type { IProject, ICreateProjectParams } from '@/common/types/project';
 import ModalHOC from '@/renderer/utils/ui/ModalHOC';
+import { isElectronDesktop } from '@renderer/utils/platform';
 import WaylandModal from '@/renderer/components/base/WaylandModal';
 import { Button, Input } from '@arco-design/web-react';
 import { FolderOpen, X } from 'lucide-react';
@@ -45,6 +46,8 @@ const CreateProjectModal = ModalHOC<CreateProjectModalProps>(({ modalProps, moda
     setWorkspace(project?.workspace ?? '');
     setIconColor(project?.iconColor ?? PROJECT_COLORS[0]);
   }, [modalProps.visible, project]);
+
+  const isDesktop = isElectronDesktop();
 
   const chooseFolder = () => {
     ipcBridge.dialog.showOpen
@@ -106,7 +109,19 @@ const CreateProjectModal = ModalHOC<CreateProjectModalProps>(({ modalProps, moda
 
         <div className='space-y-6px'>
           <div className='text-13px font-500 text-t-secondary'>{t('projects.modal.workspaceLabel')}</div>
-          {workspace ? (
+          {!isDesktop ? (
+            // WebUI has no native folder dialog (dialogBridge is Electron-only,
+            // see initBridgeStandalone), so the browser types the absolute path
+            // on the host instead - the same fallback WorkspaceFolderSelect uses.
+            // Deliberately NOT swapped for the chip once non-empty: this input is
+            // being typed into, and replacing it mid-keystroke would strand the
+            // caret after the first character.
+            <Input
+              value={workspace}
+              onChange={setWorkspace}
+              placeholder={t('projects.modal.workspacePathPlaceholder', '/absolute/path/on/the/server')}
+            />
+          ) : workspace ? (
             <div className='flex items-center gap-8px bg-fill-1 rd-8px px-12px py-8px border border-solid border-2'>
               <FolderOpen size={14} className='flex-shrink-0 text-t-secondary' />
               <span className='text-13px truncate flex-1' title={workspace}>

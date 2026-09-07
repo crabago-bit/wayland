@@ -2385,6 +2385,7 @@ export type I18nKey =
   | 'projects.modal.namePlaceholder'
   | 'projects.modal.workspaceHint'
   | 'projects.modal.workspaceLabel'
+  | 'projects.modal.workspacePathPlaceholder'
   | 'projects.newWizard.basicsSub'
   | 'projects.newWizard.basicsTitle'
   | 'projects.newWizard.create'

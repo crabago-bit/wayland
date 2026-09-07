@@ -30,7 +30,8 @@
     "workspaceLabel": "Workspace-Ordner",
     "chooseFolder": "Ordner wählen",
     "workspaceHint": "Optional. Chats in diesem Projekt starten hier, und es wird ein .wayland/-Wissensordner erstellt, damit alle Chats denselben Kontext teilen.",
-    "colorLabel": "Farbe"
+    "colorLabel": "Farbe",
+    "workspacePathPlaceholder": "[TODO:translate] /absolute/path/on/the/server"
   },
   "workspace": {
     "loading": "Projekt wird geladen …",

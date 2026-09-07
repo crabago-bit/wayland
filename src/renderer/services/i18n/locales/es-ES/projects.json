@@ -30,7 +30,8 @@
     "workspaceLabel": "Carpeta del espacio de trabajo",
     "chooseFolder": "Elegir carpeta",
     "workspaceHint": "Opcional. Los chats de este proyecto comienzan aquí, y se crea una carpeta de conocimiento .wayland/ para que todos los chats compartan el mismo contexto.",
-    "colorLabel": "Color"
+    "colorLabel": "Color",
+    "workspacePathPlaceholder": "[TODO:translate] /absolute/path/on/the/server"
   },
   "workspace": {
     "loading": "Cargando proyecto...",
