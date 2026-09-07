@@ -30,7 +30,8 @@
     "workspaceLabel": "Pasta do workspace",
     "chooseFolder": "Escolher pasta",
     "workspaceHint": "Opcional. As conversas deste projeto começam aqui, e uma pasta de conhecimento .wayland/ é criada para que todas as conversas compartilhem o mesmo contexto.",
-    "colorLabel": "Cor"
+    "colorLabel": "Cor",
+    "workspacePathPlaceholder": "[TODO:translate] /absolute/path/on/the/server"
   },
   "workspace": {
     "loading": "Carregando projeto...",

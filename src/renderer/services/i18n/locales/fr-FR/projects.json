@@ -30,7 +30,8 @@
     "workspaceLabel": "Dossier de l'espace de travail",
     "chooseFolder": "Choisir un dossier",
     "workspaceHint": "Facultatif. Les conversations de ce projet démarrent ici, et un dossier de connaissances .wayland/ est créé pour que chaque conversation partage le même contexte.",
-    "colorLabel": "Couleur"
+    "colorLabel": "Couleur",
+    "workspacePathPlaceholder": "[TODO:translate] /absolute/path/on/the/server"
   },
   "workspace": {
     "loading": "Chargement du projet...",

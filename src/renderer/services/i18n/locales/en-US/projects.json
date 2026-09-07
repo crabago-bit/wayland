@@ -30,7 +30,8 @@
     "workspaceLabel": "Workspace folder",
     "chooseFolder": "Choose folder",
     "workspaceHint": "Optional. Chats in this project start here, and a .wayland/ knowledge folder is created so every chat shares the same context.",
-    "colorLabel": "Color"
+    "colorLabel": "Color",
+    "workspacePathPlaceholder": "/absolute/path/on/the/server"
   },
   "workspace": {
     "loading": "Loading project...",
