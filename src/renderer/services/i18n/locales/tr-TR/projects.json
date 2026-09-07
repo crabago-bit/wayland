@@ -82,7 +82,8 @@
     "saveFailed": "Something went wrong. Please try again.",
     "deleteFailed": "Could not delete the project.",
     "chatAdded": "Added to project",
-    "chatRemoved": "Removed from project"
+    "chatRemoved": "Removed from project",
+    "instructionsFailed": "[TODO:translate] Project saved, but its instructions could not be written. Check the workspace folder path."
   },
   "knowledge": {
     "title": "Project knowledge",

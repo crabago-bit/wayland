@@ -64,7 +64,17 @@ const ProjectsListPage: React.FC = () => {
         try {
           await ipcBridge.project.writeKnowledge.invoke({ id: created.id, kind: 'context', content: instructions });
         } catch (err) {
+          // The instructions live in `<workspace>/.wayland/`, so this is where a
+          // workspace the server cannot write (a mistyped absolute path, a folder
+          // that does not exist) first shows up. Swallowing it created a project
+          // whose instructions silently vanished; say so instead.
           console.error('[ProjectsListPage] write instructions failed:', err);
+          Message.error(
+            t(
+              'projects.toast.instructionsFailed',
+              'Project saved, but its instructions could not be written. Check the workspace folder path.'
+            )
+          );
         }
       }
       Message.success(t('projects.toast.created'));

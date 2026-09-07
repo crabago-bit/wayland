@@ -129,7 +129,8 @@
     "saveFailed": "Une erreur s'est produite. Veuillez réessayer.",
     "deleteFailed": "Impossible de supprimer le projet.",
     "chatAdded": "Ajouté au projet",
-    "chatRemoved": "Retiré du projet"
+    "chatRemoved": "Retiré du projet",
+    "instructionsFailed": "[TODO:translate] Project saved, but its instructions could not be written. Check the workspace folder path."
   },
   "settings": {
     "title": "Paramètres du projet",
