@@ -2455,6 +2455,7 @@ export type I18nKey =
   | 'projects.toast.created'
   | 'projects.toast.deleteFailed'
   | 'projects.toast.deleted'
+  | 'projects.toast.instructionsFailed'
   | 'projects.toast.saveFailed'
   | 'projects.toast.updated'
   | 'projects.wizard.audience.customers'

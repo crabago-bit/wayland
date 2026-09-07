@@ -129,7 +129,8 @@
     "saveFailed": "Algo deu errado. Tente novamente.",
     "deleteFailed": "Não foi possível excluir o projeto.",
     "chatAdded": "Adicionado ao projeto",
-    "chatRemoved": "Removido do projeto"
+    "chatRemoved": "Removido do projeto",
+    "instructionsFailed": "[TODO:translate] Project saved, but its instructions could not be written. Check the workspace folder path."
   },
   "settings": {
     "title": "Configurações do projeto",

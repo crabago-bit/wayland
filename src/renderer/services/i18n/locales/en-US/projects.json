@@ -183,7 +183,8 @@
     "saveFailed": "Something went wrong. Please try again.",
     "deleteFailed": "Could not delete the project.",
     "chatAdded": "Added to project",
-    "chatRemoved": "Removed from project"
+    "chatRemoved": "Removed from project",
+    "instructionsFailed": "Project saved, but its instructions could not be written. Check the workspace folder path."
   },
   "settings": {
     "title": "Project settings",
