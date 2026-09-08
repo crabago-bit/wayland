@@ -195,11 +195,16 @@ export function selectCapabilityReadiness(
       return unavailable(context.capabilityId, 'Capability evidence is stale or from the future.');
     if (entry.dependencies.some((dependency) => dependency.status !== 'ready'))
       return unavailable(context.capabilityId, 'A capability dependency is unavailable.');
+    // The binary digest binds every target. The publisher digest binds only the
+    // targets that declare one (macOS, whose assets are Developer ID signed);
+    // demanding it unconditionally left every target without a declared
+    // publisher digest permanently unavailable even with a checksum-verified
+    // artifact in hand.
     if (
       entry.status !== 'unavailable' &&
       (entry.artifact?.binarySha256 !== platform.binarySha256 ||
-        !platform.publisherProofSha256 ||
-        entry.artifact.publisherProof !== platform.publisherProofSha256)
+        (platform.publisherProofSha256 !== undefined &&
+          entry.artifact.publisherProof !== platform.publisherProofSha256))
     )
       return unavailable(context.capabilityId, 'Capability artifact is not bound to the target manifest digest.');
   }

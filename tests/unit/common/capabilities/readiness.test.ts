@@ -110,6 +110,42 @@ describe('shared capability readiness selector', () => {
     ).toBe('unavailable');
   });
 
+  it('resolves a target that declares no pinned publisher proof', () => {
+    const unsigned = OFFICECLI_CAPABILITY.platforms.find((entry) => !entry.publisherProofSha256)!;
+    const unsignedContext = { ...context, platform: unsigned.platform, arch: unsigned.arch };
+    const state = selectCapabilityReadiness(
+      WAYLAND_CAPABILITY_MANIFEST,
+      [
+        evidence({
+          platform: unsigned.platform,
+          arch: unsigned.arch,
+          correlationId: unsignedContext.correlationId,
+          artifact: { binarySha256: unsigned.binarySha256, publisherProof: `sha256:${'2'.repeat(64)}` },
+        }),
+      ],
+      unsignedContext
+    ).state;
+    expect(state).toBe('ready');
+  });
+
+  it('still binds the binary digest on a target that declares no publisher proof', () => {
+    const unsigned = OFFICECLI_CAPABILITY.platforms.find((entry) => !entry.publisherProofSha256)!;
+    const unsignedContext = { ...context, platform: unsigned.platform, arch: unsigned.arch };
+    expect(
+      selectCapabilityReadiness(
+        WAYLAND_CAPABILITY_MANIFEST,
+        [
+          evidence({
+            platform: unsigned.platform,
+            arch: unsigned.arch,
+            artifact: { binarySha256: `sha256:${'3'.repeat(64)}`, publisherProof: `sha256:${'2'.repeat(64)}` },
+          }),
+        ],
+        unsignedContext
+      ).state
+    ).toBe('unavailable');
+  });
+
   it('uses a conservative intersection across producers', () => {
     const narrowed = evidence({
       evidenceId: 'officecli:e2',

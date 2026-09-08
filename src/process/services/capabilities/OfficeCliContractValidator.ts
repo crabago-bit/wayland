@@ -8,6 +8,15 @@ export const REQUIRED_OFFICECLI_AUTHORING_COMMANDS = officeCliContract.requiredC
 
 const DARWIN_TEAM_ID = '52JQX2HUSC';
 const DARWIN_ENTITLEMENTS = ['com.apple.security.cs.allow-jit'];
+/**
+ * The exact attestation `scripts/prepareOfficeCli.js` records for a target
+ * whose publisher signature cannot be inspected on the build host. Only a
+ * target that declares no pinned publisher digest may carry it.
+ */
+const UNSIGNED_TARGET_PUBLISHER_PROOF = {
+  contract: 'not-verifiable-on-build-host',
+  reason: 'not-macos-build-host',
+} as const;
 const OFFICECLI_MANIFEST_REQUIRED_KEYS = [
   'contract',
   'version',
@@ -86,8 +95,7 @@ function hasExactManifestShape(value: Record<string, unknown>): boolean {
   );
 }
 
-function validPublisherProof(platform: string, proof: unknown): boolean {
-  if (platform !== 'darwin' || !isRecord(proof)) return false;
+function validDarwinPublisherProof(proof: Record<string, unknown>): boolean {
   return (
     exactKeys(proof, ['contract', 'teamIdentifier', 'hardenedRuntime', 'secureTimestamp', 'entitlements']) &&
     proof.contract === 'apple-developer-id/1.0' &&
@@ -96,6 +104,41 @@ function validPublisherProof(platform: string, proof: unknown): boolean {
     proof.secureTimestamp === true &&
     Array.isArray(proof.entitlements) &&
     canonical([...proof.entitlements].toSorted()) === canonical(DARWIN_ENTITLEMENTS)
+  );
+}
+
+/**
+ * Decide the publisher evidence a target must carry.
+ *
+ * A target that declares `publisherProofSha256` (macOS today) is only accepted
+ * with the exact Apple Developer ID proof `prepareOfficeCli` reads back from
+ * `codesign`, and that proof must digest to the value pinned in the shared
+ * capability manifest - a build host that could not inspect the signature never
+ * satisfies it.
+ *
+ * Windows and Linux release assets carry no publisher signature to inspect, so
+ * those targets declare no pinned digest and the packaging gate records the
+ * exact `not-verifiable-on-build-host` attestation instead. Accepting only that
+ * literal attestation keeps them fail-closed - a forged Apple proof on a
+ * non-macOS target is still rejected - while letting a checksum-verified
+ * runtime actually resolve. Requiring the macOS proof everywhere made the
+ * bundled binary permanently unresolvable on Windows and Linux, so every
+ * authoring call there fell back to OFFICECLI_MISSING_RUNTIME_MESSAGE and no
+ * reinstall could clear it.
+ */
+function validPublisherProof(target: CapabilityPlatform, proof: unknown): boolean {
+  if (!isRecord(proof)) return false;
+  if (!target.publisherProofSha256) {
+    return (
+      exactKeys(proof, ['contract', 'reason']) &&
+      proof.contract === UNSIGNED_TARGET_PUBLISHER_PROOF.contract &&
+      proof.reason === UNSIGNED_TARGET_PUBLISHER_PROOF.reason
+    );
+  }
+  return (
+    target.platform === 'darwin' &&
+    validDarwinPublisherProof(proof) &&
+    digestOfficeCliEvidence(canonical(proof)) === target.publisherProofSha256
   );
 }
 
@@ -175,7 +218,7 @@ export function classifyBundledOfficeCli(
   if (manifest.source !== 'verified-cache' && manifest.source !== exactReleaseUrl) {
     return { available: false, reason: 'OfficeCLI source provenance is unsupported.' };
   }
-  if (!validPublisherProof(platform, manifest.publisherSignatureProof)) {
+  if (!validPublisherProof(target, manifest.publisherSignatureProof)) {
     return { available: false, reason: 'OfficeCLI publisher proof is unavailable or invalid for this target.' };
   }
   if (
