@@ -22,6 +22,16 @@ COPY . .
 COPY --from=constitution-builder /app/native/constitution-fs/target/release/wayland-constitution-fs /tmp/wayland-constitution-fs
 RUN CONSTITUTION_FS_PREBUILT_BINARY=/tmp/wayland-constitution-fs node scripts/prepareConstitutionFs.js
 
+# Stage the exact native OfficeCLI authoring runtime for this image's platform
+# and architecture. resources/bundled-officecli is gitignored (generated at
+# build time), so without this step the runtime image ships no OfficeCLI at all
+# and every Office authoring and preview path fails closed with "The verified
+# OfficeCLI runtime is missing; reinstall or update Wayland" - a message no
+# reinstall can clear, because the binary was never in the image. The script
+# checksum-pins the release asset and records its contract, smoke and build-host
+# proofs into manifest.json, exactly as the desktop packaging path does.
+RUN node scripts/prepareOfficeCli.js
+
 # Build renderer (no Electron needed) and server bundle
 RUN bun run build:renderer:web
 RUN node scripts/build-server.mjs
@@ -34,6 +44,11 @@ WORKDIR /app
 COPY --from=builder /app/dist-server ./dist-server
 COPY --from=builder /app/out/renderer ./out/renderer
 COPY --from=builder /app/resources/bundled-constitution-fs ./resources/bundled-constitution-fs
+# The verified OfficeCLI runtime plus the fail-closed shim that shadows every
+# PATH fallback. getManagedOfficeCliShimDir() throws when the shim directory is
+# absent, so both must reach the runtime image together.
+COPY --from=builder /app/resources/bundled-officecli ./resources/bundled-officecli
+COPY --from=builder /app/resources/managed-cli-shims ./resources/managed-cli-shims
 COPY package.json bun.lock ./
 COPY patches/ ./patches/
 RUN bun install --production --ignore-scripts
