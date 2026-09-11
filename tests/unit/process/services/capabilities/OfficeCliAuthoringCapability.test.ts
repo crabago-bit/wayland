@@ -470,3 +470,77 @@ describe('OfficeCLI target-exact evidence producer', () => {
     }
   });
 });
+
+const UNSIGNED_PUBLISHER = { contract: 'not-verifiable-on-build-host', reason: 'not-macos-build-host' };
+
+function targetManifest(
+  target: (typeof OFFICECLI_CAPABILITY.platforms)[number],
+  overrides: Record<string, unknown> = {}
+) {
+  return {
+    ...manifest(),
+    platform: target.platform,
+    arch: target.arch,
+    asset: target.artifact,
+    binary: target.platform === 'win32' ? 'officecli.exe' : 'officecli',
+    sha256: target.binarySha256,
+    publisherSignatureProof: target.publisherProofSha256 ? PUBLISHER : UNSIGNED_PUBLISHER,
+    ...overrides,
+  };
+}
+
+describe('OfficeCLI publisher evidence per declared target', () => {
+  it.each(OFFICECLI_CAPABILITY.platforms.map((target) => [`${target.platform}-${target.arch}`, target] as const))(
+    'accepts the verified runtime on %s',
+    (_label, target) => {
+      expect(
+        classifyBundledOfficeCli(targetManifest(target), target.binarySha256, target.platform, target.arch)
+      ).toMatchObject({ available: true });
+    }
+  );
+
+  it.each(
+    OFFICECLI_CAPABILITY.platforms
+      .filter((target) => !target.publisherProofSha256)
+      .map((target) => [`${target.platform}-${target.arch}`, target] as const)
+  )('rejects a forged Apple publisher proof on %s', (_label, target) => {
+    expect(
+      classifyBundledOfficeCli(
+        targetManifest(target, { publisherSignatureProof: PUBLISHER }),
+        target.binarySha256,
+        target.platform,
+        target.arch
+      )
+    ).toMatchObject({ available: false });
+  });
+
+  it.each(
+    OFFICECLI_CAPABILITY.platforms
+      .filter((target) => target.publisherProofSha256)
+      .map((target) => [`${target.platform}-${target.arch}`, target] as const)
+  )('rejects an unverifiable build-host attestation on %s', (_label, target) => {
+    expect(
+      classifyBundledOfficeCli(
+        targetManifest(target, { publisherSignatureProof: UNSIGNED_PUBLISHER }),
+        target.binarySha256,
+        target.platform,
+        target.arch
+      )
+    ).toMatchObject({ available: false });
+  });
+
+  it.each(
+    OFFICECLI_CAPABILITY.platforms
+      .filter((target) => !target.publisherProofSha256)
+      .map((target) => [`${target.platform}-${target.arch}`, target] as const)
+  )('rejects a self-claiming build-host attestation on %s', (_label, target) => {
+    expect(
+      classifyBundledOfficeCli(
+        targetManifest(target, { publisherSignatureProof: { ...UNSIGNED_PUBLISHER, grantsReady: true } }),
+        target.binarySha256,
+        target.platform,
+        target.arch
+      )
+    ).toMatchObject({ available: false });
+  });
+});
