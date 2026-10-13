@@ -81,6 +81,69 @@ describe('classifyShellCommand - text evaluated by a shell', () => {
   });
 });
 
+describe('classifyShellCommand - launcher identified by tokenizing, not regex', () => {
+  const payloads = ["'rm -rf x'", '"stripe payouts create"', "'DROP TABLE users'"];
+  const launchers = [
+    "'/tmp/a(b/sh'",
+    '"/tmp/a<b/sh"',
+    '/tmp/a\\(b/sh',
+    '/tmp/a\\;b/sh',
+    'sudo /tmp/a\\<b/sh',
+    '"/bin/s"h',
+    '/bin/s"h"',
+    '\\sh',
+    'command sh',
+    'nice sh',
+    'nice -n 5 bash',
+    'busybox sh',
+    'env FOO=1 sh',
+    'FOO=1 sh',
+    'exec bash -s',
+    'timeout 5 zsh',
+    'xargs -n1 sh',
+    '/bin/ash',
+    '$(which sh)',
+    '`which sh`',
+    '${SHELL}',
+    '$SH',
+  ];
+  for (const launcher of launchers) {
+    it(`floors ${payloads[0]} piped to ${launcher}`, () => {
+      expect(floors(`echo ${payloads[0]} | ${launcher}`)).toBe(true);
+    });
+    it(`floors a money payload piped to ${launcher}`, () => {
+      expect(floors(`echo ${payloads[1]} | ${launcher}`)).toBe(true);
+    });
+  }
+
+  it.each([
+    `bash < <(echo "stripe payouts create")`,
+    `bash <(echo "stripe payouts create")`,
+    `bash -s <<< 'DROP TABLE users'`,
+    `'/tmp/a(b/sh' <<< "stripe payouts create"`,
+    `echo "stripe payouts create" | "/tmp/a<b/python3"`,
+    `echo 'import os; os.remove("x")' | /tmp/a\\;b/python3 -`,
+    `echo "rm -rf x" | nice -n 5 sudo -u root /bin/sh`,
+  ])('floors %s', (cmd) => {
+    expect(floors(cmd)).toBe(true);
+  });
+
+  it.each([
+    'echo hello | sh',
+    'echo hello | "/tmp/a(b/sh"',
+    'echo hello | busybox sh',
+    'echo "stripe payouts create" | cat',
+    'echo "rm -rf x" | cat',
+    'bash script.sh',
+    'sh -c "echo hi" ',
+    'echo "stripe payouts create" > notes.txt',
+    'python3 script.py',
+    'sh ./deploy.sh --dry-run',
+  ])('does not floor %s', (cmd) => {
+    expect(floors(cmd)).toBe(false);
+  });
+});
+
 describe('classifyShellCommand - caps and fail-closed behaviour', () => {
   it('floors nesting deeper than the depth cap', () => {
     expect(floors(nested(3))).toBe(false);
@@ -120,6 +183,16 @@ describe('classifyShellCommand - caps and fail-closed behaviour', () => {
       'x | ' + '/'.repeat(20_000),
       ';'.repeat(20_000),
       'rm '.repeat(5_000),
+      'x |' + ' a/'.repeat(10_000),
+      'x | a/'.repeat(5_000),
+      'x | ' + '|a/'.repeat(10_000),
+      'x | sudo ' + '-u a '.repeat(6_000),
+      'x | xargs ' + '-n 1 '.repeat(6_000) + 'sh',
+      'x | nice ' + '-n 5 '.repeat(6_000) + 'sh',
+      'x | command ' + 'command '.repeat(3_500),
+      'x | env ' + 'A=1 '.repeat(8_000) + 'sh',
+      'x | sh ' + '< '.repeat(15_000),
+      'x | sh ' + '-o a '.repeat(6_000),
     ];
     for (const input of inputs) {
       const start = performance.now();
