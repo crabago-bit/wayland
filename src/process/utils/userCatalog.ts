@@ -84,16 +84,16 @@ export const MAX_PACK_AUTONOMY_RUNG = 3;
 
 /**
  * Backend ids a pack may name in `presetAgentType`. Built from the static ACP
- * backend table (no detection, no IO) plus the two non-ACP engines that are
- * handled outside it. An unknown value is not passed through: it would be
- * written verbatim into the record and surface as an assistant bound to an
- * engine that does not exist.
+ * backend table (no detection, no IO) plus `gemini`, which is handled outside
+ * it, and the bundled `fuigo` engine. An unknown value is not passed through:
+ * it would be written verbatim into the record and surface as an assistant
+ * bound to an engine that does not exist. The retired `wcore`/`wayland-core`
+ * ids are unknown since the Fuigo cutover.
  */
 const KNOWN_PRESET_AGENT_TYPES: ReadonlySet<string> = new Set<string>([
   ...Object.keys(ACP_BACKENDS_ALL).filter((id) => id !== 'custom'),
   'gemini',
-  'wcore',
-  'wayland-core',
+  'fuigo',
 ]);
 
 export type AssistantPackAssistant = {

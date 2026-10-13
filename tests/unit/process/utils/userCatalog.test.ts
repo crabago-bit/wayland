@@ -233,15 +233,18 @@ describe('parseAssistantPack', () => {
         assistants: [
           { id: 'a', name: 'A', presetAgentType: 'claude' },
           { id: 'b', name: 'B', presetAgentType: 'gemini' },
-          { id: 'c', name: 'C', presetAgentType: 'wayland-core' },
+          { id: 'c', name: 'C', presetAgentType: 'fuigo' },
           { id: 'd', name: 'D', presetAgentType: 'totally-made-up' },
+          { id: 'e', name: 'E', presetAgentType: 'wcore' },
         ],
       }),
       (line) => warns.push(line)
     );
     const types = 'pack' in result ? result.pack.assistants.map((a) => a.presetAgentType) : [];
-    expect(types).toEqual(['claude', 'gemini', 'wayland-core', undefined]);
+    expect(types).toEqual(['claude', 'gemini', 'fuigo', undefined, undefined]);
     expect(warns.join('\n')).toContain('"totally-made-up" is not a known backend');
+    // The retired Wayland Core id no longer names an engine.
+    expect(warns.join('\n')).toContain('"wcore" is not a known backend');
   });
 });
 
