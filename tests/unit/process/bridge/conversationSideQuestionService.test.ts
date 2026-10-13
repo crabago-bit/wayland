@@ -308,6 +308,6 @@ describe('ConversationSideQuestionService', () => {
     await service.ask('conv-1', 'what file did we use?');
     const params = mockForkSession.mock.calls[0][0] as { meta?: { claudeCode: { options: Record<string, unknown> } } };
     expect(params.meta?.claudeCode.options.tools).toEqual([]);
-    expect(params.meta?.claudeCode.options.settingSources).toEqual(['project']);
+    expect(params.meta?.claudeCode.options.settingSources).toEqual([]);
   });
 });

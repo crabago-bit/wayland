@@ -306,13 +306,11 @@ export class AcpAgentV2 {
       const unverified = verifyLadderedBridge(this.agentConfig.agentBackend, undefined);
       this.ladderedBridgeProblem = 'reason' in unverified ? unverified.reason : undefined;
       // Claude Code's own allow rules / defaultMode / hooks would approve calls
-      // without ever asking us; start without user/local (and unsafe project)
-      // settings. See resolveLadderedSettingSources.
+      // without ever asking us; start without any setting source. See
+      // resolveLadderedSessionMeta.
       const meta = await resolveLadderedSessionMeta(
         this.agentConfig.agentBackend,
-        this.agentConfig.cwd,
         {},
-        undefined,
         this.agentConfig.env?.CLAUDE_CONFIG_DIR
       );
       if (meta) (this.agentConfig as { sessionMeta?: Record<string, unknown> }).sessionMeta = meta;

@@ -21,11 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ProcessAcpClient, withClaudeCodeOptions } from '@process/acp/infra/ProcessAcpClient';
-import {
-  resolveLadderedSessionMeta,
-  resolveLadderedSettingSources,
-  verifyLadderedBridge,
-} from '@process/services/jarvis/sessionAutonomy';
+import { resolveLadderedSessionMeta, verifyLadderedBridge } from '@process/services/jarvis/sessionAutonomy';
 
 const AGENT = `
 const fs = require('node:fs');
@@ -90,16 +86,15 @@ async function record(meta?: Record<string, unknown>) {
 
 describe('laddered Claude sessions start without user/local Claude Code settings', () => {
   it('sends _meta.claudeCode.options.settingSources on session/new AND session/load', async () => {
-    const workspace = fs.mkdtempSync(path.join(dir, 'ws-'));
-    const meta = await resolveLadderedSessionMeta('claude', workspace, {}, '/nonexistent-home');
-    expect(meta).toEqual({ claudeCode: { options: { settingSources: ['project'] } } });
+    const meta = await resolveLadderedSessionMeta('claude');
+    expect(meta).toEqual({ claudeCode: { options: { settingSources: [] } } });
     const calls = await record(meta);
     expect(calls.map((c) => c.method)).toEqual(['session/new', 'session/load', 'session/new']);
     expect(calls[0].params._meta).toEqual(meta);
     expect(calls[1].params._meta).toEqual(meta);
     // The fork keeps the override next to its own `resume`.
     expect(calls[2].params._meta).toEqual({
-      claudeCode: { options: { settingSources: ['project'], resume: 's-1' } },
+      claudeCode: { options: { settingSources: [], resume: 's-1' } },
     });
   }, 20_000);
 
@@ -112,61 +107,21 @@ describe('laddered Claude sessions start without user/local Claude Code settings
   }, 20_000);
 
   it('only Claude gets the settings override', async () => {
-    expect(await resolveLadderedSessionMeta('codex', dir)).toBeUndefined();
-    expect(await resolveLadderedSessionMeta('qwen', dir)).toBeUndefined();
+    expect(await resolveLadderedSessionMeta('codex')).toBeUndefined();
+    expect(await resolveLadderedSessionMeta('qwen')).toBeUndefined();
   });
 });
 
-describe('resolveLadderedSettingSources - project settings only when provably safe', () => {
-  const project = (settings?: Record<string, unknown> | string, file = 'settings.json') => {
-    const ws = fs.mkdtempSync(path.join(dir, 'proj-'));
-    if (settings !== undefined) {
-      fs.mkdirSync(path.join(ws, '.claude'), { recursive: true });
-      fs.writeFileSync(
-        path.join(ws, '.claude', file),
-        typeof settings === 'string' ? settings : JSON.stringify(settings)
-      );
-    }
-    return ws;
-  };
-  const home = () => fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-home-'));
-
-  it('a clean workspace keeps project settings (workspace skills, CLAUDE.md)', async () => {
-    expect(await resolveLadderedSettingSources(project(), home())).toEqual(['project']);
-    expect(await resolveLadderedSettingSources(project({ model: 'opus' }), home())).toEqual(['project']);
-  });
-
-  it('cwd = $HOME (where .claude/settings.json IS the user file) loads nothing', async () => {
-    const h = home();
-    expect(await resolveLadderedSettingSources(h, h)).toEqual([]);
-  });
-
-  it('cwd an ancestor of $HOME loads nothing', async () => {
-    const h = home();
-    expect(await resolveLadderedSettingSources(path.dirname(h), h)).toEqual([]);
-    expect(await resolveLadderedSettingSources('/', h)).toEqual([]);
-  });
-
-  it.each([
-    ['allow rules', { permissions: { allow: ['Bash(curl *)'] } }, 'settings.json'],
-    ['a defaultMode', { permissions: { defaultMode: 'auto' } }, 'settings.json'],
-    ['hooks', { hooks: { PreToolUse: [] } }, 'settings.json'],
-    ['local allow rules', { permissions: { allow: ['Edit'] } }, 'settings.local.json'],
-  ])('a workspace whose project settings carry %s loads nothing', async (_label, settings, file) => {
-    expect(await resolveLadderedSettingSources(project(settings, file), home())).toEqual([]);
-  });
-
-  it('an unreadable project settings file loads nothing (not provably safe)', async () => {
-    expect(await resolveLadderedSettingSources(project('{ not json'), home())).toEqual([]);
-  });
-});
-
-describe('withClaudeCodeOptions', () => {
-  it('merges into claudeCode.options and keeps other _meta keys', () => {
-    expect(
-      withClaudeCodeOptions({ other: 1, claudeCode: { options: { settingSources: [] }, x: 2 } }, { resume: 'r' })
-    ).toEqual({ other: 1, claudeCode: { x: 2, options: { settingSources: [], resume: 'r' } } });
-    expect(withClaudeCodeOptions(undefined, { resume: 'r' })).toEqual({ claudeCode: { options: { resume: 'r' } } });
+describe('laddered sessions load NO setting sources, wherever they run', () => {
+  it('even in a workspace whose .claude/settings.json allow-lists everything', async () => {
+    const ws = fs.mkdtempSync(path.join(dir, 'evil-'));
+    fs.mkdirSync(path.join(ws, '.claude'));
+    fs.writeFileSync(
+      path.join(ws, '.claude', 'settings.json'),
+      JSON.stringify({ permissions: { allow: ['Bash(*)'] } })
+    );
+    const meta = (await resolveLadderedSessionMeta('claude')) as { claudeCode: { options: Record<string, unknown> } };
+    expect(meta.claudeCode.options.settingSources).toEqual([]);
   });
 });
 
@@ -198,18 +153,25 @@ describe('laddered + Flux: the scoped availableModels allowlist survives', () =>
       path.join(scoped, 'settings.json'),
       JSON.stringify({ availableModels: ['flux-auto'], permissions: { allow: ['Edit'], defaultMode: 'auto' } })
     );
-    const ws = fs.mkdtempSync(path.join(dir, 'ws-'));
-    const meta = await resolveLadderedSessionMeta('claude', ws, {}, '/nonexistent-home', scoped);
+    const meta = await resolveLadderedSessionMeta('claude', {}, scoped);
     expect(meta).toEqual({
-      claudeCode: { options: { settingSources: ['project'], settings: { availableModels: ['flux-auto'] } } },
+      claudeCode: { options: { settingSources: [], settings: { availableModels: ['flux-auto'] } } },
     });
   });
 
   it('no scoped dir: no flag settings', async () => {
-    const ws = fs.mkdtempSync(path.join(dir, 'ws-'));
-    const meta = (await resolveLadderedSessionMeta('claude', ws, {}, '/nonexistent-home')) as {
+    const meta = (await resolveLadderedSessionMeta('claude')) as {
       claudeCode: { options: Record<string, unknown> };
     };
     expect(meta.claudeCode.options.settings).toBeUndefined();
+  });
+});
+
+describe('withClaudeCodeOptions', () => {
+  it('merges into claudeCode.options and keeps other _meta keys', () => {
+    expect(
+      withClaudeCodeOptions({ other: 1, claudeCode: { options: { settingSources: [] }, x: 2 } }, { resume: 'r' })
+    ).toEqual({ other: 1, claudeCode: { x: 2, options: { settingSources: [], resume: 'r' } } });
+    expect(withClaudeCodeOptions(undefined, { resume: 'r' })).toEqual({ claudeCode: { options: { resume: 'r' } } });
   });
 });
