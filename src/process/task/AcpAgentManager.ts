@@ -1798,6 +1798,15 @@ ${collectedResponses.join('\n')}`;
     this.flushBufferedStreamTextMessages();
     this.markTrackedTurnRuntimeActivity();
 
+    // A held permission expired (unattended deadline or an autonomy-ladder
+    // hold): the request was already answered with a denial, so only the
+    // now-useless confirmation card is taken down - nothing is sent.
+    if (v.type === 'acp_permission_expired') {
+      const { callId } = (v.data ?? {}) as { callId?: string };
+      if (callId) super.confirm(v.msg_id, callId, undefined as never);
+      return;
+    }
+
     if (v.type === 'acp_permission') {
       const { toolCall, options, autonomyHold } = v.data as AcpPermissionRequest;
 

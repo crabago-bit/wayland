@@ -59,7 +59,7 @@ export type SessionOptions = {
    * stopped because nobody answered is distinguishable from one that merely
    * failed.
    */
-  onPermissionHoldExpired?: (info: { callId: string; title: string; deadlineMs: number }) => void;
+  onPermissionHoldExpired?: (info: { callId: string; title: string; deadlineMs: number; scheduled?: boolean }) => void;
   /** Pre-approval policy (JARVIS autonomy ladder), consulted before YOLO and the cache. */
   permissionGate?: PermissionGate;
 };

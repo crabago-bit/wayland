@@ -521,8 +521,32 @@ export class AcpAgentV2 {
    * the user will actually have. Titles are already rendered verbatim in the
    * permission dialog this replaces, so nothing new crosses the boundary.
    */
-  private reportHoldExpired(info: { callId: string; title: string; deadlineMs: number }): void {
+  private reportHoldExpired(info: { callId: string; title: string; deadlineMs: number; scheduled?: boolean }): void {
     const minutes = Math.max(1, Math.round(info.deadlineMs / 60_000));
+    // The confirmation card for this call is now dead: take it down so it
+    // cannot be clicked uselessly.
+    this.onSignalEvent?.({
+      type: 'acp_permission_expired',
+      conversation_id: this.conversationId,
+      msg_id: info.callId,
+      data: { callId: info.callId },
+    });
+    if (info.scheduled === false) {
+      this.onStreamEvent({
+        type: 'tips',
+        conversation_id: this.conversationId,
+        msg_id: `hold_expired_${info.callId}`,
+        data: {
+          type: 'warning',
+          content:
+            `"${info.title || 'A tool call'}" was held for your approval by the autonomy ladder` +
+            `${this.autonomy ? ` (rung ${this.autonomy.rung})` : ''}. ` +
+            `Nobody answered within ${minutes} minute${minutes === 1 ? '' : 's'}, so it was DENIED. ` +
+            `Ask the agent to try again if you want to approve it.`,
+        },
+      } as unknown as IResponseMessage);
+      return;
+    }
     this.onStreamEvent({
       type: 'tips',
       conversation_id: this.conversationId,

@@ -142,8 +142,9 @@ describe('autonomy permission gate', () => {
       vi.advanceTimersByTime(1);
       expect(await p).toEqual({ outcome: { outcome: 'selected', optionId: 'deny' } });
       expect(rows).toEqual([expect.objectContaining({ decision: 'refused' })]);
-      // The "scheduled run" notice is not shown for an attended session.
-      expect(onExpired).not.toHaveBeenCalled();
+      // Reported as an ATTENDED expiry, so the notice (and the card removal)
+      // can say what happened without calling it a scheduled run.
+      expect(onExpired).toHaveBeenCalledWith(expect.objectContaining({ callId: 'c1', scheduled: false }));
     } finally {
       vi.useRealTimers();
     }

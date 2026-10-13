@@ -157,7 +157,7 @@ type PermissionResolverConfig = {
    * of #1045 in place: they still cannot see that their automation stopped
    * because it was waiting on them.
    */
-  onHoldExpired?: (info: { callId: string; title: string; deadlineMs: number }) => void;
+  onHoldExpired?: (info: { callId: string; title: string; deadlineMs: number; scheduled?: boolean }) => void;
   /** JARVIS autonomy ladder (or any other pre-approval policy). See {@link PermissionGate}. */
   gate?: PermissionGate;
 };
@@ -174,7 +174,12 @@ export class PermissionResolver {
   private readonly pending = new Map<string, PendingPermissionWithContext>();
   private readonly hydrateFn?: () => Promise<Iterable<[string, string]>>;
   private readonly persistFn?: (cacheKey: string, optionId: string) => void;
-  private readonly onHoldExpired?: (info: { callId: string; title: string; deadlineMs: number }) => void;
+  private readonly onHoldExpired?: (info: {
+    callId: string;
+    title: string;
+    deadlineMs: number;
+    scheduled?: boolean;
+  }) => void;
   /** #1045: ms an unattended hold may last, or undefined for an attended run. */
   private holdDeadlineMs?: number;
   /** Memoized one-shot rehydration of persisted approvals (#672). */
@@ -356,9 +361,9 @@ export class PermissionResolver {
         ? { outcome: { outcome: 'selected', optionId: denyOptionId } }
         : { outcome: { outcome: 'cancelled' } }
     );
-    // The expiry notice speaks of a SCHEDULED run; a gate-bounded hold in an
-    // attended session is recorded in the approvals ledger instead.
-    if (this.holdDeadlineMs !== undefined) this.onHoldExpired?.({ callId, title, deadlineMs });
+    // `scheduled` lets the notice say which kind of hold this was: an unattended
+    // run's (#1045) or a gate hold (autonomy ladder) in an attended session.
+    this.onHoldExpired?.({ callId, title, deadlineMs, scheduled: this.holdDeadlineMs !== undefined });
   }
 
   resolve(callId: string, optionId: string): void {

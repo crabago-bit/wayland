@@ -13,8 +13,9 @@
 
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
-const { isWorkspaceTrusted } = vi.hoisted(() => ({
+const { isWorkspaceTrusted, baseConfirm } = vi.hoisted(() => ({
   isWorkspaceTrusted: vi.fn<(ws: string | undefined | null) => boolean>(() => true),
+  baseConfirm: vi.fn<(callId: string) => void>(),
 }));
 vi.mock('@process/permissions/workspaceTrust', () => ({ isWorkspaceTrusted }));
 
@@ -70,6 +71,9 @@ vi.mock('@process/task/BaseAgentManager', () => ({
       return false;
     }
     addConfirmation() {}
+    confirm(_id: string, callId: string) {
+      baseConfirm(callId);
+    }
     getConfirmations() {
       return [];
     }
@@ -179,5 +183,20 @@ describe('AcpAgentManager - mode the autonomy ladder clamped', () => {
     withAgent(mgr, { success: true, effectiveMode: 'autoGuarded' });
     const result = await mgr.setMode('bypassPermissions');
     expect(result).toMatchObject({ success: true, data: { mode: 'autoGuarded' } });
+  });
+});
+
+describe('AcpAgentManager - expired holds', () => {
+  it('takes down the dead confirmation card and sends nothing to the agent', async () => {
+    baseConfirm.mockClear();
+    const mgr = makeManager('default');
+    const agentConfirm = vi.fn();
+    (mgr as unknown as { agent: { confirmMessage: typeof agentConfirm } }).agent = { confirmMessage: agentConfirm };
+    await (mgr as unknown as { handleSignalEvent: SignalFn }).handleSignalEvent(
+      { type: 'acp_permission_expired', msg_id: 'call-1', conversation_id: 'conv-hold', data: { callId: 'call-1' } },
+      'claude'
+    );
+    expect(baseConfirm).toHaveBeenCalledWith('call-1');
+    expect(agentConfirm).not.toHaveBeenCalled();
   });
 });

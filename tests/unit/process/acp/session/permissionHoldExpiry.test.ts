@@ -178,6 +178,7 @@ describe('#1045 unattended permission holds expire into a denial', () => {
       callId: 'c1',
       title: 'rm -rf /tmp/x',
       deadlineMs: 1_000,
+      scheduled: true,
     });
   });
 });

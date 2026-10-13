@@ -283,4 +283,31 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     expect(sessionConfirmMode).not.toHaveBeenCalled();
     expect(sessionSendMessage).toHaveBeenCalled();
   });
+
+  it('an expired autonomy hold in an attended chat says so and takes the card down', async () => {
+    stubStorage({ [`custom:${PACK}`]: 2 });
+    const onSignalEvent = vi.fn();
+    const onStreamEvent = vi.fn();
+    const agent = new AcpAgentV2({
+      id: 'conv-3',
+      backend: 'claude',
+      workingDir: '/workspace',
+      onStreamEvent,
+      onSignalEvent,
+      extra: { backend: 'claude', customAgentId: PACK },
+    });
+    await agent.start();
+    capturedOptions!.onPermissionHoldExpired!({
+      callId: 'c9',
+      title: 'Write a.md',
+      deadlineMs: 900_000,
+      scheduled: false,
+    });
+    expect(onSignalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'acp_permission_expired', data: { callId: 'c9' } })
+    );
+    const tip = onStreamEvent.mock.calls.map((c) => c[0]).find((m) => m.type === 'tips');
+    expect(tip.data.content).toMatch(/autonomy ladder \(rung 2\)/);
+    expect(tip.data.content).not.toMatch(/scheduled run/);
+  });
 });
