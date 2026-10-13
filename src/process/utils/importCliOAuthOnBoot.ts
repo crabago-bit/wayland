@@ -67,8 +67,8 @@ export const DEFAULT_CLI_OAUTH_SOURCES: readonly CliOAuthSource[] = [
   },
 ];
 
-/** Re-run the reuse every 6 h so a rotated CLI access token reaches the registry. */
-export const CLI_OAUTH_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
+/** Re-run the reuse hourly so a CLI-rotated access token reaches the registry before the old one expires. */
+export const CLI_OAUTH_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 
 function defaultDeps(): CliOAuthDeps | null {
   const repo = getModelRegistryRepository();
