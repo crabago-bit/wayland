@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   initDatabaseBridge: vi.fn(),
   initExtensionsBridge: vi.fn(),
   initSystemSettingsBridge: vi.fn(),
+  initFluxConnectorBridge: vi.fn(),
   initCronBridge: vi.fn(),
   initMcpBridge: vi.fn(),
   initNotificationBridge: vi.fn(),
@@ -155,6 +156,10 @@ vi.mock('@process/bridge/extensionsBridge', () => ({
 vi.mock('@process/bridge/systemSettingsBridge', () => ({
   initSystemSettingsBridge: (...args: unknown[]) => mocks.initSystemSettingsBridge(...args),
 }));
+// LOCAL PATCH (WarriorHi): the standalone server registers the Flux connector bridge.
+vi.mock('@process/bridge/fluxConnectorBridge', () => ({
+  initFluxConnectorBridge: (...args: unknown[]) => mocks.initFluxConnectorBridge(...args),
+}));
 vi.mock('@process/bridge/cronBridge', () => ({
   initCronBridge: (...args: unknown[]) => mocks.initCronBridge(...args),
 }));
@@ -256,6 +261,7 @@ describe('initBridgeStandalone', () => {
     await mod.initBridgeStandalone();
 
     expect(mocks.initHubBridge).toHaveBeenCalledTimes(1);
+    expect(mocks.initFluxConnectorBridge).toHaveBeenCalledTimes(1);
     expect(mocks.initWebCloudFluxRoutingEvidenceAdapter).toHaveBeenCalledTimes(1);
     expect(mocks.createConstitutionFsProduction).toHaveBeenCalledWith(expect.stringMatching(/resources$/), {
       revisionAuthorityPath: path.join(STANDALONE_DATA_DIR, 'constitution', 'revision-authority.enc'),
