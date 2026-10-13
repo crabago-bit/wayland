@@ -66,6 +66,20 @@ describe('decideNativePermission - hard floor', () => {
     expect(at(4)).toMatchObject({ action: 'pass', loggable: true });
   });
 
+  it.each([4, 3, 2, 1] as AutonomyRung[])('refuses edits to .claude/settings*.json at rung %i', (rung) => {
+    expect(
+      decide({ kind: 'edit', title: 'Edit', rawInput: { file_path: '/ws/.claude/settings.json' } }, rung).action
+    ).toBe('deny');
+    expect(
+      decide({ kind: 'execute', title: 'x', rawInput: { command: 'echo {} > .claude/settings.local.json' } }, rung)
+        .action
+    ).toBe('deny');
+    // Reading it is fine.
+    expect(
+      decide({ kind: 'read', title: 'Read', rawInput: { file_path: '/ws/.claude/settings.json' } }, rung).action
+    ).toBe('pass');
+  });
+
   it("reads the command, not the agent's prose description", () => {
     const v = decide(
       { kind: 'execute', title: 'ls', rawInput: { command: 'ls -la', description: 'Delete old drafts' } },

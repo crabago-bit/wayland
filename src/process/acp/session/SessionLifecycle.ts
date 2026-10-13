@@ -171,7 +171,7 @@ export class SessionLifecycle {
             cwd: this.host.agentConfig.cwd,
             mcpServers,
             additionalDirectories: this.host.agentConfig.additionalDirectories,
-            metadata: this.host.agentConfig.sessionMetadata,
+            metadata: this.sessionRequestMetadata(),
           });
     } catch (err) {
       const normalized = normalizeError(err);
@@ -446,7 +446,7 @@ export class SessionLifecycle {
           cwd: this.host.agentConfig.cwd,
           mcpServers,
           additionalDirectories: this.host.agentConfig.additionalDirectories,
-          metadata: this.host.agentConfig.sessionMetadata,
+          metadata: this.sessionRequestMetadata(),
         });
         // Resume succeeded. Tell the host so it drops any speculative history
         // replay it armed for this resume attempt.
@@ -465,8 +465,19 @@ export class SessionLifecycle {
       cwd: this.host.agentConfig.cwd,
       mcpServers,
       additionalDirectories: this.host.agentConfig.additionalDirectories,
-      metadata: this.host.agentConfig.sessionMetadata,
+      metadata: this.sessionRequestMetadata(),
     });
+  }
+
+  /**
+   * `_meta` for session/new|load: the backend's own metadata (e.g. Fuigo
+   * `startupHints`) plus the JARVIS ladder's `sessionMeta`, which wins on a key
+   * clash because it is the stricter of the two.
+   */
+  private sessionRequestMetadata(): Record<string, unknown> | undefined {
+    const { sessionMetadata, sessionMeta } = this.host.agentConfig;
+    if (!sessionMeta) return sessionMetadata;
+    return { ...sessionMetadata, ...sessionMeta };
   }
 
   private buildMcpServers(): McpServer[] {
