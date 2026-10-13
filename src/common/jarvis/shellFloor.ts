@@ -26,6 +26,9 @@ export type ShellFloorVerdict = { floor: false } | { floor: true; reason: string
 
 const NOT_FLOOR: ShellFloorVerdict = { floor: false };
 const floor = (reason: string): ShellFloorVerdict => ({ floor: true, reason });
+const TOO_DEEP = 'command nesting is too deep to classify';
+/** Longest command line the classifier will examine; longer fails closed. */
+export const MAX_SHELL_COMMAND_LENGTH = 32_768;
 
 // ─── Tokenizer ──────────────────────────────────────────────────────────────
 
@@ -284,7 +287,7 @@ const SHELL_DELETE = /(?:^|[\s;&|(`])(?:sudo\s+|xargs\s+)?(?:rm|rmdir|unlink|shr
 const SHELL_DELETE_IN_PAYLOAD = /(?:^|[\s;&|(`"'])(?:sudo\s+|xargs\s+)?(?:rm|rmdir|unlink|shred)(?:\s|$)/i;
 
 /** Optional launchers in front of a shell/interpreter: sudo, env, xargs (with flags), a path. */
-const LAUNCH = String.raw`(?:sudo\s+(?:-\S+\s+(?:[^-\s]\S*\s+)?)*)?(?:(?:\S*/)?env\s+(?:-\S+\s+(?:[^-\s]\S*\s+)?)*)?(?:xargs\s+(?:-\S+\s+(?:[^-\s]\S*\s+)?)*)?(?:\S*/)?`;
+const LAUNCH = String.raw`(?:sudo\s+(?:-\S+\s+(?:[^-\s]\S*\s+)?)*)?(?:(?:[^\s;&|()<>]*/)?env\s+(?:-\S+\s+(?:[^-\s]\S*\s+)?)*)?(?:xargs\s+(?:-\S+\s+(?:[^-\s]\S*\s+)?)*)?(?:[^\s;&|()<>]*/)?`;
 
 /**
  * A command line that feeds TEXT to a shell to evaluate:
@@ -296,7 +299,8 @@ const EVALUATES_TEXT = new RegExp(
   String.raw`\|\s*${LAUNCH}(?:ba|z|da|k|fi)?sh\b` +
     String.raw`|(?:^|[\s;&|(])eval\s` +
     String.raw`|(?:^|[\s;&|(])(?:source|\.)\s+/dev/(?:stdin|fd/0)\b` +
-    String.raw`|(?:^|[\s;&|(])(?:(?:\S*/)?(?:ba|z|da|k)?sh|source|\.)\s+<\(`,
+    String.raw`|(?:^|[\s;&|(])(?:(?:[^\s;&|()<>]*/)?(?:ba|z|da|k)?sh|source|\.)\s+<\(` +
+    String.raw`|(?:^|[\s;&|(])(?:[^\s;&|()<>]*/)?(?:ba|z|da|k|fi)?sh(?:\s+-\S+)*\s*<<`,
   'i'
 );
 
@@ -448,7 +452,7 @@ function httpMethodOf(head: string, words: string[]): string {
 
 /** Delete / floor verdict for ONE unwrapped segment. `depth` bounds recursion. */
 function classifySegment(tokens: Token[], keywords: readonly string[], depth: number): ShellFloorVerdict {
-  if (depth > 4) return NOT_FLOOR;
+  if (depth > 4) return floor(TOO_DEEP);
   const unwrapped = unwrap(tokens);
   const words = values(unwrapped);
   if (words.length === 0) return NOT_FLOOR;
@@ -591,44 +595,54 @@ function classifySegment(tokens: Token[], keywords: readonly string[], depth: nu
  * The inner command of every `$(...)` and backtick span OUTSIDE single quotes
  * (double quotes do not stop the shell from running them). Nested spans are
  * found by the recursive classification of each inner command.
+ *
+ * One quote-aware pass, linear in the input: a `)` inside quotes does not close
+ * a span. Anything unbalanced or oddly quoted yields the whole remaining tail
+ * as a command too (fail closed).
  */
 function commandSubstitutions(commandLine: string): string[] {
   const out: string[] = [];
-  let inSingle = false;
-  for (let i = 0; i < commandLine.length; i += 1) {
+  const n = commandLine.length;
+  // 'S' = an open `$(` / `(` (command context), 'D' = an open double quote.
+  const stack: string[] = [];
+  let parens = 0;
+  let spanStart = 0;
+  for (let i = 0; i < n; i += 1) {
     const ch = commandLine[i];
-    if (ch === '\\' && !inSingle) {
+    const top = stack[stack.length - 1];
+    if (ch === '\\') {
       i += 1;
-      continue;
-    }
-    if (ch === "'") {
-      // A single quote inside double quotes is literal, but that only ever
-      // makes us look at MORE text, which is the safe direction.
-      inSingle = !inSingle;
-      continue;
-    }
-    if (inSingle) continue;
-    if (ch === '`') {
-      const end = commandLine.indexOf('`', i + 1);
-      out.push(commandLine.slice(i + 1, end === -1 ? commandLine.length : end));
-      if (end === -1) break;
-      i = end;
-      continue;
-    }
-    if (ch === '$' && commandLine[i + 1] === '(') {
-      let depth = 0;
-      let j = i + 1;
-      for (; j < commandLine.length; j += 1) {
-        if (commandLine[j] === '(') depth += 1;
-        else if (commandLine[j] === ')') {
-          depth -= 1;
-          if (depth === 0) break;
-        }
+    } else if (ch === "'" && top !== 'D') {
+      const end = commandLine.indexOf("'", i + 1);
+      if (end === -1) {
+        // An unterminated quote is not valid shell: treat what follows as code.
+        if (parens === 0) out.push(commandLine.slice(i + 1));
+        break;
       }
-      out.push(commandLine.slice(i + 2, j));
-      i = j;
+      i = end;
+    } else if (ch === '"') {
+      if (top === 'D') stack.pop();
+      else stack.push('D');
+    } else if (ch === '`') {
+      let end = i + 1;
+      while (end < n && commandLine[end] !== '`') end += commandLine[end] === '\\' ? 2 : 1;
+      if (parens === 0) out.push(commandLine.slice(i + 1, Math.min(end, n)));
+      i = end;
+    } else if (ch === '$' && commandLine[i + 1] === '(') {
+      if (parens === 0) spanStart = i + 2;
+      parens += 1;
+      stack.push('S');
+      i += 1;
+    } else if (ch === '(' && top === 'S') {
+      parens += 1;
+      stack.push('S');
+    } else if (ch === ')' && top === 'S') {
+      parens -= 1;
+      stack.pop();
+      if (parens === 0) out.push(commandLine.slice(spanStart, i));
     }
   }
+  if (parens > 0) out.push(commandLine.slice(spanStart));
   return out;
 }
 
@@ -659,17 +673,35 @@ function evaluableText(segments: Segment[]): string {
 /**
  * Does `commandLine` hit the hard floor? Checks the raw delete pattern, then
  * every segment (recursing into wrappers, `-c` payloads, find -exec and
- * interpreter code).
+ * interpreter code). Fails closed: an oversized command, nesting past the depth
+ * cap, or any error inside the classifier is a floor verdict.
  */
 export function classifyShellCommand(
   commandLine: string,
   keywords: readonly string[] = [],
   depth: number = 0
 ): ShellFloorVerdict {
-  if (!commandLine || depth > 6) return NOT_FLOOR;
+  if (depth > 0) return classifyChecked(commandLine, keywords, depth);
+  if (commandLine && commandLine.length > MAX_SHELL_COMMAND_LENGTH) {
+    return floor(`command is longer than ${MAX_SHELL_COMMAND_LENGTH} characters and cannot be classified`);
+  }
+  try {
+    return classifyChecked(commandLine, keywords, depth);
+  } catch (error) {
+    return floor(`shell classifier failed (${error instanceof Error ? error.message : String(error)}); denied`);
+  }
+}
+
+function classifyChecked(commandLine: string, keywords: readonly string[], depth: number): ShellFloorVerdict {
+  if (!commandLine) return NOT_FLOOR;
+  if (depth > 6) return floor(TOO_DEEP);
   // Text piped into a shell or eval'd is code, quotes and all.
-  if (EVALUATES_TEXT.test(commandLine) && SHELL_DELETE_IN_PAYLOAD.test(commandLine)) {
-    return floor('command deletes data');
+  if (EVALUATES_TEXT.test(commandLine)) {
+    if (SHELL_DELETE_IN_PAYLOAD.test(commandLine)) return floor('command deletes data');
+    if (DATA_DESTROYING_STATEMENT.test(commandLine)) return floor('text evaluated by a shell destroys data');
+    if (MONEY_PROVIDER.test(commandLine) && MONEY_ACTION.test(commandLine)) {
+      return floor('text evaluated by a shell moves money or signs');
+    }
   }
   if (PIPED_TO_INTERPRETER.test(commandLine)) {
     if (SHELL_DELETE_IN_PAYLOAD.test(commandLine) || INTERPRETER_DELETE.test(commandLine)) {
