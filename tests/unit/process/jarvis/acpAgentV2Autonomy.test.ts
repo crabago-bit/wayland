@@ -19,6 +19,7 @@ import type { AgentConfig, SessionCallbacks } from '@process/acp/types';
 import type { SessionOptions } from '@process/acp/session/AcpSession';
 import { loadRuntimeMcpServers } from '@process/services/mcpServices/runtimeMcpServers';
 import { TOOL_FILTER_SCRIPT } from '@process/services/mcpServices/builtinMcpRuntime';
+import { resetAutonomyRungCache } from '@process/services/jarvis/sessionAutonomy';
 import { ProcessConfig } from '@process/utils/initStorage';
 import type { IMcpServer } from '@/common/config/storage';
 
@@ -195,11 +196,28 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     expect(sessionSetMode).toHaveBeenCalledWith('bypassPermissions');
   });
 
-  it('an unreadable rung store fails toward asking (rung 2)', async () => {
+  it('an unreadable rung store with no prior copy runs unladdered (plain chats unaffected)', async () => {
+    resetAutonomyRungCache();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     stubStorage('throw');
     await startAgent({ customAgentId: PACK });
     const server = capturedConfig.mcpServers?.find((s) => s.name === 'warrior-ghl') as { args: string[] };
-    expect(server.args[server.args.indexOf('--rung') + 1]).toBe('2');
-    expect(capturedOptions?.permissionGate).toBeDefined();
+    expect(server.args).not.toContain('--rung');
+    expect(capturedOptions?.permissionGate).toBeUndefined();
+    expect(error).toHaveBeenCalled();
+  });
+
+  it('an unreadable rung store reuses the last copy read successfully', async () => {
+    resetAutonomyRungCache();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    stubStorage({ [`custom:${PACK}`]: 1 });
+    await startAgent({ customAgentId: PACK });
+    stubStorage('throw');
+    await startAgent({ customAgentId: PACK });
+    const server = capturedConfig.mcpServers?.find((s) => s.name === 'warrior-ghl') as { args: string[] };
+    expect(server.args[server.args.indexOf('--rung') + 1]).toBe('1');
+    // A plain chat stays off the ladder on the cached copy too.
+    await startAgent({});
+    expect(capturedOptions?.permissionGate).toBeUndefined();
   });
 });

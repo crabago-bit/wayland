@@ -12,20 +12,28 @@
  * `agents.autonomy`. An agent nobody configured keeps exactly the behaviour it
  * had before the ladder existed - no shim, no gate, no mode clamp - so ordinary
  * chats are untouched. (`DEFAULT_AUTONOMY_RUNG` still describes such an agent
- * in the settings UI; it is not enforced on them.) An UNREADABLE rung store is
- * different: we cannot tell whether this agent was configured, so it is put on
- * the ladder at `STORAGE_FAILURE_RUNG` (2) - fail toward asking.
+ * in the settings UI; it is not enforced on them.) An UNREADABLE rung store
+ * falls back to the last copy this process read successfully. With no such
+ * copy we cannot tell who is on the ladder, and laddering EVERY agent would
+ * break ordinary chats, so the session runs unladdered and an error is logged.
  */
 
-import { autonomyAgentKey, toAutonomyRung, type AutonomyRung } from '@/common/jarvis/autonomy';
+import { autonomyAgentKey, toAutonomyRung } from '@/common/jarvis/autonomy';
 import { decideNativePermission, isOptionAboveRung } from '@/common/jarvis/nativeAutonomy';
 import type { PermissionGate, PermissionGateVerdict } from '@process/acp/session/PermissionResolver';
 import type { ToolFilterSpawnAutonomy } from '@process/services/mcpServices/builtinMcpRuntime';
 import { ProcessConfig } from '@process/utils/initStorage';
 import { appendApprovalTo, type ApprovalRecord } from './approvalsLog';
 import { resolveApprovalsLogPath } from './approvalsPath';
-import { STORAGE_FAILURE_RUNG } from './autonomySettings';
 import { readHardFloorKeywords } from './hardFloor';
+
+/** Last `agents.autonomy` map read successfully - the fallback for a storage fault. */
+let lastGoodRungs: Record<string, unknown> | undefined;
+
+/** Test hook: forget the last-good copy. */
+export function resetAutonomyRungCache(): void {
+  lastGoodRungs = undefined;
+}
 
 /**
  * The ladder snapshot for one agent, or `undefined` when the agent has no
@@ -36,17 +44,22 @@ export async function resolveConfiguredSpawnAutonomy(agent: {
   customAgentId?: string;
 }): Promise<ToolFilterSpawnAutonomy | undefined> {
   const key = autonomyAgentKey(agent);
-  let rung: AutonomyRung;
+  let stored: Record<string, unknown> | undefined;
   try {
-    const stored = (await ProcessConfig.get('agents.autonomy')) as Record<string, unknown> | undefined;
-    if (!stored || !Object.prototype.hasOwnProperty.call(stored, key)) return undefined;
-    rung = toAutonomyRung(stored[key]);
-  } catch {
-    rung = STORAGE_FAILURE_RUNG;
+    stored = ((await ProcessConfig.get('agents.autonomy')) as Record<string, unknown> | undefined) ?? {};
+    lastGoodRungs = stored;
+  } catch (error) {
+    stored = lastGoodRungs;
+    if (!stored) {
+      console.error(`[jarvis] agents.autonomy unreadable and no prior copy; ${key} runs WITHOUT the ladder:`, error);
+      return undefined;
+    }
+    console.error('[jarvis] agents.autonomy unreadable; using the last copy read successfully:', error);
   }
+  if (!Object.prototype.hasOwnProperty.call(stored, key)) return undefined;
   return {
     agent: key,
-    rung,
+    rung: toAutonomyRung(stored[key]),
     hardFloorKeywords: readHardFloorKeywords(),
     logPath: resolveApprovalsLogPath(),
   };
