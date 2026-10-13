@@ -46,6 +46,44 @@ describe('decideNativePermission - hard floor', () => {
     'kubectl delete pod web-1',
     'gh release delete v1',
     'rm -rf ~',
+    // Round-3 review: deletes through wrappers.
+    'find . -exec rm {} \\;',
+    'xargs -n 1 rm',
+    'xargs -I {} rm {}',
+    'sudo -u forge rm f',
+    'timeout 10 rm f',
+    'nice -n 10 rm f',
+    'ionice -c 3 rm f',
+    'stdbuf -oL rm f',
+    'docker exec -it web rm -rf /data',
+    // Other deletes.
+    'docker rm -f x',
+    'docker volume rm v',
+    'docker system prune -af',
+    'aws s3 rm s3://b/k',
+    'aws s3 rb s3://b',
+    'gsutil rm gs://b/k',
+    'aws ec2 terminate-instances --instance-ids i-1',
+    'rsync -a --delete a/ b/',
+    'git clean -fdx',
+    'git push --force origin main',
+    'psql -c "DROP TABLE users"',
+    'sqlite3 db "DELETE FROM jobs"',
+    'mysql -e "TRUNCATE TABLE bids"',
+    'mongosh --eval "db.jobs.deleteMany({})"',
+    'redis-cli FLUSHALL',
+    'curl -X DELETE https://api.example.com/v1/jobs/1',
+    'python3 -c "import shutil; shutil.rmtree(\'/data\')"',
+    "node -e \"require('fs').rmSync('x', {recursive: true})\"",
+    // Money moves / signing.
+    'npx stripe payouts create',
+    'bunx stripe refunds create --charge ch_1',
+    'bash -c "stripe refunds create"',
+    'curl -X POST https://api.stripe.com/v1/refunds -d charge=ch_1',
+    'curl https://api.stripe.com/v1/payouts -d amount=100',
+    'http POST https://api-m.paypal.com/v2/payments/captures',
+    'python3 -c "import stripe; stripe.Payout.create(amount=1)"',
+    'node -e "docusign.envelopes.create(args)"',
   ])('denies the shell command %s at rung 4', (command) => {
     expect(decide({ kind: 'execute', title: command, rawInput: { command } }, 4).action).toBe('deny');
   });
@@ -56,8 +94,11 @@ describe('decideNativePermission - hard floor', () => {
     'git commit -m "fix signing flow"',
     'docker compose up --remove-orphans',
     'curl https://api.example.com/v1/payments',
-    'psql -c "DROP TABLE estimates"',
-    'echo "do not rm this"',
+    'curl -s https://api.stripe.com/v1/balance',
+    'psql -c "SELECT * FROM payments"',
+    'docker run --rm alpine true',
+    'python3 -c "print(1 + 1)"',
+    'git push origin feature',
   ])('a command that merely MENTIONS a floor word (%s) follows the rung, not the floor', (command) => {
     const at = (rung: AutonomyRung) => decide({ kind: 'execute', title: command, rawInput: { command } }, rung);
     expect(at(1).action).toBe('deny'); // rung 1 refuses every write anyway
@@ -74,6 +115,19 @@ describe('decideNativePermission - hard floor', () => {
       decide({ kind: 'execute', title: 'x', rawInput: { command: 'echo {} > .claude/settings.local.json' } }, rung)
         .action
     ).toBe('deny');
+    for (const command of [
+      'cd .claude && cat > settings.json',
+      'cp /tmp/s.json .claude/settings.json',
+      'mv x .claude/settings.local.json',
+      'tee .claude/settings.json < x',
+      "python3 -c \"open('.claude/settings.json', 'w').write('{}')\"",
+      'sed -i s/x/y/ ~/.claude/settings.json',
+    ]) {
+      expect(decide({ kind: 'execute', title: 'x', rawInput: { command } }, rung).action, command).toBe('deny');
+    }
+    expect(decide({ kind: 'execute', title: 'x', rawInput: { command: 'cat .claude/settings.json' } }, 4).action).toBe(
+      'pass'
+    );
     // Reading it is fine.
     expect(
       decide({ kind: 'read', title: 'Read', rawInput: { file_path: '/ws/.claude/settings.json' } }, rung).action
