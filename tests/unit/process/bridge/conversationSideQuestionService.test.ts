@@ -288,4 +288,26 @@ describe('ConversationSideQuestionService', () => {
     });
     expect(mockCancel).toHaveBeenCalled();
   });
+
+  it('a LADDERED agent forks without user settings and with no tools (JARVIS autonomy)', async () => {
+    mockProcessConfigGet.mockImplementation(async (key: string) => {
+      if (key === 'acp.config') return { claude: { cliPath: 'claude' } };
+      if (key === 'agents.autonomy') return { 'custom:pack-warrior-estimator': 2 };
+      return undefined;
+    });
+    const conversation = makeConversation({
+      type: 'acp',
+      extra: {
+        acpSessionId: 'parent-session-1',
+        backend: 'claude',
+        workspace: '/tmp/jarvis-btw-nonexistent-ws',
+        presetAssistantId: 'pack-warrior-estimator',
+      },
+    } as Partial<TChatConversation>);
+    const service = new ConversationSideQuestionService(makeService(conversation));
+    await service.ask('conv-1', 'what file did we use?');
+    const params = mockForkSession.mock.calls[0][0] as { meta?: { claudeCode: { options: Record<string, unknown> } } };
+    expect(params.meta?.claudeCode.options.tools).toEqual([]);
+    expect(params.meta?.claudeCode.options.settingSources).toEqual(['project']);
+  });
 });

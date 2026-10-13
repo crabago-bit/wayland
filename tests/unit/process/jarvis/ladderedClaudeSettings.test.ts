@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ProcessAcpClient } from '@process/acp/infra/ProcessAcpClient';
+import { ProcessAcpClient, withClaudeCodeOptions } from '@process/acp/infra/ProcessAcpClient';
 import { resolveLadderedSessionMeta, resolveLadderedSettingSources } from '@process/services/jarvis/sessionAutonomy';
 
 const AGENT = `
@@ -73,6 +73,7 @@ async function record(meta?: Record<string, unknown>) {
     await client.start();
     await client.createSession({ cwd: dir, ...(meta ? { metadata: meta } : {}) });
     await client.loadSession({ sessionId: 's-1', cwd: dir, ...(meta ? { metadata: meta } : {}) });
+    await client.forkSession({ sessionId: 's-1', cwd: dir, ...(meta ? { meta } : {}) });
   } finally {
     await client.close().catch(() => {});
   }
@@ -89,13 +90,21 @@ describe('laddered Claude sessions start without user/local Claude Code settings
     const meta = await resolveLadderedSessionMeta('claude', workspace, {}, '/nonexistent-home');
     expect(meta).toEqual({ claudeCode: { options: { settingSources: ['project'] } } });
     const calls = await record(meta);
-    expect(calls.map((c) => c.method)).toEqual(['session/new', 'session/load']);
-    for (const call of calls) expect(call.params._meta).toEqual(meta);
+    expect(calls.map((c) => c.method)).toEqual(['session/new', 'session/load', 'session/new']);
+    expect(calls[0].params._meta).toEqual(meta);
+    expect(calls[1].params._meta).toEqual(meta);
+    // The fork keeps the override next to its own `resume`.
+    expect(calls[2].params._meta).toEqual({
+      claudeCode: { options: { settingSources: ['project'], resume: 's-1' } },
+    });
   }, 20_000);
 
   it('a session without the ladder sends no _meta (today’s behaviour)', async () => {
     const calls = await record(undefined);
-    for (const call of calls) expect(call.params._meta).toBeUndefined();
+    expect(calls[0].params._meta).toBeUndefined();
+    expect(calls[1].params._meta).toBeUndefined();
+    // A plain fork carries only its resume option, exactly as before.
+    expect(calls[2].params._meta).toEqual({ claudeCode: { options: { resume: 's-1' } } });
   }, 20_000);
 
   it('only Claude gets the settings override', async () => {
@@ -145,5 +154,14 @@ describe('resolveLadderedSettingSources - project settings only when provably sa
 
   it('an unreadable project settings file loads nothing (not provably safe)', async () => {
     expect(await resolveLadderedSettingSources(project('{ not json'), home())).toEqual([]);
+  });
+});
+
+describe('withClaudeCodeOptions', () => {
+  it('merges into claudeCode.options and keeps other _meta keys', () => {
+    expect(
+      withClaudeCodeOptions({ other: 1, claudeCode: { options: { settingSources: [] }, x: 2 } }, { resume: 'r' })
+    ).toEqual({ other: 1, claudeCode: { x: 2, options: { settingSources: [], resume: 'r' } } });
+    expect(withClaudeCodeOptions(undefined, { resume: 'r' })).toEqual({ claudeCode: { options: { resume: 'r' } } });
   });
 });

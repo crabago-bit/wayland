@@ -57,6 +57,12 @@ export type ForkSessionParams = {
   cwd: string;
   mcpServers?: McpServer[];
   additionalDirectories?: string[];
+  /**
+   * ACP `_meta` for the fork. Its `claudeCode.options` are MERGED with the
+   * Claude fork's own `resume` option (the JARVIS ladder's settings override
+   * must survive a fork).
+   */
+  meta?: Record<string, unknown>;
 };
 
 export type ProtocolFactory = (stream: Stream, handlers: ProtocolHandlers) => AcpProtocol;
@@ -122,6 +128,7 @@ export class AcpProtocol {
       cwd: params.cwd,
       mcpServers: params.mcpServers ?? [],
       additionalDirectories: params.additionalDirectories,
+      ...(params.meta ? { _meta: params.meta } : {}),
     });
   }
 

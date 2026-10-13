@@ -319,7 +319,7 @@ export class ProcessAcpClient implements AcpClient {
       this.conn.extMethod('session/new', {
         cwd: params.cwd,
         mcpServers: params.mcpServers ?? [],
-        _meta: { claudeCode: { options: { resume: params.sessionId } } },
+        _meta: withClaudeCodeOptions(params.meta, { resume: params.sessionId }),
         forkSession: true,
       })
     ) as Promise<ForkSessionResponse>;
@@ -1099,4 +1099,18 @@ export class ProcessAcpClient implements AcpClient {
     }
     return removed;
   }
+}
+
+/**
+ * `meta` with `extra` merged into its `claudeCode.options` (other `_meta` keys
+ * and options are kept). Used so a fork keeps a caller's options, e.g. the
+ * JARVIS ladder's `settingSources`, alongside its own `resume`.
+ */
+export function withClaudeCodeOptions(
+  meta: Record<string, unknown> | undefined,
+  extra: Record<string, unknown>
+): Record<string, unknown> {
+  const claudeCode = (meta?.claudeCode ?? {}) as Record<string, unknown>;
+  const options = (claudeCode.options ?? {}) as Record<string, unknown>;
+  return { ...meta, claudeCode: { ...claudeCode, options: { ...options, ...extra } } };
 }
