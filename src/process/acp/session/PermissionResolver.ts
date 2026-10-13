@@ -70,6 +70,39 @@ function buildCacheKey(request: RequestPermissionRequest): string {
 
 // ─── PermissionResolver ─────────────────────────────────────────
 
+/**
+ * A policy consulted BEFORE every other level (yolo, cache, UI): the JARVIS
+ * autonomy ladder plugs in here. Generic on purpose - the resolver knows
+ * nothing about rungs, only about the three answers a gate can give.
+ */
+export type PermissionGateVerdict =
+  /** Continue as if there were no gate, optionally with a narrowed option list. */
+  | { action: 'pass'; options?: RequestPermissionRequest['options'] }
+  /** Answer with a rejection now. Nothing is asked, cached or persisted. */
+  | { action: 'deny' }
+  /**
+   * A HUMAN must answer: skips yolo and the approval cache, is flagged
+   * `autonomyHold` on the UI data so no auto-approver downstream acts on it,
+   * and its answer is never cached. `settle` is told how it ended.
+   */
+  | {
+      action: 'hold';
+      options?: RequestPermissionRequest['options'];
+      settle?: (approved: boolean) => void;
+    };
+
+export type PermissionGate = {
+  check(request: RequestPermissionRequest): PermissionGateVerdict;
+};
+
+/** The rejection a gate's `deny` answers with: the request's own reject option, else "no decision". */
+function denyResponse(request: RequestPermissionRequest): RequestPermissionResponse {
+  const reject = request.options.find((o) => o.kind.startsWith('reject'));
+  return reject
+    ? { outcome: { outcome: 'selected', optionId: reject.optionId } }
+    : { outcome: { outcome: 'cancelled' } };
+}
+
 type PendingPermission = {
   callId: string;
   resolve: (response: RequestPermissionResponse) => void;
@@ -112,10 +145,14 @@ type PermissionResolverConfig = {
    * because it was waiting on them.
    */
   onHoldExpired?: (info: { callId: string; title: string; deadlineMs: number }) => void;
+  /** JARVIS autonomy ladder (or any other pre-approval policy). See {@link PermissionGate}. */
+  gate?: PermissionGate;
 };
 
 type PendingPermissionWithContext = PendingPermission & {
   cacheKey: string;
+  /** Set when a gate HELD this call: never cached, and `settle` hears the outcome. */
+  held?: { settle?: (approved: boolean) => void; allowOptionIds?: ReadonlySet<string> };
 };
 
 export class PermissionResolver {
@@ -129,6 +166,7 @@ export class PermissionResolver {
   private holdDeadlineMs?: number;
   /** Memoized one-shot rehydration of persisted approvals (#672). */
   private hydration?: Promise<void>;
+  private readonly gate?: PermissionGate;
 
   constructor(config: PermissionResolverConfig) {
     this.yoloMode = config.autoApproveAll;
@@ -137,6 +175,7 @@ export class PermissionResolver {
     this.persistFn = config.persist;
     this.holdDeadlineMs = config.holdDeadlineMs;
     this.onHoldExpired = config.onHoldExpired;
+    this.gate = config.gate;
   }
 
   /**
@@ -185,9 +224,22 @@ export class PermissionResolver {
   }
 
   async evaluate(
-    request: RequestPermissionRequest,
+    originalRequest: RequestPermissionRequest,
     uiCallback: (data: PermissionUIData) => void
   ): Promise<RequestPermissionResponse> {
+    // Level 0: the gate (JARVIS autonomy ladder). Runs before YOLO and before
+    // the cache, so neither a blanket auto-approve nor a stale "allow always"
+    // can buy past a hard floor or a rung.
+    let request = originalRequest;
+    let held: PendingPermissionWithContext['held'];
+    if (this.gate) {
+      const verdict = this.gate.check(originalRequest);
+      if (verdict.action === 'deny') return denyResponse(originalRequest);
+      if (verdict.options) request = { ...originalRequest, options: verdict.options };
+      if (verdict.action === 'hold') held = { settle: verdict.settle };
+    }
+    if (held) return this.delegate(request, buildCacheKey(request), uiCallback, held);
+
     // Level 1: YOLO mode - auto-approve everything (client-side fallback).
     // Short-circuits before the cache, so no need to hydrate persisted approvals.
     if (this.yoloMode) {
@@ -210,10 +262,22 @@ export class PermissionResolver {
     }
 
     // Level 3: UI delegation
+    return this.delegate(request, cacheKey, uiCallback);
+  }
+
+  private delegate(
+    request: RequestPermissionRequest,
+    cacheKey: string,
+    uiCallback: (data: PermissionUIData) => void,
+    held?: PendingPermissionWithContext['held']
+  ): Promise<RequestPermissionResponse> {
     const { toolCall } = request;
     const callId = toolCall.toolCallId;
+    if (held) {
+      held.allowOptionIds = new Set(request.options.filter((o) => o.kind.startsWith('allow')).map((o) => o.optionId));
+    }
     return new Promise<RequestPermissionResponse>((resolve, reject) => {
-      const entry: PendingPermissionWithContext = { callId, resolve, reject, createdAt: Date.now(), cacheKey };
+      const entry: PendingPermissionWithContext = { callId, resolve, reject, createdAt: Date.now(), cacheKey, held };
       this.pending.set(callId, entry);
       // #1045: arm the deadline BEFORE the UI callback. `uiCallback` is
       // synchronous today, but arming after it would make the bound depend on
@@ -247,6 +311,7 @@ export class PermissionResolver {
           range: l.line != null ? { startLine: l.line } : undefined,
         })),
         rawInput: toolCall.rawInput,
+        ...(held ? { autonomyHold: true } : {}),
       });
     });
   }
@@ -271,6 +336,7 @@ export class PermissionResolver {
     if (!entry) return;
     this.pending.delete(callId);
     if (entry.expiryTimer) clearTimeout(entry.expiryTimer);
+    entry.held?.settle?.(false);
 
     entry.resolve(
       denyOptionId !== undefined
@@ -289,6 +355,14 @@ export class PermissionResolver {
     // unattended run's timer alive for its full deadline after every answer.
     if (entry.expiryTimer) clearTimeout(entry.expiryTimer);
 
+    // A gate-held call is answered once, by a person, for THIS call only. Its
+    // "allow always" is not remembered: the next one must be asked again.
+    if (entry.held) {
+      entry.held.settle?.(entry.held.allowOptionIds?.has(optionId) ?? false);
+      entry.resolve({ outcome: { outcome: 'selected', optionId } });
+      return;
+    }
+
     // Cache "allow always" decisions for future auto-approval (never cache deny)
     if (optionId.startsWith('allow_') && optionId.includes('always')) {
       this.cache.set(entry.cacheKey, optionId);
@@ -304,6 +378,7 @@ export class PermissionResolver {
   rejectAll(error: Error): void {
     for (const entry of this.pending.values()) {
       if (entry.expiryTimer) clearTimeout(entry.expiryTimer);
+      entry.held?.settle?.(false);
       entry.reject(error);
     }
     this.pending.clear();

@@ -742,6 +742,11 @@ export interface IConfirmation<Option extends any = any> {
    * Used for "always allow" permission memory
    */
   commandType?: string;
+  /**
+   * JARVIS autonomy ladder: a person must answer this one. No mode, trusted
+   * workspace or blanket yolo may auto-confirm it.
+   */
+  autonomyHold?: boolean;
 }
 
 /**

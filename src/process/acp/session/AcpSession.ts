@@ -16,7 +16,7 @@ import { stripAnsi } from '@process/agent/wcore/stderrLog';
 import { redactSecrets } from '@process/utils/secretRedaction';
 import { InputPreprocessor } from '@process/acp/session/InputPreprocessor';
 import { MessageTranslator } from '@process/acp/session/MessageTranslator';
-import { PermissionResolver } from '@process/acp/session/PermissionResolver';
+import { PermissionResolver, type PermissionGate } from '@process/acp/session/PermissionResolver';
 import { loadWorkspaceApprovals, saveWorkspaceApproval } from '@process/acp/session/ApprovalPersistence';
 import { PromptExecutor } from '@process/acp/session/PromptExecutor';
 import { SessionLifecycle } from '@process/acp/session/SessionLifecycle';
@@ -47,6 +47,8 @@ export type SessionOptions = {
    * failed.
    */
   onPermissionHoldExpired?: (info: { callId: string; title: string; deadlineMs: number }) => void;
+  /** Pre-approval policy (JARVIS autonomy ladder), consulted before YOLO and the cache. */
+  permissionGate?: PermissionGate;
 };
 
 const VALID_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = {
@@ -204,6 +206,7 @@ export class AcpSession {
       // session leaves it undefined and keeps prompting indefinitely.
       holdDeadlineMs: agentConfig.unattendedHoldDeadlineMs,
       onHoldExpired: options?.onPermissionHoldExpired,
+      gate: options?.permissionGate,
     });
 
     this.lifecycle = new SessionLifecycle(

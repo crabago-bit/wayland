@@ -56,6 +56,8 @@ export type OldAcpAgentConfig = {
     activeMcpServers?: string[];
     /** #1045: ms a held tool call may wait in an UNATTENDED run before it is denied. */
     unattendedHoldDeadlineMs?: number;
+    /** JARVIS autonomy: id half of the `custom:<id>` rung key (see `autonomyAgentKey`). */
+    customAgentId?: string;
   };
   onStreamEvent: (data: unknown) => void;
   onSignalEvent?: (data: unknown) => void;

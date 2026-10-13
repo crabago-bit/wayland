@@ -156,6 +156,12 @@ export type PermissionUIData = {
   }>;
   locations?: Array<{ path: string; range?: { startLine: number; endLine?: number } }>;
   rawInput?: unknown;
+  /**
+   * JARVIS autonomy ladder: this call was HELD for a person. Nothing downstream
+   * (session mode, trusted workspace, Autopilot guardrail, blanket yolo) may
+   * auto-approve it.
+   */
+  autonomyHold?: boolean;
 };
 
 // ─── Auth ───────────────────────────────────────────────────────

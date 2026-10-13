@@ -34,7 +34,8 @@ import type { IResponseMessage } from '@/common/adapter/ipcBridge';
 import { channelEventBus } from '@process/channels/agent/ChannelEventBus';
 import { teamEventBus } from '@process/team/teamEventBus';
 import type { TProviderWithModel } from '@/common/config/storage';
-import { buildWCoreSessionMcpServers } from '@process/agent/acp/mcpSessionConfig';
+import { buildWCoreSessionMcpServers, wrapWCoreServersWithAutonomy } from '@process/agent/acp/mcpSessionConfig';
+import { resolveConfiguredSpawnAutonomy } from '@process/services/jarvis/sessionAutonomy';
 import { WCoreMcpAgent } from '@process/services/mcpServices/agents/WCoreMcpAgent';
 import { mcpService } from '@process/services/mcpServices/McpService';
 import { normalizeMcpServerForSpawn } from '@/common/mcp/normalizeMcpServer';
@@ -841,7 +842,15 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
           // config.toml `WCoreMcpAgent` deliberately keeps portable for Linux
           // AppImage) because this file is rewritten on every launch.
           const spawnableServers = normalizedServers.map((server) => applyBuiltinMcpRuntime(server));
-          const authedServers = await mcpService.attachOAuthTokens(spawnableServers);
+          const oauthServers = await mcpService.attachOAuthTokens(spawnableServers);
+          // JARVIS autonomy ladder: an agent with a configured rung gets every
+          // connector published through the tool-filter shim (see
+          // `wrapWCoreServersWithAutonomy`). No configured rung = unchanged.
+          const autonomy = await resolveConfiguredSpawnAutonomy({
+            backend: 'wcore',
+            customAgentId: (mergedData as { customAgentId?: string }).customAgentId ?? mergedData.presetAssistantId,
+          });
+          const authedServers = autonomy ? wrapWCoreServersWithAutonomy(oauthServers, autonomy) : oauthServers;
           // OAuth refresh can change the exact launch definition. Rebind before
           // publication so a receipt can only correlate to what Core received.
           expectedSessionMcpServers = authedServers.map((server) =>

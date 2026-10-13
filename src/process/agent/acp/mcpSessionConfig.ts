@@ -383,6 +383,39 @@ export function buildWCoreSessionMcpServers(
   );
 }
 
+/**
+ * JARVIS autonomy ladder for a Desktop-managed Wayland Core launch.
+ *
+ * Core loads connectors from the launch-local `config.toml`, not from an ACP
+ * `session/new` array, so the shim has to be written INTO that table: every
+ * stdio connector becomes "spawn the shim, which spawns the server", and every
+ * hosted connector becomes a stdio descriptor for the shim's HTTP bridge. Core
+ * then never holds a descriptor the ladder does not sit in front of.
+ *
+ * Applied to the FINAL launch definitions (after builtin-runtime resolution
+ * and OAuth attachment) so the shim spawns exactly what Core would have.
+ */
+export function wrapWCoreServersWithAutonomy(servers: IMcpServer[], autonomy: ToolFilterSpawnAutonomy): IMcpServer[] {
+  return servers.map((server): IMcpServer => {
+    const selection = hasExplicitToolSelection(server) ? (server.allowedTools ?? []) : null;
+    const transport = server.transport;
+    if (transport.type === 'stdio') {
+      const spawn = wrapSpawnWithToolFilter(
+        { command: transport.command, args: transport.args ?? [], env: transport.env ?? {} },
+        selection,
+        autonomy
+      );
+      return { ...server, transport: { type: 'stdio', command: spawn.command, args: spawn.args, env: spawn.env } };
+    }
+    const spawn = wrapHostedWithToolFilter(
+      { url: transport.url, type: transport.type, headers: transport.headers },
+      selection,
+      autonomy
+    );
+    return { ...server, transport: { type: 'stdio', command: spawn.command, args: spawn.args, env: spawn.env } };
+  });
+}
+
 /** Config shape passed from TeamSessionService to AgentManagers */
 export type TeamMcpStdioConfig = {
   name: string;

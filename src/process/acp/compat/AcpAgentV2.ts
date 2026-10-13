@@ -50,6 +50,9 @@ import { McpConfig } from '../session/McpConfig';
 import { loadRuntimeMcpServers } from '@process/services/mcpServices/runtimeMcpServers';
 import type { McpSessionBackend, McpSessionPublicationInput } from '@/common/mcp/sessionReceipt';
 import { createMcpSessionDigestKey } from '@process/services/mcpServices/mcpSessionTruthGate';
+import { clampSessionModeForRung } from '@/common/jarvis/nativeAutonomy';
+import type { ToolFilterSpawnAutonomy } from '@process/services/mcpServices/builtinMcpRuntime';
+import { createAutonomyPermissionGate, resolveConfiguredSpawnAutonomy } from '@process/services/jarvis/sessionAutonomy';
 
 /**
  * Temporary: backend-specific CLI login arguments.
@@ -143,6 +146,13 @@ export class AcpAgentV2 {
   // legacy path exists: the live projection is always minted against a current
   // correlated launch. Falls back to a self-minted identity only when unset.
   private readonly mcpPublicationBinding?: McpSessionPublicationBinding;
+  /** `custom:<id>` half of the JARVIS autonomy key; see `autonomyAgentKey`. */
+  private readonly customAgentId?: string;
+  /**
+   * The JARVIS autonomy ladder for this agent, resolved once per session in
+   * `ensureSession`. `undefined` = no configured rung = today's behaviour.
+   */
+  private autonomy?: ToolFilterSpawnAutonomy;
 
   // Cached state from callbacks
   private cachedModelInfo: AcpModelInfo | null = null;
@@ -201,6 +211,7 @@ export class AcpAgentV2 {
     this.onAvailableCommandsUpdate = config.onAvailableCommandsUpdate;
     this.onMcpProjection = config.onMcpProjection;
     this.mcpPublicationBinding = (config as { mcpPublication?: McpSessionPublicationBinding }).mcpPublication;
+    this.customAgentId = config.extra?.customAgentId;
     this.agentConfig = toAgentConfig(config);
   }
 
@@ -235,6 +246,10 @@ export class AcpAgentV2 {
       (this.agentConfig as { authCredentials?: Record<string, string> }).authCredentials = creds;
     }
 
+    // Wayland's own coordination servers (team / team guide): exempt from the
+    // autonomy gate, see `createAutonomyPermissionGate`.
+    const internalMcpServers: string[] = this.agentConfig.teamMcpConfig ? [this.agentConfig.teamMcpConfig.name] : [];
+
     // Inject team-guide MCP server for solo agents (not in team mode) so the
     // agent has the aion_create_team tool available - mirrors AcpAgent.loadBuiltinSessionMcpServers().
     if (!this.agentConfig.teamMcpConfig) {
@@ -255,9 +270,21 @@ export class AcpAgentV2 {
             ...(this.agentConfig.presetMcpServers || []),
             guideServer,
           ];
+          internalMcpServers.push(guideServer.name);
         }
       }
     }
+
+    // JARVIS autonomy ladder. Resolved BEFORE the MCP projection and the
+    // session so the same snapshot drives all three enforcement points: the
+    // connector shim, the native-tool permission gate, and the mode clamp.
+    // Every path that runs this agent (chat, channel, cron, team) comes through
+    // here, so an unattended run is enforced exactly like an attended one.
+    this.autonomy = await resolveConfiguredSpawnAutonomy({
+      backend: this.agentConfig.agentBackend,
+      customAgentId: this.customAgentId,
+    });
+    if (this.autonomy) this.applyAutonomyModeClamp(this.autonomy);
 
     // Load user-configured (builtin) MCP servers from settings, filtered by
     // cached agent MCP capabilities. Mirrors AcpAgent.loadBuiltinSessionMcpServers().
@@ -293,6 +320,7 @@ export class AcpAgentV2 {
         },
         capabilities: caps,
         activeServerIds: binding.activeServerIds,
+        autonomy: this.autonomy,
       });
       this.onMcpProjection?.(projection);
       const userServers = projection.servers;
@@ -368,6 +396,11 @@ export class AcpAgentV2 {
       maxResumeRetries: 2,
       initialDesired: this.agentConfig.initialDesired,
       onPermissionHoldExpired: (info) => this.reportHoldExpired(info),
+      permissionGate: this.autonomy
+        ? createAutonomyPermissionGate(this.autonomy, this.agentConfig.agentBackend, {
+            internalMcpServers,
+          })
+        : undefined,
     };
 
     this.session = new AcpSession(this.agentConfig, clientFactory, callbacks, sessionOptions);
@@ -386,6 +419,29 @@ export class AcpAgentV2 {
     }
 
     return this.session;
+  }
+
+  /**
+   * Keep a laddered agent out of any mode its rung does not allow (see
+   * `clampSessionModeForRung`). Applied to the initial mode and to the blanket
+   * client-side auto-approve flag; `setMode` applies it to every later switch.
+   *
+   * `yoloMode` is cleared outright: it short-circuits inside the resolver AFTER
+   * the gate, but SessionLifecycle also uses it to push the backend into its
+   * full-auto mode directly, bypassing `setMode` and therefore this clamp.
+   */
+  private applyAutonomyModeClamp(autonomy: ToolFilterSpawnAutonomy): void {
+    const config = this.agentConfig as { yoloMode?: boolean; initialDesired?: AgentConfig['initialDesired'] };
+    const requested =
+      config.initialDesired?.mode ?? (config.yoloMode ? getFullAutoMode(this.agentConfig.agentBackend) : undefined);
+    const clamped = clampSessionModeForRung(requested, autonomy.rung, this.agentConfig.agentBackend);
+    if (clamped !== requested) {
+      console.warn(
+        `[AcpAgentV2] Autonomy rung ${autonomy.rung} (${autonomy.agent}): session mode ${requested ?? '(unset)'} clamped to ${clamped}`
+      );
+    }
+    config.initialDesired = { ...config.initialDesired, mode: clamped };
+    config.yoloMode = false;
   }
 
   /**
@@ -596,6 +652,9 @@ export class AcpAgentV2 {
                 name: opt.label,
                 kind: opt.kind,
               })),
+              // JARVIS autonomy: held for a person; the manager must not
+              // auto-approve it in any mode.
+              ...(data.autonomyHold ? { autonomyHold: true } : {}),
             },
           });
         }
@@ -1089,7 +1148,20 @@ export class AcpAgentV2 {
     });
   }
 
-  async setMode(mode: string): Promise<{ success: boolean; error?: string }> {
+  async setMode(requestedMode: string): Promise<{ success: boolean; error?: string }> {
+    let mode = requestedMode;
+    if (this.autonomy) {
+      mode = clampSessionModeForRung(requestedMode, this.autonomy.rung, this.agentConfig.agentBackend);
+      if (mode !== requestedMode && this.autonomy.rung <= 2) {
+        // Below rung 3 the requested mode is refused outright, and the session
+        // is (re)asserted into the clamped one so it can never drift there.
+        this.session?.setMode(mode);
+        return {
+          success: false,
+          error: `Autonomy rung ${this.autonomy.rung} does not allow session mode "${requestedMode}" for ${this.autonomy.agent}.`,
+        };
+      }
+    }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.modeOp = null;
