@@ -37,11 +37,41 @@ describe('decideNativePermission - hard floor', () => {
     'rm -rf ./old-bids',
     'sudo rm /var/data/x.db',
     'find . -name "*.tmp" | xargs rm',
-    'psql -c "DROP TABLE estimates"',
-    'curl -X POST https://api.stripe.com/v1/payouts',
+    'find . -name "*.bak" -delete',
+    'bash -c "rm -rf build"',
+    'cd /tmp && /bin/rm x',
+    'git rm docs/old.md',
+    'npm rm left-pad',
+    'stripe payouts create --amount 100',
+    'kubectl delete pod web-1',
+    'gh release delete v1',
     'rm -rf ~',
   ])('denies the shell command %s at rung 4', (command) => {
     expect(decide({ kind: 'execute', title: command, rawInput: { command } }, 4).action).toBe('deny');
+  });
+
+  it.each([
+    'cat payroll.csv',
+    'grep -i payment spec.txt',
+    'git commit -m "fix signing flow"',
+    'docker compose up --remove-orphans',
+    'curl https://api.example.com/v1/payments',
+    'psql -c "DROP TABLE estimates"',
+    'echo "do not rm this"',
+  ])('a command that merely MENTIONS a floor word (%s) follows the rung, not the floor', (command) => {
+    const at = (rung: AutonomyRung) => decide({ kind: 'execute', title: command, rawInput: { command } }, rung);
+    expect(at(1).action).toBe('deny'); // rung 1 refuses every write anyway
+    expect(at(2).action).toBe('hold');
+    expect(at(3)).toMatchObject({ action: 'pass', loggable: true });
+    expect(at(4)).toMatchObject({ action: 'pass', loggable: true });
+  });
+
+  it("reads the command, not the agent's prose description", () => {
+    const v = decide(
+      { kind: 'execute', title: 'ls', rawInput: { command: 'ls -la', description: 'Delete old drafts' } },
+      4
+    );
+    expect(v.action).toBe('pass');
   });
 
   it('honours operator floor keywords on shell commands', () => {
