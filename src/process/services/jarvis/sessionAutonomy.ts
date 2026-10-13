@@ -137,9 +137,17 @@ export function createAutonomyPermissionGate(
         return { action: 'deny' };
       }
       if (verdict.action === 'hold') {
+        // A held call is approved ONCE. An `allow_always` answer would make the
+        // backend (e.g. the Claude ACP bridge) remember a session rule and stop
+        // asking, so every later matching call would bypass the ladder.
+        const once = (options ?? request.options).filter((option) => option.kind !== 'allow_always');
+        if (!once.some((option) => option.kind.startsWith('allow'))) {
+          record(verdict.tool, verdict.connector, 'refused', `${verdict.reason} No one-time approval was offered.`);
+          return { action: 'deny' };
+        }
         return {
           action: 'hold',
-          options,
+          options: once,
           settle: (approved: boolean) =>
             record(
               verdict.tool,
