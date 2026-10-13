@@ -94,9 +94,11 @@ describe('the run history behind a deliverable', () => {
   });
 
   it('lists three real runs newest first, each addressable by ARTIFACT ID and not by path', async () => {
-    const first = await publishRun({ 'brief.md': 'monday' }, new Date('2026-08-18T07:00:00Z'));
-    const second = await publishRun({ 'brief.md': 'tuesday' }, new Date('2026-08-19T07:00:00Z'));
-    const third = await publishRun({ 'brief.md': 'wednesday' }, new Date('2026-08-20T07:00:00Z'));
+    // Local wall-clock instants: a run's series date is the LOCAL calendar day,
+    // so a UTC instant would fall on the previous day west of UTC-7.
+    const first = await publishRun({ 'brief.md': 'monday' }, new Date(2026, 7, 18, 7));
+    const second = await publishRun({ 'brief.md': 'tuesday' }, new Date(2026, 7, 19, 7));
+    const third = await publishRun({ 'brief.md': 'wednesday' }, new Date(2026, 7, 20, 7));
 
     const view = await buildArtifactSeriesView(await anArtifactOf(third), effects);
 
@@ -119,13 +121,13 @@ describe('the run history behind a deliverable', () => {
     // turn threw left nothing on disk at all, so the series simply stopped
     // advancing and the user had no way to tell "today has not run yet" from
     // "today ran and broke".
-    const good = await publishRun({ 'brief.md': 'monday' }, new Date('2026-08-19T07:00:00Z'));
+    const good = await publishRun({ 'brief.md': 'monday' }, new Date(2026, 7, 19, 7));
     await recordRunOutcome(seriesDir, {
       runId: 'rfailed-0001',
       taskId: TASK,
       status: 'failed',
       message: 'engine died on start',
-      now: new Date('2026-08-20T07:00:00Z'),
+      now: new Date(2026, 7, 20, 7),
     });
 
     const view = await buildArtifactSeriesView(await anArtifactOf(good), effects);
@@ -139,19 +141,19 @@ describe('the run history behind a deliverable', () => {
   });
 
   it('distinguishes a run that produced NOTHING from one that FAILED', async () => {
-    const good = await publishRun({ 'brief.md': 'monday' }, new Date('2026-08-18T07:00:00Z'));
+    const good = await publishRun({ 'brief.md': 'monday' }, new Date(2026, 7, 18, 7));
     await recordRunOutcome(seriesDir, {
       runId: 'rempty-0001',
       taskId: TASK,
       status: 'no-output',
-      now: new Date('2026-08-19T07:00:00Z'),
+      now: new Date(2026, 7, 19, 7),
     });
     await recordRunOutcome(seriesDir, {
       runId: 'rbroken-001',
       taskId: TASK,
       status: 'failed',
       message: 'engine died on start',
-      now: new Date('2026-08-20T07:00:00Z'),
+      now: new Date(2026, 7, 20, 7),
     });
 
     const view = await buildArtifactSeriesView(await anArtifactOf(good), effects);
@@ -160,7 +162,7 @@ describe('the run history behind a deliverable', () => {
   });
 
   it('treats a published run with no VERIFIED deliverable as no-output, not as a success', async () => {
-    const good = await publishRun({ 'brief.md': 'monday' }, new Date('2026-08-19T07:00:00Z'));
+    const good = await publishRun({ 'brief.md': 'monday' }, new Date(2026, 7, 19, 7));
 
     // A run whose only staged entry is a symlink: the directory publishes, the
     // ledger refuses the file, and the user has a run with nothing in it. A
@@ -169,14 +171,14 @@ describe('the run history behind a deliverable', () => {
       workspace,
       taskId: TASK,
       series: SERIES,
-      now: new Date('2026-08-20T07:00:00Z'),
+      now: new Date(2026, 7, 20, 7),
     });
     await fs.writeFile(path.join(root, 'outside.md'), 'not a deliverable', 'utf8');
     await fs.symlink(path.join(root, 'outside.md'), path.join(handle.stagingDir, 'brief.md'));
     const outcome = await commitTaskRun(handle, {
       ledgerPath,
       declaredBy: 'Morning Brief',
-      now: new Date('2026-08-20T07:00:00Z'),
+      now: new Date(2026, 7, 20, 7),
     });
     expect(outcome.published).toBe(true);
 
@@ -213,7 +215,7 @@ describe('the run history behind a deliverable', () => {
     const runIds: string[] = [];
     for (let index = 0; index < total; index += 1) {
       // eslint-disable-next-line no-await-in-loop -- publication is sequential by construction; a parallel burst would not model a schedule
-      runIds.push(await publishRun({ 'brief.md': `run ${index}` }, new Date(Date.UTC(2026, 6, index + 1, 7))));
+      runIds.push(await publishRun({ 'brief.md': `run ${index}` }, new Date(2026, 6, index + 1, 7)));
     }
 
     const view = await buildArtifactSeriesView(await anArtifactOf(runIds[total - 1]), effects);
