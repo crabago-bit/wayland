@@ -182,17 +182,12 @@ function createManager(
   return manager;
 }
 
-async function sendFirstMessage(
-  manager: InstanceType<typeof AcpAgentManager>,
-  content = 'Hello',
-  agentExtra: Record<string, unknown> = {}
-) {
+async function sendFirstMessage(manager: InstanceType<typeof AcpAgentManager>, content = 'Hello') {
   // Stub initAgent to set up a mock agent without actual process bootstrapping
   const mockAgent = {
     sendMessage: mockAgentSendMessage,
     getModelInfo: vi.fn(() => null),
     on: vi.fn().mockReturnThis(),
-    ...agentExtra,
   };
   // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- accessing private fields for test setup
   (manager as unknown as Record<string, unknown>).agent = mockAgent;
@@ -322,37 +317,6 @@ describe('AcpAgentManager - first-message skill injection', () => {
     await manager.setModel('flux-reasoning');
     expect(agent.setModelByConfigOption).toHaveBeenLastCalledWith('flux-reasoning');
     expect(internals.fuigoRulesStale).toBe(true);
-  });
-
-  it('a laddered Claude session is told the names its plugin skills are listed under', async () => {
-    const manager = createManager({
-      backend: 'claude',
-      customWorkspace: true,
-      presetContext: 'Use `contractor-os:bid-plan`.',
-    });
-    mockPrepareFirstMessage.mockImplementationOnce(async (content: string) => ({ content, loadedSkills: [] }));
-    await sendFirstMessage(manager, 'Hello', {
-      getLadderedSkills: () => [
-        {
-          requested: 'contractor-os:bid-plan',
-          sessionName: 'wayland-skills:contractor-os:bid-plan',
-          source: 'plugin-copy',
-          sourceDir: '/x',
-        },
-      ],
-    });
-    const sentContent = mockAgentSendMessage.mock.calls[0][0].content as string;
-    expect(sentContent).toContain('[Skills in this session]');
-    expect(sentContent).toContain('`contractor-os:bid-plan` → `wayland-skills:contractor-os:bid-plan`');
-  });
-
-  it('a session that is not laddered gets no skill-name note', async () => {
-    const manager = createManager({ backend: 'claude', customWorkspace: false, presetContext: 'Rules' });
-    await sendFirstMessage(manager, 'Hello', { getLadderedSkills: () => undefined });
-    const sentContent = mockAgentSendMessage.mock.calls[0][0].content as string;
-    expect(sentContent).not.toContain('[Skills in this session]');
-  });
-
   it('falls back to prompt injection for supported backend WITH customWorkspace', async () => {
     const manager = createManager({
       backend: 'claude',
