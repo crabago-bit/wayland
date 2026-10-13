@@ -6,7 +6,9 @@ import {
   hasExplicitToolSelection,
   mergeMcpSpawnEnv,
   resolveSessionMcpStdioSpawn,
+  wrapHostedWithToolFilter,
   wrapSpawnWithToolFilter,
+  type ToolFilterSpawnAutonomy,
 } from '@process/services/mcpServices/builtinMcpRuntime';
 import { isServerActiveForSession } from '@process/agent/acp/mcpSessionConfig';
 import {
@@ -42,6 +44,13 @@ export type McpConfigPublicationRequest = {
   publication: McpSessionPublicationInput;
   capabilities?: AcpMcpCapabilities;
   activeServerIds?: readonly string[];
+  /**
+   * JARVIS autonomy ladder for this agent, or absent when the agent has no
+   * configured rung. When present EVERY connector is published through the
+   * tool-filter shim (stdio spawned by it, http/sse bridged by it), so each
+   * `tools/call` meets the rung and the hard floor. Absent = today's behaviour.
+   */
+  autonomy?: ToolFilterSpawnAutonomy;
 };
 
 export type McpConfigProjection = {
@@ -116,7 +125,7 @@ export class McpConfig {
    * fail-closed omissions and recorded as desktop failures, never publications.
    */
   static projectStorageConfig(servers: IMcpServer[], request: McpConfigPublicationRequest): McpConfigProjection {
-    const { publication, activeServerIds } = request;
+    const { publication, activeServerIds, autonomy } = request;
     const caps = request.capabilities ?? DEFAULT_MCP_CAPABILITIES;
     const eligible = servers
       .filter(
@@ -143,6 +152,33 @@ export class McpConfig {
     for (const server of eligible) {
       let runtimeServer: McpServer | undefined;
       let reason: string | undefined;
+      const hostedType = server.transport.type;
+      if (autonomy && (hostedType === 'http' || hostedType === 'streamable_http' || hostedType === 'sse')) {
+        // A hosted connector handed over as a raw URL is one the engine calls
+        // directly - no rung, no floor. Bridge it through the shim as a STDIO
+        // descriptor instead; with no stdio transport to bridge through, the
+        // connector is withheld (fail closed), never published raw.
+        const hosted = server.transport as { type: typeof hostedType; url: string; headers?: Record<string, string> };
+        if (!caps.stdio) {
+          omissions.push({
+            server,
+            reason: 'Autonomy ladder: hosted connector withheld (no stdio transport to bridge it through the filter)',
+          });
+          continue;
+        }
+        const spawn = wrapHostedWithToolFilter(
+          { url: hosted.url, type: hosted.type, headers: hosted.headers },
+          hasExplicitToolSelection(server) ? (server.allowedTools ?? []) : null,
+          autonomy
+        );
+        projected.push({
+          name: server.name,
+          command: spawn.command,
+          args: spawn.args,
+          env: toNameValueArray(spawn.env),
+        });
+        continue;
+      }
       switch (server.transport.type) {
         case 'stdio': {
           if (!caps.stdio) {
@@ -155,8 +191,17 @@ export class McpConfig {
           const resolved = resolveSessionMcpStdioSpawn(server.transport.command, server.transport.args ?? [], {
             libraryEntryId: server.libraryEntryId,
           });
-          const spawn = hasExplicitToolSelection(server)
-            ? wrapSpawnWithToolFilter(resolved, server.allowedTools ?? [])
+          // The ladder rides on the #998 shim: the engine spawns the shim, the
+          // shim spawns the resolved server. The user's per-tool selection is
+          // kept (`null` = no selection, ladder only).
+          const spawn = autonomy
+            ? wrapSpawnWithToolFilter(
+                resolved,
+                hasExplicitToolSelection(server) ? (server.allowedTools ?? []) : null,
+                autonomy
+              )
+            : hasExplicitToolSelection(server)
+              ? wrapSpawnWithToolFilter(resolved, server.allowedTools ?? [])
             : resolved;
           runtimeServer = {
             name: server.name,

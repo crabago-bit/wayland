@@ -1799,7 +1799,31 @@ ${collectedResponses.join('\n')}`;
     this.markTrackedTurnRuntimeActivity();
 
     if (v.type === 'acp_permission') {
-      const { toolCall, options } = v.data as AcpPermissionRequest;
+      const { toolCall, options, autonomyHold } = v.data as AcpPermissionRequest;
+
+      // JARVIS autonomy ladder: the session's permission gate HELD this call
+      // for a person (rung 2 write, or a mode change below rung 3). Every
+      // auto-approval below - yolo, team tools, accept-edits, trusted workspace,
+      // the Autopilot guardrail - is skipped, and the confirmation carries the
+      // flag so BaseAgentManager's blanket yolo cannot confirm it either.
+      if (autonomyHold) {
+        this.addConfirmation({
+          title: toolCall.title || 'messages.permissionRequest',
+          action: 'messages.command',
+          id: v.msg_id,
+          description: toolCall.rawInput?.description || 'messages.agentRequestingPermission',
+          callId: toolCall.toolCallId || v.msg_id,
+          options: options.map((option) => ({ label: option.name, value: option })),
+          autonomyHold: true,
+        });
+        channelEventBus.emitAgentMessage(this.conversation_id, {
+          type: 'error',
+          conversation_id: this.conversation_id,
+          msg_id: v.msg_id,
+          data: 'Permission required. Please open Wayland and confirm the pending request in the conversation panel.',
+        });
+        return;
+      }
 
       // Auto-approve ALL tools when in yolo/bypassPermissions mode.
       if (this.isYoloMode(this.currentMode) && options.length > 0) {

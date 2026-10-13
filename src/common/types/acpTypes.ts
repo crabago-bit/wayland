@@ -1291,6 +1291,8 @@ export interface AcpPermissionRequest {
     content?: ToolCallContentItem[];
     locations?: ToolCallLocationItem[];
   };
+  /** JARVIS autonomy ladder: held for a person; must never be auto-approved. */
+  autonomyHold?: boolean;
 }
 
 // Legacy compatibility type - supports old version data structures

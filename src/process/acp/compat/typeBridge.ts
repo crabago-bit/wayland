@@ -58,6 +58,8 @@ export type OldAcpAgentConfig = {
     unattendedHoldDeadlineMs?: number;
     /** Backend-specific `_meta` for session/new|load (Fuigo `startupHints`). */
     sessionMetadata?: Record<string, unknown>;
+    /** JARVIS autonomy: id half of the `custom:<id>` rung key (see `autonomyAgentKey`). */
+    customAgentId?: string;
   };
   onStreamEvent: (data: unknown) => void;
   onSignalEvent?: (data: unknown) => void;

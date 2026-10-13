@@ -81,7 +81,7 @@ class BaseAgentManager<Data, ConfirmationOption extends any = any>
   }
   protected addConfirmation(data: IConfirmation<ConfirmationOption>) {
     // If yoloMode is active, attempt to auto-confirm instead of adding
-    if (this.yoloMode && data.options && data.options.length > 0) {
+    if (this.yoloMode && !data.autonomyHold && data.options && data.options.length > 0) {
       // Select the first "allow" option (usually proceed_once or similar)
       // Most agents put the positive confirmation as the first option
       const autoOption = data.options[0];
