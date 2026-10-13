@@ -292,6 +292,9 @@ export function wrapSpawnWithToolFilter(
 /** Env var the shim reads its hosted-connector request headers out of. */
 export const TOOL_FILTER_HEADERS_ENV = 'WAYLAND_TOOL_FILTER_HEADERS';
 
+/** Env var the shim reads its hosted-connector URL out of (`--url-env`). */
+export const TOOL_FILTER_URL_ENV = 'WAYLAND_TOOL_FILTER_URL';
+
 /**
  * Point the engine at the filtering shim for a HOSTED (http/streamable_http/sse)
  * connector, with the shim bridging to the real endpoint itself.
@@ -309,8 +312,8 @@ export const TOOL_FILTER_HEADERS_ENV = 'WAYLAND_TOOL_FILTER_HEADERS';
  *
  * Headers travel in the ENVIRONMENT, not on argv: a hosted connector's bearer
  * token lives in its headers, and argv is readable from `ps` by anyone on the
- * box. The URL itself stays on argv - it is not a secret, and having it visible
- * is what makes a stuck connector diagnosable.
+ * box. So does the URL (`--url-env`): many hosted connectors embed an API key
+ * in the path or query string.
  */
 export function wrapHostedWithToolFilter(
   transport: { url: string; type: 'http' | 'streamable_http' | 'sse'; headers?: Record<string, string> },
@@ -333,13 +336,15 @@ export function wrapHostedWithToolFilter(
         ...autonomy.hardFloorKeywords.flatMap((keyword) => ['--floor', keyword]),
       ]
     : [];
-  const env: Record<string, string> = { ...runtime.env };
+  const env: Record<string, string> = { ...runtime.env, [TOOL_FILTER_URL_ENV]: transport.url };
   if (transport.headers && Object.keys(transport.headers).length > 0) {
     env[TOOL_FILTER_HEADERS_ENV] = JSON.stringify(transport.headers);
   }
   return {
     command: runtime.command,
-    args: [scriptPath, ...selection, ...ladder, '--upstream', transport.type, '--url', transport.url],
+    // The URL rides in the environment too: it can embed a key in its path or
+    // query, and argv is world-readable through `ps`.
+    args: [scriptPath, ...selection, ...ladder, '--upstream', transport.type, '--url-env'],
     env,
   };
 }

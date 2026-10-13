@@ -63,6 +63,12 @@ import { createToolFilter, type JsonRpcMessage } from './toolFilterShim';
  */
 export const SHIM_HEADERS_ENV = 'WAYLAND_TOOL_FILTER_HEADERS';
 
+/**
+ * Env var carrying a hosted connector's URL when the shim is given `--url-env`.
+ * A URL can embed a key in its path or query, and argv is readable from `ps`.
+ */
+export const SHIM_URL_ENV = 'WAYLAND_TOOL_FILTER_URL';
+
 /** Which wire the shim uses to reach the real server. */
 export type ShimUpstreamKind = 'stdio' | 'http' | 'sse';
 
@@ -114,7 +120,7 @@ export type ShimArgv = {
  * Returns null when the shape is wrong. The caller must then FAIL, never fall
  * back to running unfiltered.
  */
-export function parseShimArgv(argv: readonly string[]): ShimArgv | null {
+export function parseShimArgv(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): ShimArgv | null {
   const sep = argv.indexOf('--');
   // No `--` at all is legal now: a hosted connector has no upstream argv.
   const head = sep === -1 ? argv.slice() : argv.slice(0, sep);
@@ -133,6 +139,14 @@ export function parseShimArgv(argv: readonly string[]): ShimArgv | null {
     const flag = head[i];
     if (flag === '--allow-all') {
       allowAll = true;
+      continue;
+    }
+    if (flag === '--url-env') {
+      // The URL itself travels in the environment; `--url-env` with nothing
+      // there is malformed, never "no upstream".
+      const fromEnv = env[SHIM_URL_ENV];
+      if (!fromEnv) return null;
+      url = fromEnv;
       continue;
     }
     if (

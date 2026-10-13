@@ -18,7 +18,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { buildAcpSessionMcpServers } from '@process/agent/acp/mcpSessionConfig';
-import { TOOL_FILTER_HEADERS_ENV } from '@process/services/mcpServices/builtinMcpRuntime';
+import { TOOL_FILTER_HEADERS_ENV, TOOL_FILTER_URL_ENV } from '@process/services/mcpServices/builtinMcpRuntime';
 import type { IMcpServer } from '@/common/config/storage';
 import type { ToolFilterSpawnAutonomy } from '@process/services/mcpServices/builtinMcpRuntime';
 
@@ -61,16 +61,17 @@ function bridged(servers: IMcpServer[], capabilities = caps, ladder: ToolFilterS
 }
 
 describe('hosted connectors are bridged through the tool-filter shim', () => {
-  it('hands the engine a stdio descriptor that spawns the shim with the URL', () => {
+  it('hands the engine a stdio descriptor that spawns the shim with the URL in its ENVIRONMENT', () => {
     const descriptor = bridged([hosted()]);
     expect(descriptor.type).toBe('stdio');
     expect(descriptor.name).toBe('hosted');
-    // The URL is the SHIM's argument. The engine spawns the shim and so does
-    // see it on argv - that is fine, and the reason it is on argv rather than
-    // in the environment is that a stuck connector has to be diagnosable. What
-    // matters is that the descriptor is not the endpoint itself: a raw URL here
-    // meant the engine connected directly and no verdict ever ran.
-    expect(descriptor.args).toContain('https://connector.example/mcp');
+    // The URL is the SHIM's input, not the engine's endpoint: a raw URL in the
+    // descriptor meant the engine connected directly and no verdict ever ran.
+    // It travels in env (`--url-env`), never argv - a URL can embed a key in
+    // its path or query, and argv is readable from `ps`.
+    expect(descriptor.args).toContain('--url-env');
+    expect(descriptor.args.join(' ')).not.toContain('connector.example');
+    expect(descriptor.env).toContainEqual({ name: TOOL_FILTER_URL_ENV, value: 'https://connector.example/mcp' });
     expect(descriptor.args.join(' ')).toContain('builtin-mcp-tool-filter');
   });
 
