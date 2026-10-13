@@ -93,16 +93,18 @@ describe('autonomy permission gate', () => {
     expect(result.outcome).toEqual({ outcome: 'cancelled' });
   });
 
-  it('rung 2 holds a write for a person even in YOLO, flags it, never caches its "always"', async () => {
+  it('rung 2 holds a write for a person even in YOLO, offers no "allow always", never caches', async () => {
     const { resolver, rows, persist } = setup(2, { yolo: true });
     const ui = vi.fn<(d: PermissionUIData) => void>();
     const p1 = resolver.evaluate(request('Write proposal.md', 'edit', 'c1'), ui);
     expect(ui).toHaveBeenCalledOnce();
     expect(ui.mock.calls[0][0].autonomyHold).toBe(true);
+    // allow_always would let the backend remember a rule and stop asking.
+    expect(ui.mock.calls[0][0].options.map((o) => o.kind)).toEqual(['allow_once', 'reject_once']);
     expect(rows).toHaveLength(0);
 
-    resolver.resolve('c1', 'allow_always');
-    expect(await p1).toEqual({ outcome: { outcome: 'selected', optionId: 'allow_always' } });
+    resolver.resolve('c1', 'allow');
+    expect(await p1).toEqual({ outcome: { outcome: 'selected', optionId: 'allow' } });
     expect(persist).not.toHaveBeenCalled();
     expect(rows).toEqual([expect.objectContaining({ decision: 'allowed', rung: 2 })]);
 
@@ -143,6 +145,21 @@ describe('autonomy permission gate', () => {
     const result = await resolver.evaluate(request('Read a.md', 'read'), vi.fn());
     expect(result.outcome).toEqual({ outcome: 'selected', optionId: 'allow' });
     expect(rows).toHaveLength(0);
+  });
+
+  it('denies (logged) a held call whose only approval is "allow always"', async () => {
+    const { resolver, rows } = setup(2);
+    const ui = vi.fn();
+    const result = await resolver.evaluate(
+      request('Write a.md', 'edit', 'c1', undefined, [
+        { optionId: 'always', name: 'Always', kind: 'allow_always' },
+        { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
+      ]),
+      ui
+    );
+    expect(ui).not.toHaveBeenCalled();
+    expect(result.outcome).toEqual({ outcome: 'selected', optionId: 'deny' });
+    expect(rows).toEqual([expect.objectContaining({ decision: 'refused' })]);
   });
 
   it('a shimmed server: rung-2 write denied once in the ledger; rung-3 write left to the shim to record', async () => {
