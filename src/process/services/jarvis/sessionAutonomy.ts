@@ -23,6 +23,9 @@ import { decideNativePermission, isOptionAboveRung, normalizeServerName } from '
 import type { PermissionGate, PermissionGateVerdict } from '@process/acp/session/PermissionResolver';
 import type { ToolFilterSpawnAutonomy } from '@process/services/mcpServices/builtinMcpRuntime';
 import { ProcessConfig } from '@process/utils/initStorage';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { appendApprovalTo, type ApprovalRecord } from './approvalsLog';
 import { resolveApprovalsLogPath } from './approvalsPath';
 import { readHardFloorKeywords } from './hardFloor';
@@ -66,30 +69,70 @@ export async function resolveConfiguredSpawnAutonomy(agent: {
 }
 
 /**
- * ACP `_meta` for a LADDERED Claude session: load only PROJECT settings.
+ * Which Claude Code setting sources a LADDERED session may load.
  *
  * Claude Code applies its own `permissions.allow` rules, `defaultMode` and
- * hooks from the user's settings and never asks the ACP client about a call
- * those rules allow - ~/.claude/settings.json on this install allows Edit,
- * Write, Bash(curl *), Slack sends and more, so a rung-1 agent could act
- * without Wayland ever seeing it. `settingSources` is the bridge's own option
- * (`_meta.claudeCode.options`, spread into the SDK query), so dropping `user`
- * and `local` removes those rules for this session only:
+ * hooks and never asks the ACP client about a call those rules allow - this
+ * install's ~/.claude/settings.json allows Edit, Write, Bash(curl *), Slack
+ * sends and more, so a rung-1 agent could act without Wayland seeing it.
+ * `settingSources` is the bridge's own option (`_meta.claudeCode.options`,
+ * spread into the SDK query), so it applies to this session only:
  *
  *  - credentials are NOT settings: the Max subscription login keeps working
- *    from the unchanged CLAUDE_CONFIG_DIR, nothing is copied or linked;
- *  - `project` stays so Wayland's workspace `.claude/skills` and CLAUDE.md
- *    still load (the gate refuses edits to `.claude/settings*.json`, so an
- *    agent cannot grant itself rules there);
- *  - non-laddered sessions send no `_meta` and are unchanged.
+ *    from the unchanged CLAUDE_CONFIG_DIR; nothing is copied or linked;
+ *  - `user` and `local` are never loaded;
+ *  - `project` is loaded only when it is safe: the session's cwd is not $HOME
+ *    or an ancestor of it (there `<cwd>/.claude/settings.json` IS the user
+ *    file), and neither `<cwd>/.claude/settings.json` nor `settings.local.json`
+ *    carries `permissions.allow`, `permissions.defaultMode` or `hooks`.
+ *    Otherwise NO source is loaded (`[]`) - which also drops that workspace's
+ *    CLAUDE.md and `.claude/skills`;
+ *  - the gate refuses writes to `.claude/settings*.json`, so an agent cannot
+ *    grant itself rules mid-session.
  */
-export const LADDERED_CLAUDE_SESSION_META: Readonly<Record<string, unknown>> = Object.freeze({
-  claudeCode: { options: { settingSources: ['project'] } },
-});
+export async function resolveLadderedSettingSources(
+  cwd: string,
+  home: string = os.homedir()
+): Promise<Array<'project'>> {
+  const resolve = async (p: string) => fs.promises.realpath(p).catch(() => path.resolve(p));
+  const [where, homeDir] = await Promise.all([resolve(cwd || '.'), resolve(home)]);
+  const rel = path.relative(where, homeDir);
+  // cwd === $HOME, or $HOME lies below cwd (cwd is an ancestor of $HOME).
+  if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) return [];
+  // `null` = absent (fine); `undefined` = present but unreadable (not provably safe).
+  const files = await Promise.all(
+    ['settings.json', 'settings.local.json'].map(async (name) => {
+      try {
+        return JSON.parse(await fs.promises.readFile(path.join(where, '.claude', name), 'utf8')) as unknown;
+      } catch (error) {
+        return (error as NodeJS.ErrnoException)?.code === 'ENOENT' ? null : undefined;
+      }
+    })
+  );
+  for (const parsed of files) {
+    if (parsed === null) continue;
+    if (parsed === undefined) return [];
+    const settings = (parsed ?? {}) as { permissions?: { allow?: unknown; defaultMode?: unknown }; hooks?: unknown };
+    const allow = settings.permissions?.allow;
+    if ((Array.isArray(allow) && allow.length > 0) || settings.permissions?.defaultMode !== undefined) return [];
+    if (settings.hooks && typeof settings.hooks === 'object' && Object.keys(settings.hooks).length > 0) return [];
+  }
+  return ['project'];
+}
 
-/** The `_meta` a laddered session of `backend` starts with, if any. */
-export function ladderedSessionMeta(backend: string): Record<string, unknown> | undefined {
-  return backend === 'claude' ? { ...LADDERED_CLAUDE_SESSION_META } : undefined;
+/**
+ * The `_meta` a laddered session of `backend` starts with, if any. `extraOptions`
+ * are merged into `claudeCode.options` (e.g. `resume` / `tools` for a fork).
+ */
+export async function resolveLadderedSessionMeta(
+  backend: string,
+  cwd: string,
+  extraOptions: Record<string, unknown> = {},
+  home?: string
+): Promise<Record<string, unknown> | undefined> {
+  if (backend !== 'claude') return undefined;
+  const settingSources = await resolveLadderedSettingSources(cwd, home);
+  return { claudeCode: { options: { ...extraOptions, settingSources } } };
 }
 
 /**
