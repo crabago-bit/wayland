@@ -379,6 +379,34 @@ const PASS_THROUGH_LAUNCHERS: ReadonlySet<string> = new Set([
   'nohup',
 ]);
 
+/** A short-flag cluster (`-tp`, `-vp22`, `-e`)? Returns its letters, else null. */
+const clusterLetters = (word: string): string | null => (/^-[A-Za-z0-9]+$/.test(word) ? word.slice(1) : null);
+
+/**
+ * Like {@link skipFlags}, but understands clusters of short flags: when the LAST
+ * letter of `-tp` / `-4p` takes a value the next word is that value; a value
+ * attached in the cluster (`-p22`, `-tp22`) consumes nothing more.
+ */
+function skipShortFlags(words: string[], start: number, valueFlags: ReadonlySet<string>): number {
+  let i = start;
+  while (i < words.length && words[i].startsWith('-') && words[i] !== '-' && words[i] !== '--') {
+    const letters = clusterLetters(words[i]);
+    i += 1;
+    if (letters === null) {
+      if (!words[i - 1].includes('=') && valueFlags.has(words[i - 1])) i += 1;
+      continue;
+    }
+    for (let k = 0; k < letters.length; k += 1) {
+      if (valueFlags.has(`-${letters[k]}`)) {
+        if (k === letters.length - 1) i += 1;
+        break;
+      }
+    }
+  }
+  if (words[i] === '--') i += 1;
+  return i;
+}
+
 /**
  * The command words a remote-shell launcher hands to the REMOTE shell:
  * `ssh [opts] host cmd...`, `mosh host -- cmd...`, `gcloud compute ssh --command X`
@@ -388,11 +416,11 @@ const PASS_THROUGH_LAUNCHERS: ReadonlySet<string> = new Set([
 function remoteCommandWords(words: string[]): string[] | null {
   const head = basename(lower(words[0]));
   if (head === 'ssh' || head === 'mosh') {
-    const host = skipFlags(words, 1, SSH_VALUE_FLAGS);
+    const host = skipShortFlags(words, 1, SSH_VALUE_FLAGS);
     if (host >= words.length) return [];
     let rest = words.slice(host + 1);
     if (head === 'mosh') return rest[0] === '--' ? rest.slice(1) : [];
-    rest = rest.slice(skipFlags(rest, 0, SSH_VALUE_FLAGS));
+    rest = rest.slice(skipShortFlags(rest, 0, SSH_VALUE_FLAGS));
     return rest;
   }
   if (head === 'gcloud' && lower(words[1]) === 'compute' && lower(words[2]) === 'ssh') {
@@ -423,10 +451,17 @@ function optionPayloads(words: string[]): string[] {
     const w = words[i];
     const opt = /^(?:-o)?(?:ProxyCommand|LocalCommand|RemoteCommand)(?:=|\s+)(.+)$/i.exec(w);
     if (opt) out.push(opt[1]);
-    else if (/^-o$/.test(w) && /^(?:ProxyCommand|LocalCommand|RemoteCommand)=/i.test(words[i + 1] ?? '')) {
+    else if (
+      clusterLetters(w)?.endsWith('o') &&
+      /^(?:ProxyCommand|LocalCommand|RemoteCommand)=/i.test(words[i + 1] ?? '')
+    ) {
       out.push(words[i + 1].replace(/^[^=]*=/, ''));
     } else if (head === 'rsync' && /^--(?:rsync-path|rsh)=/.test(w)) out.push(w.replace(/^[^=]*=/, ''));
-    else if (head === 'rsync' && (w === '-e' || w === '--rsh' || w === '--rsync-path') && words[i + 1]) {
+    else if (
+      head === 'rsync' &&
+      (clusterLetters(w)?.endsWith('e') || w === '--rsh' || w === '--rsync-path') &&
+      words[i + 1]
+    ) {
       out.push(words[i + 1]);
     }
   }
