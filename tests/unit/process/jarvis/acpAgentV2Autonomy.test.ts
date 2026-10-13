@@ -27,6 +27,9 @@ let capturedConfig: AgentConfig;
 let capturedCallbacks: SessionCallbacks;
 let capturedOptions: SessionOptions | undefined;
 const sessionSetMode = vi.fn();
+const sessionConfirmMode = vi.fn();
+const sessionSendMessage = vi.fn();
+const sessionStop = vi.fn();
 
 vi.mock('@process/acp/session/AcpSession', () => ({
   AcpSession: class {
@@ -36,8 +39,10 @@ vi.mock('@process/acp/session/AcpSession', () => ({
       capturedOptions = options;
     }
     start = vi.fn(() => setTimeout(() => capturedCallbacks.onStatusChange('active'), 0));
-    stop = vi.fn().mockResolvedValue(undefined);
+    stop = sessionStop;
     setMode = sessionSetMode;
+    confirmMode = sessionConfirmMode;
+    sendMessage = sessionSendMessage;
     get status() {
       return 'idle';
     }
@@ -106,6 +111,9 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
   beforeEach(() => {
     vi.mocked(loadRuntimeMcpServers).mockResolvedValue([ghl]);
     sessionSetMode.mockReset();
+    sessionConfirmMode.mockReset().mockResolvedValue('default');
+    sessionSendMessage.mockReset().mockResolvedValue(undefined);
+    sessionStop.mockReset().mockResolvedValue(undefined);
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -223,5 +231,56 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     // A plain chat stays off the ladder on the cached copy too.
     await startAgent({});
     expect(capturedOptions?.permissionGate).toBeUndefined();
+  });
+
+  it('every laddered turn starts in a CONFIRMED mode within the rung', async () => {
+    stubStorage({ [`custom:${PACK}`]: 2 });
+    const agent = await startAgent({ customAgentId: PACK, sessionMode: 'bypassPermissions' });
+    const result = await agent.sendMessage({ content: 'hi' });
+    expect(result.success).toBe(true);
+    expect(sessionConfirmMode).toHaveBeenCalledWith('default');
+    expect(sessionConfirmMode.mock.invocationCallOrder[0]).toBeLessThan(sessionSendMessage.mock.invocationCallOrder[0]);
+  });
+
+  it('fails CLOSED when the agent will not accept the laddered mode: no turn, session stopped', async () => {
+    stubStorage({ [`custom:${PACK}`]: 2 });
+    sessionConfirmMode.mockRejectedValue(new Error('Invalid params'));
+    const agent = await startAgent({ customAgentId: PACK });
+    const result = await agent.sendMessage({ content: 'hi' });
+    expect(result.success).toBe(false);
+    expect(result.error?.message).toMatch(/did not accept session mode "default"/);
+    expect(sessionSendMessage).not.toHaveBeenCalled();
+    expect(sessionStop).toHaveBeenCalled();
+  });
+
+  it('re-applies the laddered mode when the agent reports a mode outside the rung, refusing writes meanwhile', async () => {
+    stubStorage({ [`custom:${PACK}`]: 2 });
+    let release!: (v: string) => void;
+    sessionConfirmMode.mockImplementation(() => new Promise<string>((r) => (release = r)));
+    await startAgent({ customAgentId: PACK });
+    const gate = capturedOptions!.permissionGate!;
+    const write = {
+      sessionId: 's',
+      toolCall: { toolCallId: 'c', title: 'Write a.md', kind: 'edit' as const },
+      options: [
+        { optionId: 'a', name: 'Allow', kind: 'allow_once' as const },
+        { optionId: 'r', name: 'Reject', kind: 'reject_once' as const },
+      ],
+    };
+    // e.g. the bridge rebuilt its query from the user's defaultMode "auto".
+    capturedCallbacks.onModeUpdate({ currentModeId: 'auto', availableModes: [] } as never);
+    expect(sessionConfirmMode).toHaveBeenCalledWith('default');
+    expect(gate.check(write).action).toBe('deny');
+    release('default');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(gate.check(write).action).toBe('hold');
+  });
+
+  it('a non-laddered chat never confirms modes before a turn', async () => {
+    stubStorage({});
+    const agent = await startAgent({});
+    await agent.sendMessage({ content: 'hi' });
+    expect(sessionConfirmMode).not.toHaveBeenCalled();
+    expect(sessionSendMessage).toHaveBeenCalled();
   });
 });

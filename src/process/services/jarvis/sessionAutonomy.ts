@@ -128,6 +128,11 @@ export function createAutonomyPermissionGate(
      * writes and leaves their allowed writes for the shim to record.
      */
     shimmedMcpServers?: readonly string[];
+    /**
+     * False while the agent has not confirmed a mode the rung allows (see
+     * AcpAgentV2.enforceLadderedMode). Every write is refused meanwhile.
+     */
+    isModeConfirmed?: () => boolean;
   } = {}
 ): PermissionGate {
   const append = deps.append ?? appendApprovalTo;
@@ -160,6 +165,16 @@ export function createAutonomyPermissionGate(
       });
       if (verdict.action === 'deny') {
         record(verdict.tool, verdict.connector, 'refused', verdict.reason);
+        return { action: 'deny' };
+      }
+      const isRead = verdict.action === 'pass' && !verdict.loggable;
+      if (!isRead && deps.isModeConfirmed && !deps.isModeConfirmed()) {
+        record(
+          verdict.tool,
+          verdict.connector,
+          'refused',
+          `Session mode not confirmed within autonomy rung ${autonomy.rung}; writes are refused until it is.`
+        );
         return { action: 'deny' };
       }
       // A mode-switch request may carry options that would lift the session
