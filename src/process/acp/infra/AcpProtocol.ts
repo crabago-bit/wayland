@@ -20,6 +20,8 @@ export type CreateSessionParams = {
   cwd: string;
   mcpServers?: McpServer[];
   additionalDirectories?: string[];
+  /** ACP `_meta` for session/new (agent-specific options, e.g. `claudeCode.options`). */
+  meta?: Record<string, unknown>;
 };
 
 export type LoadSessionParams = {
@@ -27,6 +29,8 @@ export type LoadSessionParams = {
   cwd: string;
   mcpServers?: McpServer[];
   additionalDirectories?: string[];
+  /** ACP `_meta` for session/load. */
+  meta?: Record<string, unknown>;
 };
 
 export type ForkSessionParams = {

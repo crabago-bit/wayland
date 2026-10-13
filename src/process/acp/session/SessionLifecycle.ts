@@ -160,6 +160,7 @@ export class SessionLifecycle {
             cwd: this.host.agentConfig.cwd,
             mcpServers,
             additionalDirectories: this.host.agentConfig.additionalDirectories,
+            ...(this.host.agentConfig.sessionMeta ? { meta: this.host.agentConfig.sessionMeta } : {}),
           });
     } catch (err) {
       const normalized = normalizeError(err);
@@ -431,6 +432,7 @@ export class SessionLifecycle {
           cwd: this.host.agentConfig.cwd,
           mcpServers,
           additionalDirectories: this.host.agentConfig.additionalDirectories,
+          ...(this.host.agentConfig.sessionMeta ? { meta: this.host.agentConfig.sessionMeta } : {}),
         });
         // Resume succeeded. Tell the host so it drops any speculative history
         // replay it armed for this resume attempt.
@@ -449,6 +451,7 @@ export class SessionLifecycle {
       cwd: this.host.agentConfig.cwd,
       mcpServers,
       additionalDirectories: this.host.agentConfig.additionalDirectories,
+      ...(this.host.agentConfig.sessionMeta ? { meta: this.host.agentConfig.sessionMeta } : {}),
     });
   }
 

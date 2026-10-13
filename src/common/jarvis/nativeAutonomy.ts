@@ -115,6 +115,17 @@ const SUBCOMMAND_CLIS: ReadonlySet<string> = new Set([
   'qbo',
 ]);
 
+/** Claude Code's project/local settings files - where permission rules live. */
+const AGENT_SETTINGS_PATH = /(?:^|[\s\\/"'=>])\.claude[\\/]settings(?:\.local)?\.json\b/i;
+
+/** True when a write targets the backend's own permission settings. */
+function touchesAgentSettings(toolCall: NativeToolCall): boolean {
+  const input = toolCall.rawInput as { file_path?: unknown; path?: unknown; command?: unknown } | undefined;
+  const locations = (toolCall as { locations?: Array<{ path?: unknown }> }).locations ?? [];
+  const candidates = [input?.file_path, input?.path, input?.command, toolCall.title, ...locations.map((l) => l.path)];
+  return candidates.some((value) => typeof value === 'string' && AGENT_SETTINGS_PATH.test(value));
+}
+
 /** Split a command line into `;`/`&&`/`||`/`|`/newline/`$(`/backtick segments, as word lists. */
 function commandSegments(commandLine: string, keepQuotedText: boolean): string[][] {
   const text = keepQuotedText
@@ -301,6 +312,17 @@ export function decideNativePermission(input: {
   }
 
   // ── Hard floor ─────────────────────────────────────────────────
+  // Writing the backend's own permission settings would let an agent grant
+  // itself rules that approve future calls without asking - widening its own
+  // authority. Never, at any rung.
+  if (touchesAgentSettings(toolCall)) {
+    return {
+      action: 'deny',
+      reason: 'Hard floor: an agent may not edit its own permission settings (.claude/settings*.json).',
+      loggable: true,
+      ...native,
+    };
+  }
   if (kind === 'delete') {
     return {
       action: 'deny',

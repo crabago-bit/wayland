@@ -52,7 +52,11 @@ import type { McpSessionBackend, McpSessionPublicationInput } from '@/common/mcp
 import { createMcpSessionDigestKey } from '@process/services/mcpServices/mcpSessionTruthGate';
 import { clampSessionModeForRung } from '@/common/jarvis/nativeAutonomy';
 import type { ToolFilterSpawnAutonomy } from '@process/services/mcpServices/builtinMcpRuntime';
-import { createAutonomyPermissionGate, resolveConfiguredSpawnAutonomy } from '@process/services/jarvis/sessionAutonomy';
+import {
+  createAutonomyPermissionGate,
+  ladderedSessionMeta,
+  resolveConfiguredSpawnAutonomy,
+} from '@process/services/jarvis/sessionAutonomy';
 
 /**
  * Temporary: backend-specific CLI login arguments.
@@ -446,6 +450,10 @@ export class AcpAgentV2 {
     }
     config.initialDesired = { ...config.initialDesired, mode: clamped };
     config.yoloMode = false;
+    // Claude Code's own allow rules / defaultMode / hooks would approve calls
+    // without ever asking us; start the session without user/local settings.
+    const meta = ladderedSessionMeta(this.agentConfig.agentBackend);
+    if (meta) (this.agentConfig as { sessionMeta?: Record<string, unknown> }).sessionMeta = meta;
   }
 
   /**

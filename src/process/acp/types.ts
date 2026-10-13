@@ -45,6 +45,12 @@ export type AgentConfig = {
 
   // Session configuration
   cwd: string;
+  /**
+   * ACP `_meta` sent with session/new and session/load. The JARVIS autonomy
+   * ladder uses it to start a laddered Claude session without the user's
+   * Claude Code settings (see `LADDERED_CLAUDE_SESSION_META`).
+   */
+  sessionMeta?: Record<string, unknown>;
   mcpServers?: McpServer[];
   /** User MCP server ids selected for this exact conversation. Undefined = all; [] = none. */
   activeMcpServers?: string[];

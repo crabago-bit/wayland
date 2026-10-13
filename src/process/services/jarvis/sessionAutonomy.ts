@@ -65,6 +65,33 @@ export async function resolveConfiguredSpawnAutonomy(agent: {
   };
 }
 
+/**
+ * ACP `_meta` for a LADDERED Claude session: load only PROJECT settings.
+ *
+ * Claude Code applies its own `permissions.allow` rules, `defaultMode` and
+ * hooks from the user's settings and never asks the ACP client about a call
+ * those rules allow - ~/.claude/settings.json on this install allows Edit,
+ * Write, Bash(curl *), Slack sends and more, so a rung-1 agent could act
+ * without Wayland ever seeing it. `settingSources` is the bridge's own option
+ * (`_meta.claudeCode.options`, spread into the SDK query), so dropping `user`
+ * and `local` removes those rules for this session only:
+ *
+ *  - credentials are NOT settings: the Max subscription login keeps working
+ *    from the unchanged CLAUDE_CONFIG_DIR, nothing is copied or linked;
+ *  - `project` stays so Wayland's workspace `.claude/skills` and CLAUDE.md
+ *    still load (the gate refuses edits to `.claude/settings*.json`, so an
+ *    agent cannot grant itself rules there);
+ *  - non-laddered sessions send no `_meta` and are unchanged.
+ */
+export const LADDERED_CLAUDE_SESSION_META: Readonly<Record<string, unknown>> = Object.freeze({
+  claudeCode: { options: { settingSources: ['project'] } },
+});
+
+/** The `_meta` a laddered session of `backend` starts with, if any. */
+export function ladderedSessionMeta(backend: string): Record<string, unknown> | undefined {
+  return backend === 'claude' ? { ...LADDERED_CLAUDE_SESSION_META } : undefined;
+}
+
 type GateRequest = Parameters<PermissionGate['check']>[0];
 
 /**

@@ -271,6 +271,7 @@ export class ProcessAcpClient implements AcpClient {
         cwd: params.cwd,
         mcpServers: params.mcpServers ?? [],
         additionalDirectories: params.additionalDirectories,
+        ...(params.meta ? { _meta: params.meta } : {}),
       })
     );
   }
@@ -282,6 +283,7 @@ export class ProcessAcpClient implements AcpClient {
         cwd: params.cwd,
         mcpServers: params.mcpServers ?? [],
         additionalDirectories: params.additionalDirectories,
+        ...(params.meta ? { _meta: params.meta } : {}),
       })
     );
   }
