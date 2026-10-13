@@ -241,24 +241,41 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     expect(capturedOptions?.permissionGate).toBeUndefined();
   });
 
-  it('every laddered turn starts in a CONFIRMED mode within the rung', async () => {
+  it('every laddered prompt is guarded: the session gets a beforePrompt that confirms the clamped mode', async () => {
     stubStorage({ [`custom:${PACK}`]: 2 });
-    const agent = await startAgent({ customAgentId: PACK, sessionMode: 'bypassPermissions' });
-    const result = await agent.sendMessage({ content: 'hi' });
-    expect(result.success).toBe(true);
+    await startAgent({ customAgentId: PACK, sessionMode: 'bypassPermissions' });
+    expect(capturedOptions?.beforePrompt).toBeDefined();
+    await capturedOptions!.beforePrompt!();
     expect(sessionConfirmMode).toHaveBeenCalledWith('default');
-    expect(sessionConfirmMode.mock.invocationCallOrder[0]).toBeLessThan(sessionSendMessage.mock.invocationCallOrder[0]);
   });
 
-  it('fails CLOSED when the agent will not accept the laddered mode: no turn, session stopped', async () => {
+  it('the guard rejects (so the session aborts the prompt) when the agent refuses the laddered mode', async () => {
     stubStorage({ [`custom:${PACK}`]: 2 });
     sessionConfirmMode.mockRejectedValue(new Error('Invalid params'));
-    const agent = await startAgent({ customAgentId: PACK });
-    const result = await agent.sendMessage({ content: 'hi' });
-    expect(result.success).toBe(false);
-    expect(result.error?.message).toMatch(/did not accept session mode "default"/);
-    expect(sessionSendMessage).not.toHaveBeenCalled();
-    expect(sessionStop).toHaveBeenCalled();
+    await startAgent({ customAgentId: PACK });
+    await expect(capturedOptions!.beforePrompt!()).rejects.toThrow(/did not accept session mode "default"/);
+  });
+
+  it('the guard rejects when the session cannot take a mode change before the prompt', async () => {
+    stubStorage({ [`custom:${PACK}`]: 2 });
+    sessionConfirmMode.mockResolvedValue(null);
+    await startAgent({ customAgentId: PACK });
+    await expect(capturedOptions!.beforePrompt!()).rejects.toThrow(/could not take a mode change/);
+  });
+
+  it('a mode report while the session is not ready does NOT stop it', async () => {
+    stubStorage({ [`custom:${PACK}`]: 2 });
+    sessionConfirmMode.mockResolvedValue(null);
+    await startAgent({ customAgentId: PACK });
+    capturedCallbacks.onModeUpdate({ currentModeId: 'auto', availableModes: [] } as never);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sessionStop).not.toHaveBeenCalled();
+  });
+
+  it('a non-laddered session has no prompt guard', async () => {
+    stubStorage({});
+    await startAgent({});
+    expect(capturedOptions?.beforePrompt).toBeUndefined();
   });
 
   it('re-applies the laddered mode when the agent reports a mode outside the rung, refusing writes meanwhile', async () => {
@@ -327,12 +344,9 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
   ])('fails CLOSED for a laddered agent on %s (override not confirmable)', async (_label, init) => {
     stubStorage({ [`custom:${PACK}`]: 3 });
     initializeResult = init;
-    const agent = await startAgent({ customAgentId: PACK });
-    const result = await agent.sendMessage({ content: 'hi' });
-    expect(result.success).toBe(false);
-    expect(result.error?.message).toMatch(/cannot be confirmed/);
-    expect(sessionSendMessage).not.toHaveBeenCalled();
-    expect(sessionStop).toHaveBeenCalled();
+    await startAgent({ customAgentId: PACK });
+    await expect(capturedOptions!.beforePrompt!()).rejects.toThrow(/cannot be confirmed/);
+    expect(sessionConfirmMode).not.toHaveBeenCalled();
   });
 
   it('an unverified bridge does not affect a NON-laddered chat', async () => {
