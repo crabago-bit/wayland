@@ -87,6 +87,10 @@ describe('decideNativePermission - hard floor', () => {
     // Round 4: shell-evaluated payloads still see a quoted rm.
     'echo "rm -rf /data" | sh',
     'eval "rm -rf build"',
+    // Round 4: a writing request whose host is a variable is judged by its path.
+    'curl -X POST "$STRIPE_URL/v1/refunds"',
+    'curl -d amount=1 "${API}/v1/payouts"',
+    'curl -X POST "$(base_url)/v1/transfers"',
   ])('denies the shell command %s at rung 4', (command) => {
     expect(decide({ kind: 'execute', title: command, rawInput: { command } }, 4).action).toBe('deny');
   });
@@ -106,6 +110,8 @@ describe('decideNativePermission - hard floor', () => {
     'git commit -m "rm stale cache files"',
     'grep -rn "rm -rf" docs',
     'echo "do not rm this"',
+    // Round 4: a write to a variable host with a clean path follows the rung.
+    'curl -X POST "$API_URL/v1/jobs"',
   ])('a command that merely MENTIONS a floor word (%s) follows the rung, not the floor', (command) => {
     const at = (rung: AutonomyRung) => decide({ kind: 'execute', title: command, rawInput: { command } }, rung);
     expect(at(1).action).toBe('deny'); // rung 1 refuses every write anyway

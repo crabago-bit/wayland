@@ -515,6 +515,16 @@ function classifySegment(tokens: Token[], keywords: readonly string[], depth: nu
     if (method === 'DELETE') return floor(`${head} DELETE request`);
     if (WRITE_METHODS.has(method)) {
       const urls = args.filter((w) => /^(?:https?:\/\/|[\w.-]+\.[a-z]{2,}\/)/i.test(w));
+      // A target whose host is a variable or command substitution
+      // (`"$STRIPE_URL/v1/refunds"`) cannot be resolved here: check the part
+      // that IS visible - its path. If that is clean, the call is an ordinary
+      // write and follows the rung.
+      for (const w of args) {
+        const visible = /^(?:\$\{[^}]*\}|\$\([^)]*\)|\$[A-Za-z_][A-Za-z0-9_]*)(\/.*)$/.exec(w)?.[1];
+        if (visible && isHardFloorTool(visible.replace(/[^A-Za-z0-9]+/g, '_'), keywords)) {
+          return floor(`${head} ${method} to a hard-floor endpoint`);
+        }
+      }
       for (const url of urls) {
         if (MONEY_PROVIDER.test(url)) return floor(`${head} ${method} to a money / signing API`);
         let path = url;
