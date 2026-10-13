@@ -178,6 +178,18 @@ describe('classifyShellCommand - remote execution', () => {
     `gcloud compute ssh vm --command="stripe payouts create"`,
     `gcloud compute ssh vm -- rm -rf /data`,
     `mosh host -- rm -rf x`,
+    `ssh -tp 22 host find / -delete`,
+    `ssh -vp 22 host find / -delete`,
+    `ssh -4p 22 host find / -delete`,
+    `ssh -tl root host rm -rf x`,
+    `ssh -ti key host rm -rf x`,
+    `ssh -tp 22 host "psql -c 'DROP TABLE x'"`,
+    `ssh -J a -tp 22 host 'DROP TABLE x'`,
+    `ssh -tp22 host rm -rf x`,
+    `ssh -to ServerAliveInterval=5 host rm -rf x`,
+    `rsync -ae 'ssh -o ProxyCommand="rm -rf x"' a host:b`,
+    `rsync -avze 'rm -rf x' a host:b`,
+    `scp -ro ProxyCommand='rm -rf x' a host:b`,
   ])('floors %s', (cmd) => {
     expect(floors(cmd)).toBe(true);
   });
@@ -197,6 +209,11 @@ describe('classifyShellCommand - remote execution', () => {
     `docker -H ssh://host ps`,
     `kubectl exec pod -- ls /data`,
     `gcloud compute ssh vm --command 'uptime'`,
+    `ssh -p 2222 gw 'git pull'`,
+    `ssh -tp 22 gw uptime`,
+    `ssh -vp22 gw uptime`,
+    `rsync -avze 'ssh -p 2222' src/ host:dst/`,
+    `scp -rP 2222 a host:b`,
   ])('leaves %s to the rung', (cmd) => {
     expect(floors(cmd)).toBe(false);
   });
