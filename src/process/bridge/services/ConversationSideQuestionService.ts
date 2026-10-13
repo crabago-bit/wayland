@@ -6,6 +6,7 @@
  * Modified by Ferrox Labs in 2026. Changes are documented in the project history.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { ConversationSideQuestionResult } from '@/common/adapter/ipcBridge';
 import { isSideQuestionSupported } from '@/common/chat/sideQuestion';
 import type { TChatConversation } from '@/common/config/storage';
@@ -227,12 +228,13 @@ export class ConversationSideQuestionService {
       backend: extra.backend,
       customAgentId: extra.customAgentId || extra.presetAssistantId,
     });
-    // A laddered fork carries the same skill plugin as its session (its own
-    // copy, so the live session's plugin dir is never rebuilt under it).
+    // A laddered fork carries the same skill plugin as its session: its own
+    // copy under a unique key, so neither the live session's dir nor another
+    // concurrent fork's is rebuilt under it.
     const skillPlugin = autonomy
       ? await buildLadderedSkillPlugin({
           backend: extra.backend,
-          sessionKey: `${conversation.id}.btw`,
+          sessionKey: `${conversation.id}.btw-${randomUUID()}`,
           enabledSkills: extra.enabledSkills,
           excludeBuiltinSkills: extra.excludeBuiltinSkills,
         }).catch((error: unknown): undefined => {

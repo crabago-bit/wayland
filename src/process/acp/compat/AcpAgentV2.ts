@@ -61,7 +61,8 @@ import {
 import {
   buildLadderedSkillPlugin,
   ladderedSkillPluginOption,
-  type LadderedSkillEntry,
+  removeLadderedSkillPlugin,
+  withLadderedSkillPrompt,
 } from '@process/services/jarvis/ladderedSkillPlugin';
 
 /**
@@ -161,8 +162,10 @@ export class AcpAgentV2 {
   /** The assistant's skills, for a laddered session's skill plugin. */
   private readonly enabledSkills?: string[];
   private readonly excludeBuiltinSkills?: string[];
-  /** Skills in the laddered skill plugin (set in ensureSession). */
-  private ladderedSkills?: LadderedSkillEntry[];
+  /** The laddered skill plugin dir this session uses; removed by kill(). */
+  private skillPluginPath?: string;
+  /** kill() removed the plugin dir; the next start() rebuilds it. */
+  private skillPluginRemoved = false;
   /**
    * The JARVIS autonomy ladder for this agent, resolved once per session in
    * `ensureSession`. `undefined` = no configured rung = today's behaviour.
@@ -322,14 +325,7 @@ export class AcpAgentV2 {
       // resolveLadderedSessionMeta.
       // With no setting source the workspace `.claude/skills` is not read, so
       // the assistant's bounded skill set comes as a Wayland-owned plugin.
-      const skillPlugin = await this.buildLadderedSkillPlugin();
-      this.ladderedSkills = skillPlugin?.skills;
-      const meta = await resolveLadderedSessionMeta(
-        this.agentConfig.agentBackend,
-        skillPlugin ? ladderedSkillPluginOption(skillPlugin.path) : {},
-        this.agentConfig.env?.CLAUDE_CONFIG_DIR
-      );
-      if (meta) (this.agentConfig as { sessionMeta?: Record<string, unknown> }).sessionMeta = meta;
+      await this.applyLadderedSessionMeta();
     }
 
     // Load user-configured (builtin) MCP servers from settings, filtered by
@@ -1060,6 +1056,9 @@ export class AcpAgentV2 {
     // its own failure reason (#483/#369).
     this.lastErrorMessage = null;
     const session = await this.ensureSession();
+    // A reconnect after kill(): the skill plugin dir was removed with the old
+    // process, so rebuild it before the session starts again.
+    if (this.skillPluginRemoved && this.autonomy) await this.applyLadderedSessionMeta();
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.startOp = null;
@@ -1089,16 +1088,40 @@ export class AcpAgentV2 {
   }
 
   /**
-   * The skills a laddered session's plugin holds, with the names the session
-   * lists them under; `undefined` for a session that is not laddered.
+   * (Re)build the skill plugin and set the laddered session `_meta`: no setting
+   * sources, the plugin, and the skill-name mapping in the system prompt. The
+   * session reads `agentConfig.sessionMeta` on every session/new and load.
    */
-  getLadderedSkills(): readonly LadderedSkillEntry[] | undefined {
-    return this.ladderedSkills;
+  private async applyLadderedSessionMeta(): Promise<void> {
+    const skillPlugin = await this.buildLadderedSkillPlugin();
+    this.skillPluginPath = skillPlugin?.path;
+    this.skillPluginRemoved = false;
+    const meta = await resolveLadderedSessionMeta(
+      this.agentConfig.agentBackend,
+      skillPlugin ? ladderedSkillPluginOption(skillPlugin.path) : {},
+      this.agentConfig.env?.CLAUDE_CONFIG_DIR
+    );
+    if (meta) {
+      (this.agentConfig as { sessionMeta?: Record<string, unknown> }).sessionMeta = withLadderedSkillPrompt(
+        meta,
+        skillPlugin?.skills ?? []
+      );
+    }
   }
 
   async kill(): Promise<void> {
     await this.session?.stop();
     this.activeToolCalls.clear();
+    // The session's process is gone: drop its skill plugin dir (rebuilt by the
+    // next start() if this agent reconnects).
+    if (this.skillPluginPath) {
+      const dir = this.skillPluginPath;
+      this.skillPluginPath = undefined;
+      this.skillPluginRemoved = true;
+      await removeLadderedSkillPlugin(dir).catch((error: unknown) =>
+        console.warn('[AcpAgentV2] could not remove the laddered skill plugin:', error)
+      );
+    }
   }
 
   cancelPrompt(): void {

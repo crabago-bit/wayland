@@ -45,13 +45,20 @@
  * Inside a skill only regular files and directories are copied; a symlinked
  * file is copied only when it resolves inside the skill.
  *
- * WHERE IT LIVES. Under Wayland's data dir, never inside the agent's
- * workspace; rebuilt from scratch for every session and left read-only.
+ * Inside a skill, dotfiles, `hooks*`, `agents/` and `commands/` are not copied.
+ *
+ * WHERE IT LIVES. `<dataDir>/laddered-skill-plugins/<key>`, never inside the
+ * agent's workspace; the key must be a single safe path segment and every
+ * mkdir/chmod/rm is confined to direct children of that root. Rebuilt from
+ * scratch for every session (in a sibling dir, then swapped in), left
+ * read-only (files 0444 - so a skill's scripts are not directly executable),
+ * removed when the session ends, and swept once per process for leftovers.
  */
 
 import { getDataPath } from '@process/utils/utils';
 import { getBuiltinSkillsCopyDir } from '@process/utils/initStorage';
 import { resolveBoundedSkillSet, type BoundedSkillSetOptions, type BoundedSkillSource } from '@process/utils/initAgent';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -140,9 +147,9 @@ export function ladderedSkillPluginOption(pluginDir: string): {
 }
 
 /**
- * A first-message note telling the model the names its skills are listed
- * under in this session (its instructions name them without the plugin
- * prefix). Empty when the plugin holds no skills.
+ * The mapping from each enabled skill name to the name the session lists it
+ * under (the instructions name skills without the plugin prefix). Empty when
+ * the plugin holds no skills.
  */
 export function describeLadderedSkills(skills: readonly LadderedSkillEntry[]): string {
   if (skills.length === 0) return '';
@@ -155,24 +162,71 @@ export function describeLadderedSkills(skills: readonly LadderedSkillEntry[]): s
 }
 
 /**
+ * `meta` with the skill-name mapping appended to the Claude system prompt
+ * (`_meta.systemPrompt.append`, which the ACP bridge reads on every
+ * session/new, session/load and fork - so a resumed session is told too).
+ */
+export function withLadderedSkillPrompt(
+  meta: Record<string, unknown>,
+  skills: readonly LadderedSkillEntry[]
+): Record<string, unknown> {
+  const append = describeLadderedSkills(skills);
+  return append ? { ...meta, systemPrompt: { append } } : meta;
+}
+
+/** Name markers of a build in progress and of a build being replaced. */
+const BUILDING = '.building-';
+const RETIRED = '.retired-';
+/** A plugin dir untouched this long, with no live session, is swept. */
+export const LADDERED_PLUGIN_STALE_MS = 24 * 60 * 60_000;
+/** A half-built or retired dir this old is swept. */
+export const LADDERED_PLUGIN_HALF_BUILT_MS = 10 * 60_000;
+
+/** Plugin dirs this process handed to a live session. */
+const liveDirs = new Set<string>();
+/** One sweep per plugin root per process, before its first build. */
+const sweeps = new Map<string, Promise<void>>();
+
+/** The directory name for a session key, or `undefined` when it is not a safe single segment. */
+export function ladderedSkillPluginKey(sessionKey: string): string | undefined {
+  const key = sessionKey.replace(/[^A-Za-z0-9._-]/g, '_');
+  return key && key !== '.' && key !== '..' ? key : undefined;
+}
+
+/** Throws unless `dir` is a DIRECT child of `root` (both resolved); returns it resolved. */
+function assertPluginDir(root: string, dir: string): string {
+  const resolvedRoot = path.resolve(root);
+  const resolved = path.resolve(dir);
+  if (resolved === resolvedRoot || path.dirname(resolved) !== resolvedRoot) {
+    throw new Error(`[ladderedSkillPlugin] ${dir} is not a plugin dir under ${root}`);
+  }
+  return resolved;
+}
+
+/**
  * Build the plugin dir for one session, or `undefined` when `backend` is not
- * Claude. Any previous build under the same key is removed first.
+ * Claude. The build is made in a sibling dir and swapped in, so a live session
+ * reading the previous build under the same key never sees a gap.
  */
 export async function buildLadderedSkillPlugin(
   options: BoundedSkillSetOptions & {
     backend: string;
-    /** Unique per live session, e.g. the conversation id (`.btw` for a /btw fork). */
+    /** One key per live session: the conversation id, or a unique id for a /btw fork. */
     sessionKey: string;
     /** Test seam; defaults to ladderedSkillPluginRoot(). */
     rootDir?: string;
-    /** Test seam; defaults to ~/.claude/skills and <dataDir>/skill-sources. */
+    /** Test seam; defaults to USER_SKILL_ROOTS and <dataDir>/skill-sources. */
     roots?: LadderedSkillRoots;
   }
 ): Promise<LadderedSkillPlugin | undefined> {
   if (options.backend !== 'claude') return undefined;
-  const root = options.rootDir ?? ladderedSkillPluginRoot();
-  const pluginDir = path.join(root, options.sessionKey.replace(/[^A-Za-z0-9._-]/g, '_'));
-  await removeLadderedSkillPlugin(pluginDir);
+  const key = ladderedSkillPluginKey(options.sessionKey);
+  if (!key) throw new Error(`[ladderedSkillPlugin] invalid session key ${JSON.stringify(options.sessionKey)}`);
+  const root = path.resolve(options.rootDir ?? ladderedSkillPluginRoot());
+  const finalDir = assertPluginDir(root, path.join(root, key));
+  const buildDir = assertPluginDir(root, path.join(root, `${key}${BUILDING}${randomUUID()}`));
+  await fs.mkdir(root, { recursive: true });
+  await sweepOnce(root);
 
   const libraryEntries = options._libraryEntries ?? (await loadLibraryEntries());
   const blocked = new Set(
@@ -181,57 +235,156 @@ export async function buildLadderedSkillPlugin(
   const skills = await resolveBoundedSkillSet({ ...options, _libraryEntries: libraryEntries });
   const roots = options.roots ?? defaultRoots();
 
-  await fs.mkdir(path.join(pluginDir, '.claude-plugin'), { recursive: true });
-  await fs.writeFile(
-    path.join(pluginDir, '.claude-plugin', 'plugin.json'),
-    `${JSON.stringify(
-      {
-        name: LADDERED_SKILL_PLUGIN_NAME,
-        version: '1.0.0',
-        description: "This assistant's Wayland skills (generated per session; skills only).",
-      },
-      null,
-      2
-    )}\n`
-  );
-  const skillsDir = path.join(pluginDir, 'skills');
-  await fs.mkdir(skillsDir);
-
   const placed: LadderedSkillEntry[] = [];
-  for (const skill of skills) {
-    const dirName = pluginSkillDirName(skill.name);
-    if (!dirName) continue;
-    const target = path.join(skillsDir, dirName);
-    const source = await resolveLadderedSkillSource(skill, roots, blocked);
-    if (!source) {
-      console.warn(`[ladderedSkillPlugin] ${skill.label} directory not found: ${skill.name}`);
-      continue;
-    }
-    const taken = await fs.lstat(target).then(
-      () => true,
-      () => false
+  try {
+    await fs.mkdir(path.join(buildDir, '.claude-plugin'), { recursive: true });
+    await fs.writeFile(
+      path.join(buildDir, '.claude-plugin', 'plugin.json'),
+      `${JSON.stringify(
+        {
+          name: LADDERED_SKILL_PLUGIN_NAME,
+          version: '1.0.0',
+          description: "This assistant's Wayland skills (generated per session; skills only).",
+        },
+        null,
+        2
+      )}\n`
     );
-    if (taken) continue; // first source under this name wins, as in the workspace
-    try {
-      await copySkillTree(source.dir, target, await fs.realpath(source.dir), skill.name);
-      placed.push({
-        requested: skill.name,
-        sessionName: `${LADDERED_SKILL_PLUGIN_NAME}:${skill.name}`,
-        source: source.kind,
-        sourceDir: source.dir,
-      });
-    } catch (error) {
-      console.warn(`[ladderedSkillPlugin] dropped ${skill.label} ${skill.name}:`, error);
-      await removeLadderedSkillPlugin(target);
+    const skillsDir = path.join(buildDir, 'skills');
+    await fs.mkdir(skillsDir);
+
+    for (const skill of skills) {
+      const dirName = pluginSkillDirName(skill.name);
+      if (!dirName) continue;
+      const target = path.join(skillsDir, dirName);
+      const source = await resolveLadderedSkillSource(skill, roots, blocked);
+      if (!source) {
+        console.warn(`[ladderedSkillPlugin] ${skill.label} directory not found: ${skill.name}`);
+        continue;
+      }
+      const taken = await fs.lstat(target).then(
+        () => true,
+        () => false
+      );
+      if (taken) continue; // first source under this name wins, as in the workspace
+      try {
+        await copySkillTree(source.dir, target, await fs.realpath(source.dir), skill.name);
+        placed.push({
+          requested: skill.name,
+          sessionName: `${LADDERED_SKILL_PLUGIN_NAME}:${skill.name}`,
+          source: source.kind,
+          sourceDir: source.dir,
+        });
+      } catch (error) {
+        console.warn(`[ladderedSkillPlugin] dropped ${skill.label} ${skill.name}:`, error);
+        await removeTree(target);
+      }
     }
+    await makeReadOnly(buildDir);
+  } catch (error) {
+    await removeTree(buildDir).catch(() => {});
+    throw error;
   }
 
-  await makeReadOnly(pluginDir);
-  return { path: pluginDir, skills: placed };
+  const pluginPath = await swapIn(root, buildDir, finalDir, key);
+  liveDirs.add(pluginPath);
+  return { path: pluginPath, skills: placed };
 }
 
-/** Remove a plugin dir built by buildLadderedSkillPlugin (read-only dirs included). */
-export async function removeLadderedSkillPlugin(dir: string): Promise<void> {
+/**
+ * Move `buildDir` to `finalDir`: the previous build is renamed aside first and
+ * removed after. If a concurrent build takes `finalDir` first (or the rename
+ * is refused), the complete `buildDir` is used where it is.
+ */
+async function swapIn(root: string, buildDir: string, finalDir: string, key: string): Promise<string> {
+  const retired = assertPluginDir(root, path.join(root, `${key}${RETIRED}${randomUUID()}`));
+  let moved = false;
+  try {
+    await fs.rename(finalDir, retired);
+    moved = true;
+  } catch (error) {
+    if (errorCode(error) !== 'ENOENT')
+      console.warn('[ladderedSkillPlugin] could not retire the previous build:', error);
+  }
+  let pluginPath = finalDir;
+  try {
+    await fs.rename(buildDir, finalDir);
+  } catch (error) {
+    if (!['EEXIST', 'ENOTEMPTY', 'EACCES', 'EPERM'].includes(errorCode(error) ?? '')) {
+      await removeTree(buildDir).catch(() => {});
+      throw error;
+    }
+    pluginPath = buildDir; // a concurrent build won the name; this build is complete too
+  }
+  if (moved) await removeTree(retired).catch(() => {});
+  return pluginPath;
+}
+
+/**
+ * Remove a plugin dir built by buildLadderedSkillPlugin (read-only dirs
+ * included). Refuses anything that is not a direct child of `root`.
+ */
+export async function removeLadderedSkillPlugin(dir: string, root: string = ladderedSkillPluginRoot()): Promise<void> {
+  const resolved = assertPluginDir(root, dir);
+  liveDirs.delete(resolved);
+  await removeTree(resolved);
+}
+
+/**
+ * Delete plugin dirs no live session of this process uses: half-built and
+ * retired dirs older than LADDERED_PLUGIN_HALF_BUILT_MS, and any other dir
+ * untouched for LADDERED_PLUGIN_STALE_MS (left behind by a crash or restart).
+ * Returns the names removed.
+ */
+export async function sweepLadderedSkillPlugins(
+  root: string = ladderedSkillPluginRoot(),
+  now: number = Date.now()
+): Promise<string[]> {
+  const resolvedRoot = path.resolve(root);
+  const removed: string[] = [];
+  let names: string[];
+  try {
+    names = await fs.readdir(resolvedRoot);
+  } catch {
+    return removed;
+  }
+  for (const name of names) {
+    const dir = path.join(resolvedRoot, name);
+    if (liveDirs.has(dir)) continue;
+    const stat = await fs.lstat(dir).catch((): undefined => undefined);
+    if (!stat?.isDirectory()) continue;
+    const halfBuilt = name.includes(BUILDING) || name.includes(RETIRED);
+    if (now - stat.mtimeMs > (halfBuilt ? LADDERED_PLUGIN_HALF_BUILT_MS : LADDERED_PLUGIN_STALE_MS)) {
+      try {
+        await removeTree(dir);
+        removed.push(name);
+      } catch (error) {
+        console.warn('[ladderedSkillPlugin] sweep could not remove', dir, error);
+      }
+    }
+  }
+  return removed;
+}
+
+/** The first build under a root sweeps it once per process (no session of ours is live yet). */
+function sweepOnce(root: string): Promise<void> {
+  let sweep = sweeps.get(root);
+  if (!sweep) {
+    sweep = sweepLadderedSkillPlugins(root).then(
+      (): undefined => undefined,
+      (): undefined => undefined
+    );
+    sweeps.set(root, sweep);
+  }
+  return sweep;
+}
+
+function errorCode(error: unknown): string | undefined {
+  return (error as { code?: string } | null)?.code;
+}
+
+/** Remove a tree, making read-only dirs writable first. Missing is fine. */
+async function removeTree(dir: string): Promise<void> {
   await makeWritable(dir);
   await fs.rm(dir, { recursive: true, force: true });
 }
@@ -334,6 +487,7 @@ async function loadLibraryEntries(): Promise<BoundedSkillSetOptions['_libraryEnt
 async function copySkillTree(src: string, dest: string, realRoot: string, skillName?: string): Promise<void> {
   await fs.mkdir(dest, { recursive: true });
   for (const entry of await fs.readdir(src, { withFileTypes: true })) {
+    if (isPluginLikeEntry(entry.name)) continue;
     const from = path.join(src, entry.name);
     const to = path.join(dest, entry.name);
     let isDir = entry.isDirectory();
@@ -355,6 +509,17 @@ async function copySkillTree(src: string, dest: string, realRoot: string, skillN
       }
     }
   }
+}
+
+/**
+ * Entries never copied from a skill, at any depth: dotfiles and dot-dirs
+ * (`.mcp.json`, `.claude-plugin`, `.lsp.json`...), anything named `hooks*`,
+ * and `agents/` / `commands/` - the shapes of plugin components, kept out even
+ * though Claude only reads them at a plugin's root.
+ */
+export function isPluginLikeEntry(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.startsWith('.') || lower.startsWith('hooks') || lower === 'agents' || lower === 'commands';
 }
 
 /**

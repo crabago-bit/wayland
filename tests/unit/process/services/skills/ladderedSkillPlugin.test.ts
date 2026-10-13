@@ -29,9 +29,14 @@ import {
   LADDERED_SKILL_PLUGIN_NAME,
   buildLadderedSkillPlugin,
   describeLadderedSkills,
+  LADDERED_PLUGIN_HALF_BUILT_MS,
+  LADDERED_PLUGIN_STALE_MS,
   USER_SKILL_ROOTS,
+  ladderedSkillPluginKey,
   removeLadderedSkillPlugin,
   sanitizeSkillMarkdown,
+  sweepLadderedSkillPlugins,
+  withLadderedSkillPrompt,
 } from '@process/services/jarvis/ladderedSkillPlugin';
 import { setupAssistantWorkspace } from '@process/utils/initAgent';
 
@@ -61,6 +66,17 @@ function tree(dir: string): string[] {
   return out.toSorted();
 }
 
+/** Make a test tree writable so it can be removed. */
+function execChmod(dir: string) {
+  const walk = (p: string) => {
+    const st = fs.lstatSync(p);
+    if (!st.isDirectory()) return;
+    fs.chmodSync(p, 0o755);
+    for (const name of fs.readdirSync(p)) walk(path.join(p, name));
+  };
+  walk(dir);
+}
+
 const noPrefs = { pinned: [], disabled: [], revision: 0 };
 
 beforeEach(() => {
@@ -82,7 +98,7 @@ beforeEach(() => {
 });
 
 afterAll(async () => {
-  await removeLadderedSkillPlugin(pluginRoot);
+  if (fs.existsSync(roots.base)) execChmod(roots.base);
   fs.rmSync(roots.base, { recursive: true, force: true });
 });
 
@@ -212,6 +228,114 @@ describe('buildLadderedSkillPlugin', () => {
     const dir = await build({ enabledSkills: ['broken', 'crew-core-brand-context'] });
     expect(fs.readdirSync(path.join(dir, 'skills'))).not.toContain('broken');
     expect(fs.readdirSync(path.join(dir, 'skills'))).toContain('crew-core-brand-context');
+  });
+
+  it('refuses an empty or dot session key and never touches the root’s parent', async () => {
+    const marker = path.join(roots.base, 'keep-me');
+    fs.writeFileSync(marker, 'x');
+    for (const sessionKey of ['', '.', '..']) {
+      expect(ladderedSkillPluginKey(sessionKey)).toBeUndefined();
+      await expect(build({ sessionKey })).rejects.toThrow(/invalid session key/);
+    }
+    expect(fs.readFileSync(marker, 'utf8')).toBe('x');
+    // `/` and other separators are flattened, never followed.
+    expect(ladderedSkillPluginKey('../x')).toBe('.._x');
+    expect(ladderedSkillPluginKey('a/../../b')).toBe('a_.._.._b');
+  });
+
+  it('removeLadderedSkillPlugin refuses anything but a direct child of the root', async () => {
+    await expect(removeLadderedSkillPlugin(pluginRoot, pluginRoot)).rejects.toThrow(/not a plugin dir/);
+    await expect(removeLadderedSkillPlugin(path.join(pluginRoot, '..'), pluginRoot)).rejects.toThrow(
+      /not a plugin dir/
+    );
+    await expect(removeLadderedSkillPlugin(path.join(pluginRoot, 'a', 'b'), pluginRoot)).rejects.toThrow(
+      /not a plugin dir/
+    );
+    await expect(removeLadderedSkillPlugin(roots.base, pluginRoot)).rejects.toThrow(/not a plugin dir/);
+    expect(fs.existsSync(config)).toBe(true);
+    const dir = await build({ sessionKey: 'to-remove' });
+    await removeLadderedSkillPlugin(dir, pluginRoot);
+    expect(fs.existsSync(dir)).toBe(false);
+  });
+
+  it('a rebuild swaps in a fresh dir at the same path and leaves no half-built or retired dirs', async () => {
+    const first = await build({ sessionKey: 'swap' });
+    const second = await build({ sessionKey: 'swap', enabledSkills: ['mermaid'] });
+    expect(second).toBe(first);
+    expect(fs.readdirSync(path.join(second, 'skills')).toSorted()).toEqual(['cron', 'mermaid', 'office-cli']);
+    expect(fs.readdirSync(pluginRoot).filter((n) => n.startsWith('swap'))).toEqual(['swap']);
+  });
+
+  it('concurrent builds under one key both end with a complete plugin', async () => {
+    const results = await Promise.all([build({ sessionKey: 'race' }), build({ sessionKey: 'race' })]);
+    for (const dir of results) {
+      expect(fs.readdirSync(path.join(dir, 'skills'))).toContain('crew-core-brand-context');
+      expect(fs.existsSync(path.join(dir, '.claude-plugin', 'plugin.json'))).toBe(true);
+    }
+    expect(fs.readdirSync(pluginRoot).filter((n) => n.startsWith('race') && n.includes('.retired-'))).toEqual([]);
+  });
+
+  it('the sweep removes stale and half-built dirs but keeps live and recent ones', async () => {
+    const live = await build({ sessionKey: 'sweep-live' });
+    const now = Date.now();
+    const old = (name: string, ageMs: number) => {
+      const dir = path.join(pluginRoot, name);
+      fs.mkdirSync(path.join(dir, 'skills'), { recursive: true });
+      const t = (now - ageMs) / 1000;
+      fs.utimesSync(dir, t, t);
+      return dir;
+    };
+    old('sweep-stale', LADDERED_PLUGIN_STALE_MS + 60_000);
+    old('sweep-recent', 60_000);
+    old('sweep-x.building-1', LADDERED_PLUGIN_HALF_BUILT_MS + 60_000);
+    old('sweep-y.retired-1', LADDERED_PLUGIN_HALF_BUILT_MS + 60_000);
+    old('sweep-z.building-2', 1_000);
+    fs.chmodSync(path.join(pluginRoot, 'sweep-stale', 'skills'), 0o555);
+    fs.utimesSync(live, (now - LADDERED_PLUGIN_STALE_MS * 2) / 1000, (now - LADDERED_PLUGIN_STALE_MS * 2) / 1000);
+    const removed = await sweepLadderedSkillPlugins(pluginRoot, now);
+    expect(removed.filter((n) => n.startsWith('sweep')).toSorted()).toEqual([
+      'sweep-stale',
+      'sweep-x.building-1',
+      'sweep-y.retired-1',
+    ]);
+    expect(fs.existsSync(live)).toBe(true);
+    expect(fs.existsSync(path.join(pluginRoot, 'sweep-recent'))).toBe(true);
+    expect(fs.existsSync(path.join(pluginRoot, 'sweep-z.building-2'))).toBe(true);
+  });
+
+  it('never copies dotfiles, hooks*, agents/ or commands/ from inside a skill', async () => {
+    skill(path.join(config, 'skills'), 'nested');
+    const dir = path.join(config, 'skills', 'nested');
+    fs.mkdirSync(path.join(dir, 'hooks'));
+    fs.writeFileSync(path.join(dir, 'hooks', 'hooks.json'), '{}');
+    fs.writeFileSync(path.join(dir, 'hooks.json'), '{}');
+    fs.writeFileSync(path.join(dir, '.mcp.json'), '{}');
+    fs.mkdirSync(path.join(dir, '.claude-plugin'));
+    fs.writeFileSync(path.join(dir, '.claude-plugin', 'plugin.json'), '{}');
+    fs.mkdirSync(path.join(dir, 'agents'));
+    fs.writeFileSync(path.join(dir, 'agents', 'a.md'), 'x');
+    fs.mkdirSync(path.join(dir, 'commands'));
+    fs.writeFileSync(path.join(dir, 'commands', 'c.md'), 'x');
+    fs.mkdirSync(path.join(dir, 'docs', '.hidden'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'docs', 'ref.md'), 'ref');
+    fs.writeFileSync(path.join(dir, 'docs', 'hooks.json'), '{}');
+    const plugin = await build({ enabledSkills: ['nested'] });
+    expect(tree(path.join(plugin, 'skills', 'nested'))).toEqual(['SKILL.md', 'docs/', 'docs/ref.md']);
+  });
+
+  it('withLadderedSkillPrompt appends the name mapping to the system prompt, or leaves meta alone', () => {
+    const meta = { claudeCode: { options: { settingSources: [] } } };
+    expect(withLadderedSkillPrompt(meta, [])).toBe(meta);
+    const entry = {
+      requested: 'pdf',
+      sessionName: 'wayland-skills:pdf',
+      source: 'bundled' as const,
+      sourceDir: '/x',
+    };
+    expect(withLadderedSkillPrompt(meta, [entry])).toEqual({
+      ...meta,
+      systemPrompt: { append: describeLadderedSkills([entry]) },
+    });
   });
 
   it('only Claude gets a plugin', async () => {
