@@ -31,7 +31,9 @@ const labels: ExportTranscriptLabels = {
 describe('conversationExport', () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-03-24T09:21:33.000Z'));
+    // Local wall-clock time: the default filename uses the local calendar date,
+    // so a UTC instant would land on 2026-03-23 in timezones west of UTC-9.
+    vi.setSystemTime(new Date(2026, 2, 24, 9, 21, 33));
   });
 
   afterEach(() => {
