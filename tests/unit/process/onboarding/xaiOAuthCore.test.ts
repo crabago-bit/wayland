@@ -162,6 +162,18 @@ describe('parseGrokAuthJson (~/.grok/auth.json reuse)', () => {
     expect(tokens).toEqual({ accessToken: 'AT', refreshToken: 'RT', expiresAt: 1_900_000_000_000 });
   });
 
+  it('reads the Grok CLI 1.x issuer-keyed layout with a `key` access token', () => {
+    const tokens = parseGrokAuthJson({
+      'https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828': {
+        key: 'AT',
+        auth_mode: 'oauth',
+        refresh_token: 'RT',
+        expires_at: '2030-01-01T00:00:00Z',
+      },
+    });
+    expect(tokens).toEqual({ accessToken: 'AT', refreshToken: 'RT', expiresAt: Date.parse('2030-01-01T00:00:00Z') });
+  });
+
   it('reads camelCase token fields', () => {
     const tokens = parseGrokAuthJson({ accessToken: 'AT', refreshToken: 'RT' });
     expect(tokens).toEqual({ accessToken: 'AT', refreshToken: 'RT' });
