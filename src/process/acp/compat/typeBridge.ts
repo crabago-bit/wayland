@@ -62,6 +62,10 @@ export type OldAcpAgentConfig = {
     customAgentId?: string;
     /** JARVIS autonomy: `customAgentId ?? presetAssistantId`, the id the rung is keyed by. */
     autonomyAgentId?: string;
+    /** The assistant's enabledSkills; a laddered Claude session gets them as a plugin. */
+    enabledSkills?: string[];
+    /** Builtin auto-injected skills to exclude (with enabledSkills above). */
+    excludeBuiltinSkills?: string[];
   };
   onStreamEvent: (data: unknown) => void;
   onSignalEvent?: (data: unknown) => void;

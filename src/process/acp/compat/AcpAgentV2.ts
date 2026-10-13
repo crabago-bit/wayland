@@ -57,6 +57,7 @@ import {
   verifyLadderedBridge,
   resolveConfiguredSpawnAutonomy,
 } from '@process/services/jarvis/sessionAutonomy';
+import { buildLadderedSkillPlugin, ladderedSkillPluginOption } from '@process/services/jarvis/ladderedSkillPlugin';
 
 /**
  * Temporary: backend-specific CLI login arguments.
@@ -152,6 +153,9 @@ export class AcpAgentV2 {
   private readonly mcpPublicationBinding?: McpSessionPublicationBinding;
   /** `custom:<id>` half of the JARVIS autonomy key (custom OR preset assistant id); see `autonomyAgentKey`. */
   private readonly customAgentId?: string;
+  /** The assistant's skills, for a laddered session's skill plugin. */
+  private readonly enabledSkills?: string[];
+  private readonly excludeBuiltinSkills?: string[];
   /**
    * The JARVIS autonomy ladder for this agent, resolved once per session in
    * `ensureSession`. `undefined` = no configured rung = today's behaviour.
@@ -227,6 +231,8 @@ export class AcpAgentV2 {
     this.onMcpProjection = config.onMcpProjection;
     this.mcpPublicationBinding = (config as { mcpPublication?: McpSessionPublicationBinding }).mcpPublication;
     this.customAgentId = config.extra?.autonomyAgentId ?? config.extra?.customAgentId;
+    this.enabledSkills = config.extra?.enabledSkills;
+    this.excludeBuiltinSkills = config.extra?.excludeBuiltinSkills;
     this.agentConfig = toAgentConfig(config);
   }
 
@@ -307,9 +313,12 @@ export class AcpAgentV2 {
       // Claude Code's own allow rules / defaultMode / hooks would approve calls
       // without ever asking us; start without any setting source. See
       // resolveLadderedSessionMeta.
+      // With no setting source the workspace `.claude/skills` is not read, so
+      // the assistant's bounded skill set comes as a Wayland-owned plugin.
+      const skillPluginDir = await this.buildLadderedSkillPlugin();
       const meta = await resolveLadderedSessionMeta(
         this.agentConfig.agentBackend,
-        {},
+        skillPluginDir ? ladderedSkillPluginOption(skillPluginDir) : {},
         this.agentConfig.env?.CLAUDE_CONFIG_DIR
       );
       if (meta) (this.agentConfig as { sessionMeta?: Record<string, unknown> }).sessionMeta = meta;
@@ -1059,6 +1068,24 @@ export class AcpAgentV2 {
       this.startOp = { resolve, reject, timer };
       session.start();
     });
+  }
+
+  /**
+   * The laddered skill plugin for this conversation (see buildLadderedSkillPlugin).
+   * A failure only costs the skills: the session still starts, still laddered.
+   */
+  private async buildLadderedSkillPlugin(): Promise<string | undefined> {
+    try {
+      return await buildLadderedSkillPlugin({
+        backend: this.agentConfig.agentBackend,
+        sessionKey: this.conversationId,
+        enabledSkills: this.enabledSkills,
+        excludeBuiltinSkills: this.excludeBuiltinSkills,
+      });
+    } catch (error) {
+      console.error('[AcpAgentV2] laddered skill plugin not built; the session starts without its skills:', error);
+      return undefined;
+    }
   }
 
   async kill(): Promise<void> {

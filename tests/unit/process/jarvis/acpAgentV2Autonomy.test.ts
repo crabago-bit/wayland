@@ -74,6 +74,11 @@ vi.mock('@process/services/jarvis/approvalsPath', () => ({
   resolveApprovalsLogPath: () => '/data/jarvis/approvals.jsonl',
 }));
 vi.mock('@process/services/jarvis/hardFloor', () => ({ readHardFloorKeywords: () => ['wire'] }));
+const buildSkillPlugin = vi.fn(async (opts: { sessionKey: string }) => `/data/skill-plugins/${opts.sessionKey}`);
+vi.mock('@process/services/jarvis/ladderedSkillPlugin', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@process/services/jarvis/ladderedSkillPlugin')>()),
+  buildLadderedSkillPlugin: (opts: { sessionKey: string }) => buildSkillPlugin(opts),
+}));
 
 const PACK = 'pack-warrior-estimator';
 
@@ -122,6 +127,7 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     sessionSendMessage.mockReset().mockResolvedValue(undefined);
     sessionStop.mockReset().mockResolvedValue(undefined);
     initializeResult = VERIFIED_INIT;
+    buildSkillPlugin.mockClear();
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -151,8 +157,16 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     expect(capturedConfig.initialDesired?.mode).toBe('default');
     expect(capturedConfig.yoloMode).toBe(false);
     expect(capturedOptions?.initialDesired?.mode).toBe('default');
-    // Claude Code's own allow rules / defaultMode / hooks are not loaded.
-    expect(capturedConfig.sessionMeta).toEqual({ claudeCode: { options: { settingSources: [] } } });
+    // Claude Code's own allow rules / defaultMode / hooks are not loaded; the
+    // assistant's skills come as a Wayland-owned plugin instead.
+    expect(capturedConfig.sessionMeta).toEqual({
+      claudeCode: {
+        options: {
+          settingSources: [],
+          plugins: [{ type: 'local', path: '/data/skill-plugins/conv-1', skipMcpDiscovery: true }],
+        },
+      },
+    });
 
     // A later switch into bypass is refused and the session re-asserted to default.
     const result = await agent.setMode('bypassPermissions');
@@ -202,6 +216,31 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     );
   });
 
+  it('builds the skill plugin from the assistant’s own skills, keyed by the conversation', async () => {
+    stubStorage({ [`custom:${PACK}`]: 3 });
+    await startAgent({
+      customAgentId: PACK,
+      enabledSkills: ['crew-core-brand-context', 'contractor-os:line-item-pricing'],
+      excludeBuiltinSkills: ['cron'],
+    });
+    expect(buildSkillPlugin).toHaveBeenCalledWith({
+      backend: 'claude',
+      sessionKey: 'conv-1',
+      enabledSkills: ['crew-core-brand-context', 'contractor-os:line-item-pricing'],
+      excludeBuiltinSkills: ['cron'],
+    });
+  });
+
+  it('a skill plugin that fails to build costs only the skills: still laddered, no plugins', async () => {
+    stubStorage({ [`custom:${PACK}`]: 2 });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    buildSkillPlugin.mockRejectedValueOnce(new Error('disk full'));
+    await startAgent({ customAgentId: PACK });
+    expect(capturedOptions?.permissionGate).toBeDefined();
+    expect(capturedConfig.sessionMeta).toEqual({ claudeCode: { options: { settingSources: [] } } });
+    expect(error).toHaveBeenCalled();
+  });
+
   it('an agent with NO configured rung keeps today’s behaviour', async () => {
     stubStorage({ [`custom:${PACK}`]: 1 });
     const agent = await startAgent({ sessionMode: 'bypassPermissions', yoloMode: true });
@@ -212,6 +251,7 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     expect(capturedConfig.initialDesired?.mode).toBe('bypassPermissions');
     expect(capturedConfig.yoloMode).toBe(true);
     expect(capturedConfig.sessionMeta).toBeUndefined();
+    expect(buildSkillPlugin).not.toHaveBeenCalled();
     void agent.setMode('bypassPermissions');
     expect(sessionSetMode).toHaveBeenCalledWith('bypassPermissions');
   });

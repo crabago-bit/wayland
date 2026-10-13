@@ -16,6 +16,11 @@ import { LegacyConnectorFactory } from '@process/acp/compat/LegacyConnectorFacto
 import type { IConversationService } from '@process/services/IConversationService';
 import { ProcessConfig } from '@process/utils/initStorage';
 import { resolveConfiguredSpawnAutonomy, resolveLadderedSessionMeta } from '@process/services/jarvis/sessionAutonomy';
+import {
+  buildLadderedSkillPlugin,
+  ladderedSkillPluginOption,
+  removeLadderedSkillPlugin,
+} from '@process/services/jarvis/ladderedSkillPlugin';
 
 const ACP_SIDE_QUESTION_TIMEOUT_MS = 30_000;
 
@@ -26,6 +31,8 @@ type ResolvedAcpContext = {
    * question can never run with the user's Claude Code allow list.
    */
   forkMeta?: Record<string, unknown>;
+  /** The laddered fork's own skill plugin dir, removed when the fork is done. */
+  skillPluginDir?: string;
   acpSessionId: string;
   backend: AcpBackend;
   cliPath?: string;
@@ -75,6 +82,10 @@ export class ConversationSideQuestionService {
           return { status: 'unsupported' };
         }
         throw caughtError;
+      } finally {
+        if (resolvedAcpContext.skillPluginDir) {
+          await removeLadderedSkillPlugin(resolvedAcpContext.skillPluginDir).catch(() => {});
+        }
       }
     }
 
@@ -216,10 +227,29 @@ export class ConversationSideQuestionService {
       backend: extra.backend,
       customAgentId: extra.customAgentId || extra.presetAssistantId,
     });
-    const forkMeta = autonomy ? await resolveLadderedSessionMeta(extra.backend, { tools: [] }) : undefined;
+    // A laddered fork carries the same skill plugin as its session (its own
+    // copy, so the live session's plugin dir is never rebuilt under it).
+    const skillPluginDir = autonomy
+      ? await buildLadderedSkillPlugin({
+          backend: extra.backend,
+          sessionKey: `${conversation.id}.btw`,
+          enabledSkills: extra.enabledSkills,
+          excludeBuiltinSkills: extra.excludeBuiltinSkills,
+        }).catch((error: unknown): undefined => {
+          console.error('[ConversationSideQuestionService] laddered skill plugin not built:', error);
+          return undefined;
+        })
+      : undefined;
+    const forkMeta = autonomy
+      ? await resolveLadderedSessionMeta(extra.backend, {
+          tools: [],
+          ...(skillPluginDir ? ladderedSkillPluginOption(skillPluginDir) : {}),
+        })
+      : undefined;
 
     return {
       ...(forkMeta ? { forkMeta } : {}),
+      ...(skillPluginDir ? { skillPluginDir } : {}),
       acpSessionId: extra.acpSessionId,
       backend: extra.backend,
       cliPath: cliPath.trim(),
