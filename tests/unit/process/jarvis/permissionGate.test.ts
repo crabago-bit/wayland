@@ -12,7 +12,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RequestPermissionRequest } from '@agentclientprotocol/sdk';
 import { PermissionResolver } from '@process/acp/session/PermissionResolver';
-import { createAutonomyPermissionGate } from '@process/services/jarvis/sessionAutonomy';
+import { AUTONOMY_HOLD_DEADLINE_MS, createAutonomyPermissionGate } from '@process/services/jarvis/sessionAutonomy';
 import type { ApprovalRecord } from '@process/services/jarvis/approvalsLog';
 import type { AutonomyRung } from '@/common/jarvis/autonomy';
 import type { PermissionUIData } from '@process/acp/types';
@@ -125,6 +125,25 @@ describe('autonomy permission gate', () => {
       vi.advanceTimersByTime(1000);
       expect(await p).toEqual({ outcome: { outcome: 'selected', optionId: 'deny' } });
       expect(rows).toEqual([expect.objectContaining({ decision: 'refused' })]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a hold in an ATTENDED session (team, channel, chat) is still bounded: 15 min -> logged refusal', async () => {
+    vi.useFakeTimers();
+    try {
+      const { resolver, rows } = setup(2);
+      const onExpired = vi.fn();
+      (resolver as unknown as { onHoldExpired: unknown }).onHoldExpired = onExpired;
+      const p = resolver.evaluate(request('Write proposal.md', 'edit', 'c1'), vi.fn());
+      vi.advanceTimersByTime(AUTONOMY_HOLD_DEADLINE_MS - 1);
+      expect(rows).toHaveLength(0);
+      vi.advanceTimersByTime(1);
+      expect(await p).toEqual({ outcome: { outcome: 'selected', optionId: 'deny' } });
+      expect(rows).toEqual([expect.objectContaining({ decision: 'refused' })]);
+      // The "scheduled run" notice is not shown for an attended session.
+      expect(onExpired).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
