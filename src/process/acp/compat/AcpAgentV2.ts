@@ -55,6 +55,7 @@ import type { ToolFilterSpawnAutonomy } from '@process/services/mcpServices/buil
 import {
   createAutonomyPermissionGate,
   resolveLadderedSessionMeta,
+  verifyLadderedBridge,
   resolveConfiguredSpawnAutonomy,
 } from '@process/services/jarvis/sessionAutonomy';
 
@@ -166,6 +167,8 @@ export class AcpAgentV2 {
    * `defaultMode`). While false the permission gate refuses every write.
    */
   private ladderedModeConfirmed = false;
+  /** Set when the agent's initialize result is not a bridge verified for the ladder. */
+  private ladderedBridgeProblem?: string;
 
   // Cached state from callbacks
   private cachedModelInfo: AcpModelInfo | null = null;
@@ -299,6 +302,9 @@ export class AcpAgentV2 {
     });
     if (this.autonomy) {
       this.applyAutonomyModeClamp(this.autonomy);
+      // Unverified until the agent's initialize result says otherwise.
+      const unverified = verifyLadderedBridge(this.agentConfig.agentBackend, undefined);
+      this.ladderedBridgeProblem = 'reason' in unverified ? unverified.reason : undefined;
       // Claude Code's own allow rules / defaultMode / hooks would approve calls
       // without ever asking us; start without user/local (and unsafe project)
       // settings. See resolveLadderedSettingSources.
@@ -482,6 +488,14 @@ export class AcpAgentV2 {
    */
   private async enforceLadderedMode(): Promise<void> {
     if (!this.autonomy || !this.session) return;
+    if (this.ladderedBridgeProblem) {
+      this.ladderedModeConfirmed = false;
+      await this.kill().catch(() => {});
+      throw new AcpSessionError(
+        'INVALID_STATE',
+        `Autonomy rung ${this.autonomy.rung} (${this.autonomy.agent}): ${this.ladderedBridgeProblem}, so the ladder's settings override cannot be confirmed. The session was stopped instead of running unladdered.`
+      );
+    }
     const target = this.ladderedMode ?? 'default';
     try {
       await this.session.confirmMode(target);
@@ -588,6 +602,11 @@ export class AcpAgentV2 {
   private buildCallbacks(): SessionCallbacks {
     return {
       onInitialize: (result: unknown) => {
+        if (this.autonomy) {
+          const verdict = verifyLadderedBridge(this.agentConfig.agentBackend, result);
+          this.ladderedBridgeProblem = 'reason' in verdict ? verdict.reason : undefined;
+          if (this.ladderedBridgeProblem) this.ladderedModeConfirmed = false;
+        }
         this.cacheInitializeResult(result).catch((err) => {
           console.warn('[AcpAgentV2] Failed to cache initialize result:', err);
         });
