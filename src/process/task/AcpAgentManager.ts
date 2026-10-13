@@ -1962,7 +1962,10 @@ ${collectedResponses.join('\n')}`;
   private async restorePersistedState(): Promise<void> {
     if (this.currentMode && this.currentMode !== 'default') {
       try {
-        await this.agent.setMode(this.currentMode);
+        const result = await this.agent.setMode(this.currentMode);
+        // JARVIS autonomy: a restored mode the rung does not allow was clamped;
+        // track (and show) the mode the session is really in.
+        if (result?.effectiveMode) this.adoptEffectiveMode(result.effectiveMode);
       } catch (error) {
         mainWarn('[AcpAgentManager]', `Failed to re-apply mode ${this.currentMode}`, error);
       }
@@ -2965,7 +2968,13 @@ ${collectedResponses.join('\n')}`;
     }
 
     const result = await this.agent.setMode(mode);
-    if (result.success) {
+    if (result.effectiveMode) {
+      // JARVIS autonomy clamped the request: record what the session is in.
+      const prev = this.currentMode;
+      this.adoptEffectiveMode(result.effectiveMode);
+      if (result.success && options?.persist !== false) this.saveSessionMode(result.effectiveMode);
+      if (this.isYoloMode(prev) && !this.isYoloMode(this.currentMode)) void this.clearLegacyYoloConfig();
+    } else if (result.success) {
       const prev = this.currentMode;
       this.currentMode = mode;
       this.yoloMode = this.isYoloMode(mode);
@@ -2982,6 +2991,12 @@ ${collectedResponses.join('\n')}`;
       msg: result.error,
       data: { mode: this.currentMode },
     };
+  }
+
+  /** Adopt the mode the autonomy ladder clamped the session into. */
+  private adoptEffectiveMode(mode: string): void {
+    this.currentMode = mode;
+    this.yoloMode = this.isYoloMode(mode);
   }
 
   /** Check if a mode value represents YOLO mode for any backend */

@@ -142,6 +142,7 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     const result = await agent.setMode('bypassPermissions');
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/rung 2/);
+    expect(result.effectiveMode).toBe('default');
     expect(sessionSetMode).toHaveBeenCalledWith('default');
     // The cron path's enableYoloMode goes through the same clamp.
     sessionSetMode.mockReset();

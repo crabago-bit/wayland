@@ -1160,7 +1160,12 @@ export class AcpAgentV2 {
     });
   }
 
-  async setMode(requestedMode: string): Promise<{ success: boolean; error?: string }> {
+  /**
+   * `effectiveMode` is set when the autonomy ladder clamped the request: it is
+   * the mode the session is actually in, so the caller can show that rather
+   * than the one it asked for.
+   */
+  async setMode(requestedMode: string): Promise<{ success: boolean; error?: string; effectiveMode?: string }> {
     let mode = requestedMode;
     if (this.autonomy) {
       mode = clampSessionModeForRung(requestedMode, this.autonomy.rung, this.agentConfig.agentBackend);
@@ -1171,10 +1176,11 @@ export class AcpAgentV2 {
         return {
           success: false,
           error: `Autonomy rung ${this.autonomy.rung} does not allow session mode "${requestedMode}" for ${this.autonomy.agent}.`,
+          effectiveMode: mode,
         };
       }
     }
-    return new Promise((resolve, reject) => {
+    const result = await new Promise<{ success: boolean; error?: string }>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.modeOp = null;
         resolve({ success: true }); // Optimistic timeout
@@ -1182,6 +1188,7 @@ export class AcpAgentV2 {
       this.modeOp = { resolve, reject, timer };
       this.session!.setMode(mode);
     });
+    return mode === requestedMode ? result : { ...result, effectiveMode: mode };
   }
 
   async setConfigOption(configId: string, value: string): Promise<AcpSessionConfigOption[]> {
