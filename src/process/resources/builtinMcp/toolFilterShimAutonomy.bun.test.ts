@@ -339,6 +339,16 @@ describe('the hosted-connector bridge enforces the same ladder', () => {
 });
 
 describe('shim argv for a hosted upstream', () => {
+  it('reads the URL from the environment with --url-env (never argv)', () => {
+    const env = { WAYLAND_TOOL_FILTER_URL: 'https://e.test/mcp?key=k' };
+    const parsed = parseShimArgv(['--allow-all', '--rung', '2', '--upstream', 'http', '--url-env'], env);
+    expect(parsed?.url).toBe('https://e.test/mcp?key=k');
+    expect(parsed?.upstream).toBe('http');
+    // --url-env with nothing in the environment is malformed.
+    expect(parseShimArgv(['--allow-all', '--url-env'], {})).toBeNull();
+    expect(parseShimArgv(['--allow-all', '--url-env'], { WAYLAND_TOOL_FILTER_URL: 'file:///etc/passwd' })).toBeNull();
+  });
+
   it('accepts --url with no upstream command', () => {
     const parsed = parseShimArgv(['--allow-all', '--rung', '2', '--url', 'https://example.test/mcp']);
     expect(parsed?.upstream).toBe('http');

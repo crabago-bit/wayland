@@ -13,7 +13,11 @@
 
 import { describe, expect, it } from 'vitest';
 import { McpConfig, type McpConfigPublicationRequest } from '@process/acp/session/McpConfig';
-import { TOOL_FILTER_HEADERS_ENV, TOOL_FILTER_SCRIPT } from '@process/services/mcpServices/builtinMcpRuntime';
+import {
+  TOOL_FILTER_HEADERS_ENV,
+  TOOL_FILTER_SCRIPT,
+  TOOL_FILTER_URL_ENV,
+} from '@process/services/mcpServices/builtinMcpRuntime';
 import type { ToolFilterSpawnAutonomy } from '@process/services/mcpServices/builtinMcpRuntime';
 import { createMcpSessionDigestKey } from '@process/services/mcpServices/mcpSessionTruthGate';
 import { wrapWCoreServersWithAutonomy } from '@process/agent/acp/mcpSessionConfig';
@@ -107,12 +111,14 @@ describe('McpConfig.projectStorageConfig - JARVIS autonomy ladder', () => {
     expect(server.type).toBeUndefined();
     expect(server.url).toBeUndefined();
     expect(server.args[0]).toContain(TOOL_FILTER_SCRIPT);
-    expect(server.args.slice(server.args.indexOf('--upstream'), server.args.indexOf('--upstream') + 4)).toEqual([
+    expect(server.args.slice(server.args.indexOf('--upstream'), server.args.indexOf('--upstream') + 3)).toEqual([
       '--upstream',
       type,
-      '--url',
-      'https://connector.example/mcp',
+      '--url-env',
     ]);
+    // The URL (which may embed a key) is in env, never argv.
+    expect(server.args.join(' ')).not.toContain('connector.example');
+    expect(server.env).toContainEqual({ name: TOOL_FILTER_URL_ENV, value: 'https://connector.example/mcp' });
     expect(ladderArgs(server.args).rung).toEqual(['2']);
     // Bearer token travels in env, never argv.
     expect(server.args.join(' ')).not.toContain('secret');
@@ -157,7 +163,10 @@ describe('wrapWCoreServersWithAutonomy - Wayland Core config.toml path', () => {
     expect(localArgs.slice(localArgs.indexOf('--') + 1)).toEqual(['/usr/bin/ghl-mcp', '--stdio']);
     expect(remote.transport.type).toBe('stdio');
     const remoteArgs = (remote.transport as { args: string[] }).args;
-    expect(remoteArgs).toContain('--url');
+    expect(remoteArgs).toContain('--url-env');
+    expect((remote.transport as { env: Record<string, string> }).env[TOOL_FILTER_URL_ENV]).toBe(
+      'https://connector.example/mcp'
+    );
     expect((remote.transport as { env: Record<string, string> }).env[TOOL_FILTER_HEADERS_ENV]).toBeDefined();
     // Identity and selection metadata are preserved.
     expect(local.name).toBe('warrior-ghl');
