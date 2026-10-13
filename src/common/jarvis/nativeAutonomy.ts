@@ -69,13 +69,133 @@ const READ_KINDS: ReadonlySet<string> = new Set(['read', 'search', 'think', 'fet
  */
 const MCP_TOOL_TITLE = /^(?:mcp__)?([a-z0-9_.-]+?)__([a-z0-9_.-]+)$/i;
 
+/** Commands that delete files when they are the command word of a segment. */
+const DELETE_COMMANDS: ReadonlySet<string> = new Set(['rm', 'rmdir', 'unlink', 'shred']);
+
 /**
- * A delete in COMMAND position: `rm`, `rmdir`, `unlink`, `shred`, optionally
- * behind `sudo`/`xargs`. "Deleting data" is on the hard floor in autonomy.md,
- * and these are the shell's spellings of it. `docker run --rm` does not match:
- * the verb has to start a command, not end a flag.
+ * `<tool> rm ...` forms. autonomy.md puts "deleting data" on the hard floor and
+ * does not carve out version-control or package-manager removals, so these stay
+ * denied: `git rm` deletes tracked files; `npm rm` & co. are kept for the same
+ * reason (the safer reading), even though they only uninstall a dependency.
  */
-const SHELL_DELETE = /(?:^|[\s;&|(`])(?:sudo\s+|xargs\s+)?(?:rm|rmdir|unlink|shred)(?:\s|$)/i;
+const DELETE_SUBCOMMAND_TOOLS: ReadonlySet<string> = new Set(['git', 'npm', 'pnpm', 'yarn', 'bun']);
+
+/** Words that only wrap the real command: `sudo rm`, `xargs rm`, `env X=1 rm`. */
+const COMMAND_WRAPPERS: ReadonlySet<string> = new Set([
+  'sudo',
+  'xargs',
+  'env',
+  'time',
+  'nice',
+  'nohup',
+  'command',
+  'exec',
+]);
+
+/** Shells whose `-c` argument is itself a command line. */
+const SHELLS: ReadonlySet<string> = new Set(['sh', 'bash', 'zsh', 'dash']);
+
+/**
+ * CLIs whose SUBCOMMAND names the action (`stripe payouts create`, `kubectl
+ * delete`, `gh release delete`). For these the leading non-flag words are
+ * checked against the floor as well as the command word.
+ */
+const SUBCOMMAND_CLIS: ReadonlySet<string> = new Set([
+  'stripe',
+  'kubectl',
+  'gh',
+  'aws',
+  'gcloud',
+  'az',
+  'heroku',
+  'docusign',
+  'paypal',
+  'square',
+  'quickbooks',
+  'qbo',
+]);
+
+/** Split a command line into `;`/`&&`/`||`/`|`/newline/`$(`/backtick segments, as word lists. */
+function commandSegments(commandLine: string, keepQuotedText: boolean): string[][] {
+  const text = keepQuotedText
+    ? commandLine.replace(/["']/g, ' ')
+    : commandLine.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, ' ');
+  return text
+    .split(/;|&&|\|\||\||\n|\$\(|`|\(|\)/)
+    .map((segment) => segment.trim().split(/\s+/).filter(Boolean))
+    .filter((words) => words.length > 0);
+}
+
+/** The shell command an execute call will run: `rawInput.command`/`cmd`, else its title. */
+function shellCommandOf(toolCall: NativeToolCall, title: string): string {
+  const input = toolCall.rawInput as { command?: unknown; cmd?: unknown } | undefined;
+  for (const candidate of [input?.command, input?.cmd]) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate;
+    if (Array.isArray(candidate)) {
+      const words = candidate.filter((word): word is string => typeof word === 'string');
+      if (words.length > 0) return words.join(' ');
+    }
+  }
+  return title;
+}
+
+/** Drop leading wrappers and `VAR=value` assignments; strip a leading path. */
+function unwrap(words: string[]): string[] {
+  let i = 0;
+  while (i < words.length) {
+    const word = words[i];
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) i += 1;
+    else if (COMMAND_WRAPPERS.has(word.toLowerCase())) {
+      i += 1;
+      // A wrapper's own flags (`xargs -0`, `sudo -u x`) are not the command.
+      while (i < words.length && words[i].startsWith('-')) i += 1;
+    } else break;
+  }
+  return words.slice(i).map((word, index) => (index === 0 ? (word.split('/').pop() ?? word) : word));
+}
+
+/** True when any segment's command word deletes data. Quoted text is KEPT so `bash -c "rm x"` is seen. */
+function deletesData(commandLine: string): boolean {
+  for (const raw of commandSegments(commandLine, true)) {
+    let words = unwrap(raw);
+    // `bash -c "rm x"`: the -c payload (quotes already dropped) is the command.
+    const dashC = words.indexOf('-c');
+    if (words[0] && SHELLS.has(words[0].toLowerCase()) && dashC > 0) words = unwrap(words.slice(dashC + 1));
+    const [head, sub] = [words[0]?.toLowerCase(), words[1]?.toLowerCase()];
+    if (!head) continue;
+    if (DELETE_COMMANDS.has(head)) return true;
+    if (DELETE_SUBCOMMAND_TOOLS.has(head) && (sub === 'rm' || sub === 'remove' || sub === 'uninstall')) {
+      return head === 'git' ? sub === 'rm' : true;
+    }
+    if (head === 'find' && words.includes('-delete')) return true;
+  }
+  return false;
+}
+
+/**
+ * True when a segment's COMMAND (its command word, plus the subcommand words of
+ * a known action CLI) is a hard-floor action. Quoted strings are removed first,
+ * so a commit message, a grep pattern or a file name that merely MENTIONS a
+ * floor word does not trip the floor; such calls fall through to the rung.
+ */
+function commandIsOnFloor(commandLine: string, keywords: readonly string[]): boolean {
+  for (const raw of commandSegments(commandLine, false)) {
+    const words = unwrap(raw);
+    const head = words[0];
+    if (!head) continue;
+    if (SHELLS.has(head.toLowerCase())) continue; // its -c payload was stripped with the quotes
+    const parts = [head];
+    if (SUBCOMMAND_CLIS.has(head.toLowerCase())) {
+      for (const word of words.slice(1)) {
+        if (word.startsWith('-') || !/^[A-Za-z][A-Za-z0-9_:-]*$/.test(word)) break;
+        parts.push(word);
+        if (parts.length >= 4) break;
+      }
+    }
+    if (isHardFloorTool(parts.join('_'), keywords)) return true;
+  }
+  return false;
+}
 
 /** Modes that auto-approve EVERYTHING on the agent side, so no request reaches us. */
 const BLANKET_BYPASS_MODES: ReadonlySet<string> = new Set(['yolo', 'bypassPermissions', 'auto']);
@@ -167,10 +287,15 @@ export function decideNativePermission(input: {
   if (kind === 'execute') {
     const command = extractCommandText(toolCall as { kind?: string; title?: string; rawInput?: unknown });
     const catastrophic = classifyCommand(command);
-    if (catastrophic.destructive || SHELL_DELETE.test(command) || isHardFloorTool(command, keywords)) {
+    // The floor/delete checks read the COMMAND itself, never the agent's prose
+    // `description` ("Delete the old drafts") that rides along in rawInput.
+    const shell = shellCommandOf(toolCall, title);
+    const deletes = deletesData(shell);
+    if (catastrophic.destructive || deletes || commandIsOnFloor(shell, keywords)) {
+      const why = catastrophic.reason || (deletes ? 'command deletes data' : 'command is a hard-floor action');
       return {
         action: 'deny',
-        reason: `Hard floor: ${catastrophic.reason || 'command deletes data or touches a hard-floor action'}; never run by an agent, at any autonomy rung.`,
+        reason: `Hard floor: ${why}; never run by an agent, at any autonomy rung.`,
         loggable: true,
         ...native,
       };
