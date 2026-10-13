@@ -286,29 +286,98 @@ const SHELL_DELETE = /(?:^|[\s;&|(`])(?:sudo\s+|xargs\s+)?(?:rm|rmdir|unlink|shr
 /** The same pattern also matching right after a quote - for text a shell will EVALUATE. */
 const SHELL_DELETE_IN_PAYLOAD = /(?:^|[\s;&|(`"'])(?:sudo\s+|xargs\s+)?(?:rm|rmdir|unlink|shred)(?:\s|$)/i;
 
-/** Optional launchers in front of a shell/interpreter: sudo, env, xargs (with flags), a path. */
-const LAUNCH = String.raw`(?:sudo\s+(?:-\S+\s+(?:[^-\s]\S*\s+)?)*)?(?:(?:[^\s;&|()<>]*/)?env\s+(?:-\S+\s+(?:[^-\s]\S*\s+)?)*)?(?:xargs\s+(?:-\S+\s+(?:[^-\s]\S*\s+)?)*)?(?:[^\s;&|()<>]*/)?`;
-
 /**
- * A command line that feeds TEXT to a shell to evaluate:
- * `... | sh` / `| /bin/sh` / `| env bash` / `| xargs sh -c`, `eval ...`,
- * `source /dev/stdin` / `. /dev/stdin`, and process substitution
- * `bash <(...)` / `source <(...)`.
+ * Text a shell evaluates that no launcher word is needed to spot: `eval ...`,
+ * `source /dev/stdin` / `. /dev/stdin`, and `source <(...)` / `. <(...)`. Shells
+ * and interpreters that read their program from stdin are found from the
+ * tokenised segments instead (see {@link stdinLaunchers}), never by regex, so
+ * quoting and escaping inside the launcher path cannot hide them.
  */
 const EVALUATES_TEXT = new RegExp(
-  String.raw`\|\s*${LAUNCH}(?:ba|z|da|k|fi)?sh\b` +
-    String.raw`|(?:^|[\s;&|(])eval\s` +
+  String.raw`(?:^|[\s;&|(])eval\s` +
     String.raw`|(?:^|[\s;&|(])(?:source|\.)\s+/dev/(?:stdin|fd/0)\b` +
-    String.raw`|(?:^|[\s;&|(])(?:(?:[^\s;&|()<>]*/)?(?:ba|z|da|k)?sh|source|\.)\s+<\(` +
-    String.raw`|(?:^|[\s;&|(])(?:[^\s;&|()<>]*/)?(?:ba|z|da|k|fi)?sh(?:\s+-\S+)*\s*<<`,
+    String.raw`|(?:^|[\s;&|(])(?:source|\.)\s+<\(`,
   'i'
 );
 
-/** Text piped into an interpreter that reads its program from stdin (no script argument, or `-`). */
-const PIPED_TO_INTERPRETER = new RegExp(
-  String.raw`\|\s*${LAUNCH}(?:python[0-9.]*|node|nodejs|perl|ruby|php)(?:\s+-)?\s*(?:$|[;&|)])`,
-  'i'
-);
+/** A pipe into a launcher that is a command substitution or backtick: it may be any shell. */
+const PIPED_TO_SUBSTITUTION = /\|\s*["']?(?:\$\(|`)/;
+
+const SHELL_LAUNCHERS: ReadonlySet<string> = new Set([
+  'sh',
+  'bash',
+  'zsh',
+  'dash',
+  'ksh',
+  'fish',
+  'ash',
+  'csh',
+  'tcsh',
+]);
+const STDIN_INTERPRETER = /^(?:python[0-9.]*|node|nodejs|perl|ruby|php)$/;
+/** Wrappers `unwrap` does not know, which just hand the next word to exec. */
+const PASS_THROUGH_LAUNCHERS: ReadonlySet<string> = new Set([
+  'command',
+  'exec',
+  'builtin',
+  'busybox',
+  'toybox',
+  'time',
+  'nohup',
+]);
+
+const isRedirectOp = (t: Token): boolean => !t.quoted && (t.value === '<' || t.value === '>' || t.value === '>>');
+
+/**
+ * Which segments run a shell or interpreter that reads its program from stdin
+ * (a pipe, `<`, `<<`, `<<<`, `<(...)`)? The launcher is the first word after
+ * env assignments and wrappers, unquoted and unescaped by the tokenizer, reduced
+ * to its basename. A launcher that is a variable (`$SH`, `${SHELL}`) is treated
+ * as a possible shell.
+ */
+function stdinLaunchers(segments: Segment[]): { shell: boolean; interpreter: boolean } {
+  const found = { shell: false, interpreter: false };
+  segments.forEach((segment, index) => {
+    let rest = segment;
+    for (let guard = 0; guard < 8; guard += 1) {
+      rest = unwrap(rest);
+      if (!PASS_THROUGH_LAUNCHERS.has(basename(lower(rest[0]?.value)))) break;
+      rest = rest.slice(1);
+      while (rest.length > 0 && rest[0].value.startsWith('-') && rest[0].value !== '-') rest = rest.slice(1);
+    }
+    if (rest.length === 0) return;
+    const head = basename(lower(rest[0].value));
+    const variable = rest[0].value.startsWith('$');
+    const isShell = variable || SHELL_LAUNCHERS.has(head);
+    const isInterpreter = STDIN_INTERPRETER.test(head);
+    if (!isShell && !isInterpreter) return;
+    const redirectsIn = rest.some((t) => !t.quoted && t.value === '<');
+    // Script arguments: non-flag words that are not redirection operators or their targets.
+    let hasScript = false;
+    let stdinFlag = false;
+    for (let i = 1; i < rest.length; i += 1) {
+      const t = rest[i];
+      if (isRedirectOp(t)) {
+        while (i + 1 < rest.length && isRedirectOp(rest[i + 1])) i += 1;
+        i += 1; // the redirection target
+        continue;
+      }
+      if (t.value === '-s') stdinFlag = true;
+      if (t.value === '-o' || t.value === '+o' || t.value === '-O') {
+        i += 1;
+        continue;
+      }
+      if (!t.value.startsWith('-')) hasScript = true;
+    }
+    // `xargs sh -c '{}'`: the command text arrives on stdin whatever the arguments say.
+    const viaXargs = segment.slice(0, segment.length - rest.length).some((t) => basename(lower(t.value)) === 'xargs');
+    if (hasScript && !stdinFlag && !viaXargs) return;
+    if (index === 0 && !redirectsIn) return;
+    if (isShell) found.shell = true;
+    else found.interpreter = true;
+  });
+  return found;
+}
 
 const DELETE_COMMANDS: ReadonlySet<string> = new Set(['rm', 'rmdir', 'unlink', 'shred', 'srm', 'wipe']);
 const PACKAGE_MANAGERS: ReadonlySet<string> = new Set(['npm', 'pnpm', 'yarn', 'bun']);
@@ -695,15 +764,17 @@ export function classifyShellCommand(
 function classifyChecked(commandLine: string, keywords: readonly string[], depth: number): ShellFloorVerdict {
   if (!commandLine) return NOT_FLOOR;
   if (depth > 6) return floor(TOO_DEEP);
+  const segments = tokenizeShell(commandLine);
+  const launchers = stdinLaunchers(segments);
   // Text piped into a shell or eval'd is code, quotes and all.
-  if (EVALUATES_TEXT.test(commandLine)) {
+  if (launchers.shell || EVALUATES_TEXT.test(commandLine) || PIPED_TO_SUBSTITUTION.test(commandLine)) {
     if (SHELL_DELETE_IN_PAYLOAD.test(commandLine)) return floor('command deletes data');
     if (DATA_DESTROYING_STATEMENT.test(commandLine)) return floor('text evaluated by a shell destroys data');
     if (MONEY_PROVIDER.test(commandLine) && MONEY_ACTION.test(commandLine)) {
       return floor('text evaluated by a shell moves money or signs');
     }
   }
-  if (PIPED_TO_INTERPRETER.test(commandLine)) {
+  if (launchers.interpreter) {
     if (SHELL_DELETE_IN_PAYLOAD.test(commandLine) || INTERPRETER_DELETE.test(commandLine)) {
       return floor('code piped into an interpreter deletes data');
     }
@@ -717,7 +788,6 @@ function classifyChecked(commandLine: string, keywords: readonly string[], depth
     const verdict = classifyShellCommand(inner, keywords, depth + 1);
     if (verdict.floor) return verdict;
   }
-  const segments = tokenizeShell(commandLine);
   if (SHELL_DELETE.test(evaluableText(segments))) return floor('command deletes data');
   for (const segment of segments) {
     const verdict = classifySegment(segment, keywords, depth);
