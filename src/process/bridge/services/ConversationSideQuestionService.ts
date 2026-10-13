@@ -216,9 +216,7 @@ export class ConversationSideQuestionService {
       backend: extra.backend,
       customAgentId: extra.customAgentId || extra.presetAssistantId,
     });
-    const forkMeta = autonomy
-      ? await resolveLadderedSessionMeta(extra.backend, extra.workspace, { tools: [] })
-      : undefined;
+    const forkMeta = autonomy ? await resolveLadderedSessionMeta(extra.backend, { tools: [] }) : undefined;
 
     return {
       ...(forkMeta ? { forkMeta } : {}),

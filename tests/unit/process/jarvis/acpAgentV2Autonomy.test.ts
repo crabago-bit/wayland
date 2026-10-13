@@ -152,7 +152,7 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     expect(capturedConfig.yoloMode).toBe(false);
     expect(capturedOptions?.initialDesired?.mode).toBe('default');
     // Claude Code's own allow rules / defaultMode / hooks are not loaded.
-    expect(capturedConfig.sessionMeta).toEqual({ claudeCode: { options: { settingSources: ['project'] } } });
+    expect(capturedConfig.sessionMeta).toEqual({ claudeCode: { options: { settingSources: [] } } });
 
     // A later switch into bypass is refused and the session re-asserted to default.
     const result = await agent.setMode('bypassPermissions');
