@@ -207,6 +207,44 @@ const DOCKER_RUN_VALUE_FLAGS: ReadonlySet<string> = new Set([
   '--index',
 ]);
 
+const DOCKER_GLOBAL_VALUE_FLAGS: ReadonlySet<string> = new Set([
+  '-H',
+  '--host',
+  '-c',
+  '--context',
+  '--config',
+  '-l',
+  '--log-level',
+  '--tlscacert',
+  '--tlscert',
+  '--tlskey',
+]);
+
+/** ssh options that take a separate value. */
+const SSH_VALUE_FLAGS: ReadonlySet<string> = new Set([
+  '-B',
+  '-b',
+  '-c',
+  '-D',
+  '-E',
+  '-e',
+  '-F',
+  '-I',
+  '-i',
+  '-J',
+  '-L',
+  '-l',
+  '-m',
+  '-O',
+  '-o',
+  '-p',
+  '-Q',
+  '-R',
+  '-S',
+  '-W',
+  '-w',
+]);
+
 /** Skip leading flags (and the values of value-taking flags) from `start`. */
 function skipFlags(words: string[], start: number, valueFlags: ReadonlySet<string>): number {
   let i = start;
@@ -243,6 +281,21 @@ function unwrap(tokens: Token[]): Token[] {
     if (/^-?\d+$/.test(words[0]) && rest !== tokens) {
       rest = rest.slice(1); // `nice -10 rm`
       continue;
+    }
+    if ((head === 'docker' || head === 'podman') && words[1]?.startsWith('-')) {
+      // `docker -H ssh://host exec ...` / `docker --context prod exec ...`
+      const at = skipFlags(words, 1, DOCKER_GLOBAL_VALUE_FLAGS);
+      if (at > 1) {
+        rest = [rest[0], ...rest.slice(at)];
+        continue;
+      }
+    }
+    if (head === 'kubectl' || head === 'oc') {
+      const dashes = words.indexOf('--');
+      if (dashes > 0 && words.slice(1, dashes).includes('exec')) {
+        rest = rest.slice(dashes + 1); // `kubectl exec pod -- cmd`
+        continue;
+      }
     }
     const sub = lower(words[1]);
     if ((head === 'pnpm' || head === 'yarn') && sub === 'dlx') {
@@ -326,6 +379,60 @@ const PASS_THROUGH_LAUNCHERS: ReadonlySet<string> = new Set([
   'nohup',
 ]);
 
+/**
+ * The command words a remote-shell launcher hands to the REMOTE shell:
+ * `ssh [opts] host cmd...`, `mosh host -- cmd...`, `gcloud compute ssh --command X`
+ * (or after `--`). `[]` = no command (an interactive session that reads stdin);
+ * `null` = not a remote-shell launcher. The remote shell re-parses the joined words.
+ */
+function remoteCommandWords(words: string[]): string[] | null {
+  const head = basename(lower(words[0]));
+  if (head === 'ssh' || head === 'mosh') {
+    const host = skipFlags(words, 1, SSH_VALUE_FLAGS);
+    if (host >= words.length) return [];
+    let rest = words.slice(host + 1);
+    if (head === 'mosh') return rest[0] === '--' ? rest.slice(1) : [];
+    rest = rest.slice(skipFlags(rest, 0, SSH_VALUE_FLAGS));
+    return rest;
+  }
+  if (head === 'gcloud' && lower(words[1]) === 'compute' && lower(words[2]) === 'ssh') {
+    const out: string[] = [];
+    for (let k = 3; k < words.length; k += 1) {
+      const w = words[k];
+      if (w === '--command') {
+        out.push(words[k + 1] ?? '');
+        k += 1;
+      } else if (w.startsWith('--command=')) {
+        out.push(w.slice('--command='.length));
+      } else if (w === '--') {
+        out.push(...words.slice(k + 1));
+        break;
+      }
+    }
+    return out;
+  }
+  return null;
+}
+
+/** Commands a transfer/remote tool is told to run: ProxyCommand/LocalCommand/RemoteCommand, rsync --rsync-path / -e / --rsh. */
+function optionPayloads(words: string[]): string[] {
+  const head = basename(lower(words[0]));
+  if (!['ssh', 'scp', 'sftp', 'rsync', 'mosh'].includes(head)) return [];
+  const out: string[] = [];
+  for (let i = 1; i < words.length; i += 1) {
+    const w = words[i];
+    const opt = /^(?:-o)?(?:ProxyCommand|LocalCommand|RemoteCommand)(?:=|\s+)(.+)$/i.exec(w);
+    if (opt) out.push(opt[1]);
+    else if (/^-o$/.test(w) && /^(?:ProxyCommand|LocalCommand|RemoteCommand)=/i.test(words[i + 1] ?? '')) {
+      out.push(words[i + 1].replace(/^[^=]*=/, ''));
+    } else if (head === 'rsync' && /^--(?:rsync-path|rsh)=/.test(w)) out.push(w.replace(/^[^=]*=/, ''));
+    else if (head === 'rsync' && (w === '-e' || w === '--rsh' || w === '--rsync-path') && words[i + 1]) {
+      out.push(words[i + 1]);
+    }
+  }
+  return out;
+}
+
 const isRedirectOp = (t: Token): boolean => !t.quoted && (t.value === '<' || t.value === '>' || t.value === '>>');
 
 /**
@@ -335,7 +442,11 @@ const isRedirectOp = (t: Token): boolean => !t.quoted && (t.value === '<' || t.v
  * to its basename. A launcher that is a variable (`$SH`, `${SHELL}`) is treated
  * as a possible shell.
  */
-function stdinLaunchers(segments: Segment[]): { shell: boolean; interpreter: boolean } {
+function stdinLaunchers(
+  segments: Segment[],
+  stdinFed: boolean = false,
+  nesting: number = 0
+): { shell: boolean; interpreter: boolean } {
   const found = { shell: false, interpreter: false };
   segments.forEach((segment, index) => {
     let rest = segment;
@@ -346,6 +457,20 @@ function stdinLaunchers(segments: Segment[]): { shell: boolean; interpreter: boo
       while (rest.length > 0 && rest[0].value.startsWith('-') && rest[0].value !== '-') rest = rest.slice(1);
     }
     if (rest.length === 0) return;
+    const remote = remoteCommandWords(values(rest));
+    if (remote) {
+      // ssh and friends: the remote shell reads our stdin when we have one.
+      const fed = stdinFed || index > 0 || rest.some((t) => !t.quoted && t.value === '<');
+      if (!fed) return;
+      if (remote.length === 0 || remote[0].startsWith('$') || nesting >= 4) {
+        found.shell = true;
+        return;
+      }
+      const inner = stdinLaunchers(tokenizeShell(remote.join(' ')), true, nesting + 1);
+      found.shell ||= inner.shell;
+      found.interpreter ||= inner.interpreter;
+      return;
+    }
     const head = basename(lower(rest[0].value));
     const variable = rest[0].value.startsWith('$');
     const isShell = variable || SHELL_LAUNCHERS.has(head);
@@ -372,7 +497,7 @@ function stdinLaunchers(segments: Segment[]): { shell: boolean; interpreter: boo
     // `xargs sh -c '{}'`: the command text arrives on stdin whatever the arguments say.
     const viaXargs = segment.slice(0, segment.length - rest.length).some((t) => basename(lower(t.value)) === 'xargs');
     if (hasScript && !stdinFlag && !viaXargs) return;
-    if (index === 0 && !redirectsIn) return;
+    if (index === 0 && !redirectsIn && !stdinFed) return;
     if (isShell) found.shell = true;
     else found.interpreter = true;
   });
@@ -540,6 +665,14 @@ function classifySegment(tokens: Token[], keywords: readonly string[], depth: nu
     if (at > 0 && words[at + 1] !== undefined) return recurse(words[at + 1]);
     return NOT_FLOOR;
   }
+
+  // ── Remote execution: the payload runs on the remote shell ─────
+  for (const payload of optionPayloads(words)) {
+    const inner = recurse(payload);
+    if (inner.floor) return inner;
+  }
+  const remote = remoteCommandWords(words);
+  if (remote && remote.length > 0) return recurse(remote.join(' '));
 
   // ── find -delete / -exec ────────────────────────────────────────
   if (head === 'find') {
