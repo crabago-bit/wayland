@@ -289,6 +289,7 @@ export class AcpAgentV2 {
     // Load user-configured (builtin) MCP servers from settings, filtered by
     // cached agent MCP capabilities. Mirrors AcpAgent.loadBuiltinSessionMcpServers().
 
+    const shimmedMcpServers: string[] = [];
     const rawMcpServers = await loadRuntimeMcpServers();
     if (rawMcpServers.length > 0) {
       const cachedInit = await ProcessConfig.get('acp.cachedInitializeResult');
@@ -324,6 +325,8 @@ export class AcpAgentV2 {
       });
       this.onMcpProjection?.(projection);
       const userServers = projection.servers;
+      // With a ladder every projected connector went through the shim.
+      if (this.autonomy) shimmedMcpServers.push(...userServers.map((server) => server.name));
       if (userServers.length > 0) {
         (this.agentConfig as { mcpServers?: McpServer[] }).mcpServers = [
           ...(this.agentConfig.mcpServers || []),
@@ -399,6 +402,7 @@ export class AcpAgentV2 {
       permissionGate: this.autonomy
         ? createAutonomyPermissionGate(this.autonomy, this.agentConfig.agentBackend, {
             internalMcpServers,
+            shimmedMcpServers,
           })
         : undefined,
     };

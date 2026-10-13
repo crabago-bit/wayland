@@ -85,6 +85,23 @@ describe('decideNativePermission - hard floor', () => {
     expect(decide({ kind: 'execute', title: 'npm test', rawInput: { command: 'npm test' } }, 3).action).toBe('pass');
   });
 
+  it('decides an MCP call on the TOOL half only - a floor word in the server name does not floor it', () => {
+    expect(decide({ kind: 'other', title: 'mcp__payroll-db__list_employees' }, 1).action).toBe('pass');
+    expect(decide({ kind: 'other', title: 'mcp__delete-me__get_status' }, 4).action).toBe('pass');
+  });
+
+  it('a rung-2 MCP write on a SHIMMED server is denied (the shim would refuse it), not held', () => {
+    const shimmed = new Set(['warrior-ghl']);
+    const call = { kind: 'other', title: 'mcp__warrior-ghl__ghl_create_contact' };
+    expect(decideNativePermission({ toolCall: call, rung: 2, shimmedServers: shimmed }).action).toBe('deny');
+    expect(decideNativePermission({ toolCall: call, rung: 2 }).action).toBe('hold');
+    // At rung 3 the shim records the allowed write; the gate does not double-log it.
+    expect(decideNativePermission({ toolCall: call, rung: 3, shimmedServers: shimmed })).toMatchObject({
+      action: 'pass',
+      loggable: false,
+    });
+  });
+
   it('denies a hard-floor MCP tool (backend-loaded connector) at every rung', () => {
     for (const rung of [1, 2, 3, 4] as AutonomyRung[]) {
       const v = decide({ kind: 'other', title: 'mcp__stripe__create_payout' }, rung);
