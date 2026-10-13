@@ -60,6 +60,8 @@ export type OldAcpAgentConfig = {
     sessionMetadata?: Record<string, unknown>;
     /** JARVIS autonomy: id half of the `custom:<id>` rung key (see `autonomyAgentKey`). */
     customAgentId?: string;
+    /** JARVIS autonomy: `customAgentId ?? presetAssistantId`, the id the rung is keyed by. */
+    autonomyAgentId?: string;
   };
   onStreamEvent: (data: unknown) => void;
   onSignalEvent?: (data: unknown) => void;

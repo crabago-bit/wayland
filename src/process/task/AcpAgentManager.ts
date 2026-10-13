@@ -2105,6 +2105,12 @@ ${collectedResponses.join('\n')}`;
           // under. Without it every `custom:<id>` agent would read the bare
           // `custom` backend's rung and the per-agent selector would be inert.
           customAgentId: data.customAgentId,
+          // A PRESET assistant (every Warrior pack agent) carries only
+          // `presetAssistantId` - buildAgentConversationParams never sets
+          // customAgentId for presets, from the Guid page or from Teams. The
+          // rung key must fall back to it, or the ladder reads the bare backend
+          // key. Separate field so nothing else customAgentId drives changes.
+          autonomyAgentId: data.customAgentId || data.presetAssistantId,
           // Forward team MCP stdio config so AcpAgent.loadBuiltinSessionMcpServers() can inject it
           teamMcpStdioConfig: (data as unknown as Record<string, unknown>).teamMcpStdioConfig as
             | { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> }
