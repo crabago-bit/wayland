@@ -307,7 +307,13 @@ export class AcpAgentV2 {
       // Claude Code's own allow rules / defaultMode / hooks would approve calls
       // without ever asking us; start without user/local (and unsafe project)
       // settings. See resolveLadderedSettingSources.
-      const meta = await resolveLadderedSessionMeta(this.agentConfig.agentBackend, this.agentConfig.cwd);
+      const meta = await resolveLadderedSessionMeta(
+        this.agentConfig.agentBackend,
+        this.agentConfig.cwd,
+        {},
+        undefined,
+        this.agentConfig.env?.CLAUDE_CONFIG_DIR
+      );
       if (meta) (this.agentConfig as { sessionMeta?: Record<string, unknown> }).sessionMeta = meta;
     }
 

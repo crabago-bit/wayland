@@ -190,3 +190,26 @@ describe('verifyLadderedBridge - only a bridge verified to honour the override',
     expect(verifyLadderedBridge('codex', undefined)).toEqual({ ok: true });
   });
 });
+
+describe('laddered + Flux: the scoped availableModels allowlist survives', () => {
+  it('carries ONLY availableModels from the scoped CLAUDE_CONFIG_DIR as flag settings', async () => {
+    const scoped = fs.mkdtempSync(path.join(dir, 'flux-claude-home-'));
+    fs.writeFileSync(
+      path.join(scoped, 'settings.json'),
+      JSON.stringify({ availableModels: ['flux-auto'], permissions: { allow: ['Edit'], defaultMode: 'auto' } })
+    );
+    const ws = fs.mkdtempSync(path.join(dir, 'ws-'));
+    const meta = await resolveLadderedSessionMeta('claude', ws, {}, '/nonexistent-home', scoped);
+    expect(meta).toEqual({
+      claudeCode: { options: { settingSources: ['project'], settings: { availableModels: ['flux-auto'] } } },
+    });
+  });
+
+  it('no scoped dir: no flag settings', async () => {
+    const ws = fs.mkdtempSync(path.join(dir, 'ws-'));
+    const meta = (await resolveLadderedSessionMeta('claude', ws, {}, '/nonexistent-home')) as {
+      claudeCode: { options: Record<string, unknown> };
+    };
+    expect(meta.claudeCode.options.settings).toBeUndefined();
+  });
+});

@@ -128,11 +128,41 @@ export async function resolveLadderedSessionMeta(
   backend: string,
   cwd: string,
   extraOptions: Record<string, unknown> = {},
-  home?: string
+  home?: string,
+  /** The spawn's CLAUDE_CONFIG_DIR, when Wayland scoped one (Flux routing). */
+  scopedClaudeConfigDir?: string
 ): Promise<Record<string, unknown> | undefined> {
   if (backend !== 'claude') return undefined;
   const settingSources = await resolveLadderedSettingSources(cwd, home);
-  return { claudeCode: { options: { ...extraOptions, settingSources } } };
+  const availableModels = await readScopedAvailableModels(scopedClaudeConfigDir);
+  return {
+    claudeCode: {
+      options: {
+        ...extraOptions,
+        settingSources,
+        // Dropping the `user` source also drops the `availableModels` allowlist
+        // a Flux-routed spawn depends on (see materializeFluxClaudeConfigDir).
+        // Carry ONLY that key as flag settings, never permissions or hooks.
+        ...(availableModels ? { settings: { availableModels } } : {}),
+      },
+    },
+  };
+}
+
+/** `availableModels` from a Wayland-scoped CLAUDE_CONFIG_DIR's settings.json, if any. */
+async function readScopedAvailableModels(configDir: string | undefined): Promise<string[] | undefined> {
+  if (!configDir) return undefined;
+  try {
+    const parsed = JSON.parse(await fs.promises.readFile(path.join(configDir, 'settings.json'), 'utf8')) as {
+      availableModels?: unknown;
+    };
+    const models = Array.isArray(parsed.availableModels)
+      ? parsed.availableModels.filter((m): m is string => typeof m === 'string')
+      : [];
+    return models.length > 0 ? models : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
