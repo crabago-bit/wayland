@@ -35,6 +35,7 @@ import { classifyCommand, extractCommandText } from '@/common/security/destructi
 import { isCodexAutoApproveMode } from '@/common/types/codex/codexModes';
 import { getFullAutoMode } from '@/common/types/agentModes';
 import { decideToolCall, isHardFloorTool, type AutonomyRung } from './autonomy';
+import { classifyShellCommand, shellWritesAgentSettings } from './shellFloor';
 
 /** The slice of an ACP permission request this policy reads. */
 export type NativeToolCall = {
@@ -69,72 +70,18 @@ const READ_KINDS: ReadonlySet<string> = new Set(['read', 'search', 'think', 'fet
  */
 const MCP_TOOL_TITLE = /^(?:mcp__)?([a-z0-9_.-]+?)__([a-z0-9_.-]+)$/i;
 
-/** Commands that delete files when they are the command word of a segment. */
-const DELETE_COMMANDS: ReadonlySet<string> = new Set(['rm', 'rmdir', 'unlink', 'shred']);
-
-/**
- * `<tool> rm ...` forms. autonomy.md puts "deleting data" on the hard floor and
- * does not carve out version-control or package-manager removals, so these stay
- * denied: `git rm` deletes tracked files; `npm rm` & co. are kept for the same
- * reason (the safer reading), even though they only uninstall a dependency.
- */
-const DELETE_SUBCOMMAND_TOOLS: ReadonlySet<string> = new Set(['git', 'npm', 'pnpm', 'yarn', 'bun']);
-
-/** Words that only wrap the real command: `sudo rm`, `xargs rm`, `env X=1 rm`. */
-const COMMAND_WRAPPERS: ReadonlySet<string> = new Set([
-  'sudo',
-  'xargs',
-  'env',
-  'time',
-  'nice',
-  'nohup',
-  'command',
-  'exec',
-]);
-
-/** Shells whose `-c` argument is itself a command line. */
-const SHELLS: ReadonlySet<string> = new Set(['sh', 'bash', 'zsh', 'dash']);
-
-/**
- * CLIs whose SUBCOMMAND names the action (`stripe payouts create`, `kubectl
- * delete`, `gh release delete`). For these the leading non-flag words are
- * checked against the floor as well as the command word.
- */
-const SUBCOMMAND_CLIS: ReadonlySet<string> = new Set([
-  'stripe',
-  'kubectl',
-  'gh',
-  'aws',
-  'gcloud',
-  'az',
-  'heroku',
-  'docusign',
-  'paypal',
-  'square',
-  'quickbooks',
-  'qbo',
-]);
-
 /** Claude Code's project/local settings files - where permission rules live. */
 const AGENT_SETTINGS_PATH = /(?:^|[\s\\/"'=>])\.claude[\\/]settings(?:\.local)?\.json\b/i;
 
 /** True when a write targets the backend's own permission settings. */
-function touchesAgentSettings(toolCall: NativeToolCall): boolean {
-  const input = toolCall.rawInput as { file_path?: unknown; path?: unknown; command?: unknown } | undefined;
+function touchesAgentSettings(toolCall: NativeToolCall, title: string): boolean {
+  if (toolCall.kind === 'execute') return shellWritesAgentSettings(shellCommandOf(toolCall, title));
+  const input = toolCall.rawInput as { file_path?: unknown; path?: unknown; notebook_path?: unknown } | undefined;
   const locations = (toolCall as { locations?: Array<{ path?: unknown }> }).locations ?? [];
-  const candidates = [input?.file_path, input?.path, input?.command, toolCall.title, ...locations.map((l) => l.path)];
-  return candidates.some((value) => typeof value === 'string' && AGENT_SETTINGS_PATH.test(value));
-}
-
-/** Split a command line into `;`/`&&`/`||`/`|`/newline/`$(`/backtick segments, as word lists. */
-function commandSegments(commandLine: string, keepQuotedText: boolean): string[][] {
-  const text = keepQuotedText
-    ? commandLine.replace(/["']/g, ' ')
-    : commandLine.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, ' ');
-  return text
-    .split(/;|&&|\|\||\||\n|\$\(|`|\(|\)/)
-    .map((segment) => segment.trim().split(/\s+/).filter(Boolean))
-    .filter((words) => words.length > 0);
+  const candidates = [input?.file_path, input?.path, input?.notebook_path, ...locations.map((l) => l.path)];
+  if (candidates.some((value) => typeof value === 'string' && AGENT_SETTINGS_PATH.test(value))) return true;
+  // A write with no structured path: fall back to the title.
+  return candidates.every((value) => typeof value !== 'string') && AGENT_SETTINGS_PATH.test(title);
 }
 
 /** The shell command an execute call will run: `rawInput.command`/`cmd`, else its title. */
@@ -148,64 +95,6 @@ function shellCommandOf(toolCall: NativeToolCall, title: string): string {
     }
   }
   return title;
-}
-
-/** Drop leading wrappers and `VAR=value` assignments; strip a leading path. */
-function unwrap(words: string[]): string[] {
-  let i = 0;
-  while (i < words.length) {
-    const word = words[i];
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) i += 1;
-    else if (COMMAND_WRAPPERS.has(word.toLowerCase())) {
-      i += 1;
-      // A wrapper's own flags (`xargs -0`, `sudo -u x`) are not the command.
-      while (i < words.length && words[i].startsWith('-')) i += 1;
-    } else break;
-  }
-  return words.slice(i).map((word, index) => (index === 0 ? (word.split('/').pop() ?? word) : word));
-}
-
-/** True when any segment's command word deletes data. Quoted text is KEPT so `bash -c "rm x"` is seen. */
-function deletesData(commandLine: string): boolean {
-  for (const raw of commandSegments(commandLine, true)) {
-    let words = unwrap(raw);
-    // `bash -c "rm x"`: the -c payload (quotes already dropped) is the command.
-    const dashC = words.indexOf('-c');
-    if (words[0] && SHELLS.has(words[0].toLowerCase()) && dashC > 0) words = unwrap(words.slice(dashC + 1));
-    const [head, sub] = [words[0]?.toLowerCase(), words[1]?.toLowerCase()];
-    if (!head) continue;
-    if (DELETE_COMMANDS.has(head)) return true;
-    if (DELETE_SUBCOMMAND_TOOLS.has(head) && (sub === 'rm' || sub === 'remove' || sub === 'uninstall')) {
-      return head === 'git' ? sub === 'rm' : true;
-    }
-    if (head === 'find' && words.includes('-delete')) return true;
-  }
-  return false;
-}
-
-/**
- * True when a segment's COMMAND (its command word, plus the subcommand words of
- * a known action CLI) is a hard-floor action. Quoted strings are removed first,
- * so a commit message, a grep pattern or a file name that merely MENTIONS a
- * floor word does not trip the floor; such calls fall through to the rung.
- */
-function commandIsOnFloor(commandLine: string, keywords: readonly string[]): boolean {
-  for (const raw of commandSegments(commandLine, false)) {
-    const words = unwrap(raw);
-    const head = words[0];
-    if (!head) continue;
-    if (SHELLS.has(head.toLowerCase())) continue; // its -c payload was stripped with the quotes
-    const parts = [head];
-    if (SUBCOMMAND_CLIS.has(head.toLowerCase())) {
-      for (const word of words.slice(1)) {
-        if (word.startsWith('-') || !/^[A-Za-z][A-Za-z0-9_:-]*$/.test(word)) break;
-        parts.push(word);
-        if (parts.length >= 4) break;
-      }
-    }
-    if (isHardFloorTool(parts.join('_'), keywords)) return true;
-  }
-  return false;
 }
 
 /** Modes that auto-approve EVERYTHING on the agent side, so no request reaches us. */
@@ -315,7 +204,7 @@ export function decideNativePermission(input: {
   // Writing the backend's own permission settings would let an agent grant
   // itself rules that approve future calls without asking - widening its own
   // authority. Never, at any rung.
-  if (touchesAgentSettings(toolCall)) {
+  if (touchesAgentSettings(toolCall, title)) {
     return {
       action: 'deny',
       reason: 'Hard floor: an agent may not edit its own permission settings (.claude/settings*.json).',
@@ -337,9 +226,9 @@ export function decideNativePermission(input: {
     // The floor/delete checks read the COMMAND itself, never the agent's prose
     // `description` ("Delete the old drafts") that rides along in rawInput.
     const shell = shellCommandOf(toolCall, title);
-    const deletes = deletesData(shell);
-    if (catastrophic.destructive || deletes || commandIsOnFloor(shell, keywords)) {
-      const why = catastrophic.reason || (deletes ? 'command deletes data' : 'command is a hard-floor action');
+    const verdict = classifyShellCommand(shell, keywords);
+    if (catastrophic.destructive || verdict.floor) {
+      const why = catastrophic.reason || (verdict.floor ? verdict.reason : 'hard-floor action');
       return {
         action: 'deny',
         reason: `Hard floor: ${why}; never run by an agent, at any autonomy rung.`,
