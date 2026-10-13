@@ -5,18 +5,24 @@
 #   scripts/deploy-webui.sh --pull     # also fetch upstream + rebase local patches first
 #   scripts/deploy-webui.sh --no-restart
 #
-# Steps: (1) pinned wayland-core into resources/bundled-wayland-core (the desktop
-# fails closed on a contract-minor mismatch, so this is NOT optional after an
-# upstream bump), (2) constitution-fs helper, (3) renderer + server + stdio MCP
-# bundles via build:webui, (4) verify:webui, (5) pin-drift check, (6) pm2 restart,
+# Steps: (1) pinned Fuigo engine into resources/bundled-fuigo (scripts/fuigo/prepare.cjs
+# downloads the release pinned in scripts/fuigo/authority.json and refuses a digest
+# mismatch), (2) constitution-fs helper, (3) renderer + server + stdio MCP bundles via
+# build:webui, (4) verify:webui, (5) staged-engine check: the staged binary's sha256
+# must equal the receipt in bundle.json (the server refuses to spawn it otherwise)
+# and the tool-filter shim must carry the hosted-connector URL env, (6) pm2 restart,
 # (7) smoke: local 200 + public 200 + boot marker in pm2 log.
+#
+# The checkout defaults to the one this script lives in, so a worktree can build
+# and verify itself (--no-restart) without touching the live tree. Steps 6-7 only
+# ever act on the pm2 app `wayland-webui`.
 #
 # WAYLAND_ALLOW_MISSING_MCP=1 is passed by build:webui itself: the four optional
 # @wayland/{imap,news,cal-com,apple}-mcp packages live in a FerroxLabs repo that is
 # not public, so they are intentionally not bundled here. The 6 required stdio MCP
 # scripts are still verified.
 set -euo pipefail
-REPO=/home/forge/wayland-desktop
+REPO="${WAYLAND_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$REPO"
 export PATH=/home/forge/.bun/bin:/home/forge/.nvm/versions/node/v24.16.0/bin:$PATH
 
@@ -34,9 +40,8 @@ if [ "$PULL" = 1 ]; then
   echo "rebased $branch onto origin/main"
 fi
 
-step 1 "pinned wayland-core"
-pinned=$(grep -oE "DEFAULT_WCORE_VERSION = 'v[0-9.]+'" scripts/prepareWaylandCore.js | grep -oE 'v[0-9.]+')
-WCORE_VERSION="${WCORE_VERSION:-$pinned}" node scripts/prepareWaylandCore.js
+step 1 "pinned Fuigo engine"
+node scripts/fuigo/prepare.cjs linux x64
 
 step 2 "constitution-fs helper"
 node scripts/prepareConstitutionFs.js
@@ -47,8 +52,24 @@ NODE_ENV=production bun run build:webui
 step 4 "verify:webui"
 node scripts/verify-webui.mjs
 
-step 5 "engine pin drift check"
-scripts/check-core-pin.sh
+step 5 "staged engine + tool-filter shim check"
+FUIGO_DIR="$REPO/resources/bundled-fuigo/linux-x64"
+node -e '
+  const fs = require("fs"), crypto = require("crypto"), path = require("path");
+  const dir = process.argv[1];
+  const receipt = JSON.parse(fs.readFileSync(path.join(dir, "bundle.json"), "utf8"));
+  const pin = require(path.resolve("scripts/fuigo/authority.json"));
+  const file = path.join(dir, receipt.binary);
+  if (fs.lstatSync(file).isSymbolicLink()) throw new Error("staged Fuigo binary is a symlink; the server refuses it");
+  const sha = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  if (sha !== receipt.stagedSha256) throw new Error(`staged sha256 ${sha} != bundle.json ${receipt.stagedSha256}`);
+  if (receipt.version !== pin.version || receipt.binarySha256 !== pin.platforms[receipt.runtime].binarySha256)
+    throw new Error(`bundle.json ${receipt.version} does not match the pin ${pin.version}`);
+  console.log(`fuigo ${receipt.version} ${receipt.runtime} sha256 ${sha} OK`);
+' "$FUIGO_DIR"
+shim_hits=$(grep -c url-env dist-server/builtin-mcp-tool-filter.js || true)
+[ "${shim_hits:-0}" -gt 0 ] || { echo "dist-server/builtin-mcp-tool-filter.js has no --url-env support (JARVIS hosted bridge missing)"; exit 1; }
+echo "tool-filter shim url-env refs: $shim_hits"
 
 if [ "$RESTART" = 1 ]; then
   step 6 "pm2 restart"
