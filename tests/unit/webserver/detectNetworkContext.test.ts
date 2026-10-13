@@ -65,10 +65,15 @@ describe('detectNetworkContext', () => {
     expect(ctx.isHttps).toBe(true);
   });
 
-  it('isHttps reflects SERVER_BASE_URL https://', () => {
+  it('isHttps follows the request protocol, not SERVER_BASE_URL https://, when a request is present', () => {
+    // SERVER_BASE_URL is only a hint for request-less callers. A plain-HTTP request (e.g. an
+    // operator listener on the tailnet via WAYLAND_EXTRA_LISTEN) must not be reported as HTTPS,
+    // or it would be issued `Secure` cookies the browser then drops.
     process.env.SERVER_BASE_URL = 'https://box.example.com';
-    const ctx = detectNetworkContext(makeReq({ hostname: 'box.example.com', peer: '203.0.113.5' }));
-    expect(ctx.isHttps).toBe(true);
+    const plain = detectNetworkContext(makeReq({ hostname: 'box.example.com', peer: '203.0.113.5' }));
+    expect(plain.isHttps).toBe(false);
+    const secure = detectNetworkContext(makeReq({ hostname: 'box.example.com', peer: '203.0.113.5', secure: true }));
+    expect(secure.isHttps).toBe(true);
   });
 
   it('isHttps reflects req.secure (trust-proxy resolved)', () => {
