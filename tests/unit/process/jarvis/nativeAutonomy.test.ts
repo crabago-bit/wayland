@@ -91,6 +91,26 @@ describe('decideNativePermission - hard floor', () => {
     'curl -X POST "$STRIPE_URL/v1/refunds"',
     'curl -d amount=1 "${API}/v1/payouts"',
     'curl -X POST "$(base_url)/v1/transfers"',
+    // Round 5: command substitution runs even inside double quotes.
+    'echo "$(rm -rf /data)"',
+    'cat "$(rm -rf /data)"',
+    'echo "`rm -rf /data`"',
+    'ls "$(rm -rf /data)"',
+    'git commit -m "$(rm -rf /data)"',
+    'git commit -m "msg $(echo hi; rm -rf /data)"',
+    'echo $(stripe payouts create)',
+    'echo "$(echo "$(rm -rf /data)")"',
+    // Round 5: other ways to feed text to a shell or interpreter.
+    'echo "rm -rf /data" | xargs sh -c',
+    "echo 'rm -rf /data' | xargs -I {} sh -c '{}'",
+    'echo "rm -rf /data" | /bin/sh',
+    'echo "rm -rf /data" | env sh',
+    'echo "rm -rf /data" | /usr/bin/env bash',
+    'echo "rm -rf /data" | sudo -u forge bash',
+    'echo "import shutil; shutil.rmtree(\'/data\')" | python3',
+    'echo "import shutil; shutil.rmtree(\'/data\')" | python3 -',
+    'echo "rm -rf /data" | source /dev/stdin',
+    'bash <(echo "rm -rf /data")',
   ])('denies the shell command %s at rung 4', (command) => {
     expect(decide({ kind: 'execute', title: command, rawInput: { command } }, 4).action).toBe('deny');
   });
@@ -112,6 +132,11 @@ describe('decideNativePermission - hard floor', () => {
     'echo "do not rm this"',
     // Round 4: a write to a variable host with a clean path follows the rung.
     'curl -X POST "$API_URL/v1/jobs"',
+    // Round 5: single-quoted text is literal - no substitution runs.
+    "echo '$(rm -rf x)'",
+    "git commit -m 'drop `rm` from the docs'",
+    'echo "$(date)"',
+    'echo "listing" | python3 script.py',
   ])('a command that merely MENTIONS a floor word (%s) follows the rung, not the floor', (command) => {
     const at = (rung: AutonomyRung) => decide({ kind: 'execute', title: command, rawInput: { command } }, rung);
     expect(at(1).action).toBe('deny'); // rung 1 refuses every write anyway
