@@ -31,6 +31,7 @@
  * - it resolves a stable `XaiOAuthResult`.
  */
 
+import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -181,39 +182,56 @@ function grokAuthJsonPath(): string {
 /**
  * Headless reuse of the Grok CLI login (`~/.grok/auth.json`) with NO browser
  * and NO loopback listener - for the WebUI server, where `xai.auth.login` is
- * remote-denied. Registers the `xai` provider from the CLI bundle; when the
- * CLI access token has expired it is refreshed with the CLI's refresh token
- * first (the engine store is rewritten by `registerTokens`). Returns `null`
- * when no usable CLI login exists; never throws, never opens anything.
+ * remote-denied. Registers the `xai` provider from the CLI's ACCESS token only.
+ *
+ * The Grok CLI is the sole owner of its single-use rotating refresh token. The
+ * Grok Build agent runs that same CLI, so if Wayland refreshes with the CLI's
+ * refresh token (or hands it to the engine store, which then refreshes it on
+ * its own) the CLI is silently logged out. So this path never refreshes and
+ * never persists the refresh token: when the CLI access token has expired it
+ * asks the CLI to refresh itself, then re-reads the file. Returns `null` when
+ * no usable CLI login exists; never throws, never opens anything.
  */
 export async function xaiReuseCliLogin(): Promise<XaiOAuthResult | null> {
   try {
-    const reused = await tryReuseGrokCli();
-    if (reused) return reused;
+    const first = await readGrokCliTokens();
+    if (!first) return null;
+    if (!isTokenExpired(first)) return await registerTokens({ ...first, refreshToken: undefined }, true);
 
-    let raw: string;
-    try {
-      raw = await fs.readFile(grokAuthJsonPath(), 'utf-8');
-    } catch {
-      return null;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      return null;
-    }
-    const tokens = parseGrokAuthJson(parsed);
-    if (!tokens?.refreshToken) return null;
-
-    const endpoints = await fetchXaiEndpoints();
-    const fresh = await refreshAccessToken(endpoints.tokenUrl, tokens.refreshToken, resolveClientId());
-    if ('error' in fresh) return { ok: false, error: fresh.error };
-    if (!fresh.refreshToken) fresh.refreshToken = tokens.refreshToken;
-    return await registerTokens(fresh, true);
+    await nudgeGrokCliRefresh();
+    const second = await readGrokCliTokens();
+    if (!second || isTokenExpired(second)) return null;
+    return await registerTokens({ ...second, refreshToken: undefined }, true);
   } catch {
     return { ok: false, error: 'unknown' };
   }
+}
+
+async function readGrokCliTokens(): Promise<XaiTokens | null> {
+  try {
+    return parseGrokAuthJson(JSON.parse(await fs.readFile(grokAuthJsonPath(), 'utf-8')));
+  } catch {
+    return null;
+  }
+}
+
+/** Grace period for the CLI's own token refresh before the result is re-read. */
+const GROK_CLI_NUDGE_TIMEOUT_MS = 45 * 1000;
+
+/**
+ * Run a cheap authenticated Grok CLI command so the CLI refreshes and rewrites
+ * its own credential file. stdin is closed and the process is killed on timeout:
+ * a CLI whose refresh token is dead prints a sign-in URL and waits forever.
+ */
+function nudgeGrokCliRefresh(): Promise<void> {
+  return new Promise((resolve) => {
+    execFile(
+      process.env.WAYLAND_GROK_CLI || 'grok',
+      ['models'],
+      { timeout: GROK_CLI_NUDGE_TIMEOUT_MS, killSignal: 'SIGKILL', windowsHide: true },
+      () => resolve()
+    ).stdin?.end();
+  });
 }
 
 async function tryReuseGrokCli(): Promise<XaiOAuthResult | null> {
