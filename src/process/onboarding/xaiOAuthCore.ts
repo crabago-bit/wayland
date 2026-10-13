@@ -194,7 +194,7 @@ export function parseGrokAuthJson(json: unknown): XaiTokens | null {
   // token field directly.
   const record = unwrapAuthRecord(json as Record<string, unknown>);
 
-  const accessToken = firstString(record, ['access_token', 'accessToken', 'token', 'api_key', 'apiKey']);
+  const accessToken = firstString(record, ['access_token', 'accessToken', 'token', 'api_key', 'apiKey', 'key']);
   if (!accessToken) return null;
 
   const tokens: XaiTokens = { accessToken };
@@ -223,6 +223,17 @@ function unwrapAuthRecord(record: Record<string, unknown>): Record<string, unkno
   );
   if (hasDirectToken) return record;
   for (const key of ['xai', 'grok', 'oauth', 'credentials']) {
+    const nested = record[key];
+    if (typeof nested === 'object' && nested !== null && !Array.isArray(nested)) {
+      return nested as Record<string, unknown>;
+    }
+  }
+  // Grok CLI >= 1.0 keys each login by `<issuer>::<client id>`
+  // (e.g. `https://auth.x.ai::b1a0…`) and names the access token `key`.
+  const issuerKeyed = Object.keys(record)
+    .filter((k) => k.includes('::'))
+    .toSorted((a, b) => Number(b.startsWith('https://auth.x.ai')) - Number(a.startsWith('https://auth.x.ai')));
+  for (const key of issuerKeyed) {
     const nested = record[key];
     if (typeof nested === 'object' && nested !== null && !Array.isArray(nested)) {
       return nested as Record<string, unknown>;
