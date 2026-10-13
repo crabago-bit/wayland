@@ -147,3 +147,37 @@ describe('AcpAgentManager - autonomy-held permission requests', () => {
     expect(confirm).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('AcpAgentManager - mode the autonomy ladder clamped', () => {
+  type ModeAgent = { setMode: ReturnType<typeof vi.fn>; getModelInfo: () => null };
+  function withAgent(mgr: AcpAgentManager, result: Record<string, unknown>) {
+    const agent: ModeAgent = { setMode: vi.fn().mockResolvedValue(result), getModelInfo: () => null };
+    (mgr as unknown as { agent: ModeAgent }).agent = agent;
+    vi.spyOn(mgr as unknown as { saveSessionMode: (m: string) => void }, 'saveSessionMode').mockImplementation(
+      () => {}
+    );
+    return agent;
+  }
+
+  it('a refused switch to bypass leaves the manager (and UI) on the clamped mode', async () => {
+    const mgr = makeManager('default');
+    withAgent(mgr, { success: false, error: 'rung 2', effectiveMode: 'default' });
+    const result = await mgr.setMode('bypassPermissions');
+    expect(result.success).toBe(false);
+    expect(mgr.getMode().mode).toBe('default');
+  });
+
+  it('a restored bypass mode the rung refuses is replaced by the clamped mode', async () => {
+    const mgr = makeManager('bypassPermissions');
+    withAgent(mgr, { success: false, error: 'rung 2', effectiveMode: 'default' });
+    await (mgr as unknown as { restorePersistedState: () => Promise<void> }).restorePersistedState();
+    expect(mgr.getMode().mode).toBe('default');
+  });
+
+  it('a rung-4 bypass is recorded as the guarded mode the session actually runs', async () => {
+    const mgr = makeManager('default');
+    withAgent(mgr, { success: true, effectiveMode: 'autoGuarded' });
+    const result = await mgr.setMode('bypassPermissions');
+    expect(result).toMatchObject({ success: true, data: { mode: 'autoGuarded' } });
+  });
+});
