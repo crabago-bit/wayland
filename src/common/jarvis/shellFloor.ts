@@ -29,7 +29,12 @@ const floor = (reason: string): ShellFloorVerdict => ({ floor: true, reason });
 
 // ─── Tokenizer ──────────────────────────────────────────────────────────────
 
-type Token = { value: string; quoted: boolean };
+/**
+ * `quoted`: (part of) the token came from a quoted string. `executes`: a
+ * double-quoted part contained `$(` or a backtick - the shell still RUNS that,
+ * so the token is never treated as mere data.
+ */
+type Token = { value: string; quoted: boolean; executes?: boolean };
 type Segment = Token[];
 
 /**
@@ -44,12 +49,14 @@ export function tokenizeShell(commandLine: string): Segment[] {
   let word = '';
   let inWord = false;
   let quoted = false;
+  let executes = false;
 
   const endWord = () => {
-    if (inWord) current.push({ value: word, quoted });
+    if (inWord) current.push(executes ? { value: word, quoted, executes } : { value: word, quoted });
     word = '';
     inWord = false;
     quoted = false;
+    executes = false;
   };
   const endSegment = () => {
     endWord();
@@ -76,6 +83,7 @@ export function tokenizeShell(commandLine: string): Segment[] {
           j += 2;
           continue;
         }
+        if (commandLine[j] === '`' || (commandLine[j] === '$' && commandLine[j + 1] === '(')) executes = true;
         word += commandLine[j];
         j += 1;
       }
@@ -275,8 +283,28 @@ const SHELL_DELETE = /(?:^|[\s;&|(`])(?:sudo\s+|xargs\s+)?(?:rm|rmdir|unlink|shr
 /** The same pattern also matching right after a quote - for text a shell will EVALUATE. */
 const SHELL_DELETE_IN_PAYLOAD = /(?:^|[\s;&|(`"'])(?:sudo\s+|xargs\s+)?(?:rm|rmdir|unlink|shred)(?:\s|$)/i;
 
-/** A command line that feeds text to a shell to evaluate: `... | sh`, `| bash`, `eval`. */
-const EVALUATES_TEXT = /\|\s*(?:sudo\s+)?(?:ba|z|da|k)?sh\b(?!\s+-[a-z]*c)|(?:^|[\s;&|(])eval\s/i;
+/** Optional launchers in front of a shell/interpreter: sudo, env, xargs (with flags), a path. */
+const LAUNCH = String.raw`(?:sudo\s+(?:-\S+\s+(?:[^-\s]\S*\s+)?)*)?(?:(?:\S*/)?env\s+(?:-\S+\s+(?:[^-\s]\S*\s+)?)*)?(?:xargs\s+(?:-\S+\s+(?:[^-\s]\S*\s+)?)*)?(?:\S*/)?`;
+
+/**
+ * A command line that feeds TEXT to a shell to evaluate:
+ * `... | sh` / `| /bin/sh` / `| env bash` / `| xargs sh -c`, `eval ...`,
+ * `source /dev/stdin` / `. /dev/stdin`, and process substitution
+ * `bash <(...)` / `source <(...)`.
+ */
+const EVALUATES_TEXT = new RegExp(
+  String.raw`\|\s*${LAUNCH}(?:ba|z|da|k|fi)?sh\b` +
+    String.raw`|(?:^|[\s;&|(])eval\s` +
+    String.raw`|(?:^|[\s;&|(])(?:source|\.)\s+/dev/(?:stdin|fd/0)\b` +
+    String.raw`|(?:^|[\s;&|(])(?:(?:\S*/)?(?:ba|z|da|k)?sh|source|\.)\s+<\(`,
+  'i'
+);
+
+/** Text piped into an interpreter that reads its program from stdin (no script argument, or `-`). */
+const PIPED_TO_INTERPRETER = new RegExp(
+  String.raw`\|\s*${LAUNCH}(?:python[0-9.]*|node|nodejs|perl|ruby|php)(?:\s+-)?\s*(?:$|[;&|)])`,
+  'i'
+);
 
 const DELETE_COMMANDS: ReadonlySet<string> = new Set(['rm', 'rmdir', 'unlink', 'shred', 'srm', 'wipe']);
 const PACKAGE_MANAGERS: ReadonlySet<string> = new Set(['npm', 'pnpm', 'yarn', 'bun']);
@@ -559,6 +587,51 @@ function classifySegment(tokens: Token[], keywords: readonly string[], depth: nu
   return NOT_FLOOR;
 }
 
+/**
+ * The inner command of every `$(...)` and backtick span OUTSIDE single quotes
+ * (double quotes do not stop the shell from running them). Nested spans are
+ * found by the recursive classification of each inner command.
+ */
+function commandSubstitutions(commandLine: string): string[] {
+  const out: string[] = [];
+  let inSingle = false;
+  for (let i = 0; i < commandLine.length; i += 1) {
+    const ch = commandLine[i];
+    if (ch === '\\' && !inSingle) {
+      i += 1;
+      continue;
+    }
+    if (ch === "'") {
+      // A single quote inside double quotes is literal, but that only ever
+      // makes us look at MORE text, which is the safe direction.
+      inSingle = !inSingle;
+      continue;
+    }
+    if (inSingle) continue;
+    if (ch === '`') {
+      const end = commandLine.indexOf('`', i + 1);
+      out.push(commandLine.slice(i + 1, end === -1 ? commandLine.length : end));
+      if (end === -1) break;
+      i = end;
+      continue;
+    }
+    if (ch === '$' && commandLine[i + 1] === '(') {
+      let depth = 0;
+      let j = i + 1;
+      for (; j < commandLine.length; j += 1) {
+        if (commandLine[j] === '(') depth += 1;
+        else if (commandLine[j] === ')') {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+      out.push(commandLine.slice(i + 2, j));
+      i = j;
+    }
+  }
+  return out;
+}
+
 /** True for a segment whose quoted arguments are only data: a read-only command or a commit/tag message. */
 function quotesAreData(segment: Segment): boolean {
   const words = values(unwrap(segment));
@@ -576,7 +649,8 @@ function quotesAreData(segment: Segment): boolean {
 function evaluableText(segments: Segment[]): string {
   return segments
     .map((segment) => {
-      const keep = quotesAreData(segment) ? segment.filter((t) => !t.quoted) : segment;
+      // A quoted token that runs a command substitution is never just data.
+      const keep = quotesAreData(segment) ? segment.filter((t) => !t.quoted || t.executes) : segment;
       return values(keep).join(' ');
     })
     .join(' ; ');
@@ -592,10 +666,24 @@ export function classifyShellCommand(
   keywords: readonly string[] = [],
   depth: number = 0
 ): ShellFloorVerdict {
-  if (!commandLine) return NOT_FLOOR;
+  if (!commandLine || depth > 6) return NOT_FLOOR;
   // Text piped into a shell or eval'd is code, quotes and all.
   if (EVALUATES_TEXT.test(commandLine) && SHELL_DELETE_IN_PAYLOAD.test(commandLine)) {
     return floor('command deletes data');
+  }
+  if (PIPED_TO_INTERPRETER.test(commandLine)) {
+    if (SHELL_DELETE_IN_PAYLOAD.test(commandLine) || INTERPRETER_DELETE.test(commandLine)) {
+      return floor('code piped into an interpreter deletes data');
+    }
+    if (DATA_DESTROYING_STATEMENT.test(commandLine)) return floor('code piped into an interpreter destroys data');
+    if (MONEY_PROVIDER.test(commandLine) && MONEY_ACTION.test(commandLine)) {
+      return floor('code piped into an interpreter moves money or signs');
+    }
+  }
+  // `$(...)` / backticks run even inside double quotes: classify each as a command.
+  for (const inner of commandSubstitutions(commandLine)) {
+    const verdict = classifyShellCommand(inner, keywords, depth + 1);
+    if (verdict.floor) return verdict;
   }
   const segments = tokenizeShell(commandLine);
   if (SHELL_DELETE.test(evaluableText(segments))) return floor('command deletes data');
