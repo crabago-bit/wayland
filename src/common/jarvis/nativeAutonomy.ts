@@ -203,6 +203,15 @@ const BLANKET_BYPASS_MODES: ReadonlySet<string> = new Set(['yolo', 'bypassPermis
 /** Modes that auto-approve SOME writes (edits) without a human. */
 const PARTIAL_AUTO_MODES: ReadonlySet<string> = new Set(['acceptEdits', 'autoEdit', 'auto_edit', 'autoGuarded']);
 
+/**
+ * Server names as they appear inside an MCP tool title. Backends normalise the
+ * name they were given (Claude Code maps anything outside [A-Za-z0-9_-] to
+ * `_`), so both sides are compared in that form.
+ */
+export function normalizeServerName(name: string): string {
+  return name.replace(/[^A-Za-z0-9_-]/g, '_').toLowerCase();
+}
+
 function truncate(value: string, max = 160): string {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
@@ -246,26 +255,42 @@ export function decideNativePermission(input: {
   toolCall: NativeToolCall;
   rung: AutonomyRung;
   hardFloorKeywords?: readonly string[];
+  /**
+   * MCP servers this session published THROUGH the tool-filter shim, by
+   * {@link normalizeServerName}. Their calls meet the shim's verdict as well.
+   */
+  shimmedServers?: ReadonlySet<string>;
 }): NativePermissionVerdict {
   const { toolCall, rung } = input;
   const keywords = input.hardFloorKeywords ?? [];
   const kind = typeof toolCall.kind === 'string' ? toolCall.kind : '';
   const title = typeof toolCall.title === 'string' ? toolCall.title.trim() : '';
 
-  // An MCP tool the backend loaded ITSELF (e.g. Claude Code's ~/.claude.json
-  // servers) never passes through our shim. When the backend asks permission
-  // for it, apply the shim's own verdict to its name here.
+  // An MCP tool call. Decided on the TOOL half only (`server__tool` -> `tool`),
+  // exactly as the shim decides it - a floor word in a server's NAME must not
+  // floor every tool on that server.
   const mcp = MCP_TOOL_TITLE.exec(title);
   if (mcp) {
-    const toolName = `${mcp[1]}__${mcp[2]}`;
+    const [, server, toolName] = mcp;
     const verdict = decideToolCall({ toolName, rung, hardFloorKeywords: keywords });
-    const base = { tool: truncate(toolName), connector: mcp[1] };
-    if (verdict.decision === 'allowed')
-      return { action: 'pass', reason: verdict.reason, loggable: verdict.loggable, ...base };
-    // Rung 2 on an MCP write asks a human here - the shim, which cannot ask,
-    // refuses the same call. Hard-floor refusals are never held.
+    const base = { tool: truncate(`${server}__${toolName}`), connector: server };
+    const shimmed = input.shimmedServers?.has(normalizeServerName(server)) === true;
+    if (verdict.decision === 'allowed') {
+      // A shimmed server's allowed write is recorded by the shim when it runs;
+      // recording it here too would put two lines in the ledger for one call.
+      return { action: 'pass', reason: verdict.reason, loggable: verdict.loggable && !shimmed, ...base };
+    }
+    // Refused by the ladder. Rung 2 asks a person - but ONLY for a server the
+    // backend loaded itself. A server Wayland published through the shim would
+    // refuse the call anyway (the shim cannot ask), so holding it would only
+    // collect an approval that cannot take effect. Hard floor is never held.
     const floor = isHardFloorTool(toolName, keywords);
-    return { action: !floor && rung === 2 ? 'hold' : 'deny', reason: verdict.reason, loggable: true, ...base };
+    return {
+      action: !floor && !shimmed && rung === 2 ? 'hold' : 'deny',
+      reason: verdict.reason,
+      loggable: true,
+      ...base,
+    };
   }
 
   const tool = truncate(`${kind || 'unknown'}: ${title}`);

@@ -19,7 +19,7 @@
  */
 
 import { autonomyAgentKey, toAutonomyRung } from '@/common/jarvis/autonomy';
-import { decideNativePermission, isOptionAboveRung } from '@/common/jarvis/nativeAutonomy';
+import { decideNativePermission, isOptionAboveRung, normalizeServerName } from '@/common/jarvis/nativeAutonomy';
 import type { PermissionGate, PermissionGateVerdict } from '@process/acp/session/PermissionResolver';
 import type { ToolFilterSpawnAutonomy } from '@process/services/mcpServices/builtinMcpRuntime';
 import { ProcessConfig } from '@process/utils/initStorage';
@@ -85,13 +85,20 @@ export function createAutonomyPermissionGate(
      * (and `team_remove_member` would even read as a hard-floor delete).
      */
     internalMcpServers?: readonly string[];
+    /**
+     * Servers this session published THROUGH the tool-filter shim. The shim is
+     * their enforcement point: the gate denies (never holds) their rung-refused
+     * writes and leaves their allowed writes for the shim to record.
+     */
+    shimmedMcpServers?: readonly string[];
   } = {}
 ): PermissionGate {
   const append = deps.append ?? appendApprovalTo;
-  const internal = new Set(deps.internalMcpServers ?? []);
+  const internal = new Set((deps.internalMcpServers ?? []).map(normalizeServerName));
+  const shimmedServers = new Set((deps.shimmedMcpServers ?? []).map(normalizeServerName));
   const isInternalTool = (title: string | null | undefined): boolean => {
     const match = /^(?:mcp__)?(.+?)__[A-Za-z0-9_-]+$/.exec((title ?? '').trim());
-    return match !== null && internal.has(match[1]);
+    return match !== null && internal.has(normalizeServerName(match[1]));
   };
   const now = deps.now ?? Date.now;
   const record = (tool: string, connector: string, decision: ApprovalRecord['decision'], reason: string) =>
@@ -112,6 +119,7 @@ export function createAutonomyPermissionGate(
         toolCall: request.toolCall,
         rung: autonomy.rung,
         hardFloorKeywords: autonomy.hardFloorKeywords,
+        shimmedServers,
       });
       if (verdict.action === 'deny') {
         record(verdict.tool, verdict.connector, 'refused', verdict.reason);

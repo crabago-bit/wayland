@@ -287,6 +287,7 @@ export class AcpAgentV2 {
 
     // Load and refresh storage-backed connectors now, but defer their transport
     // projection until SessionLifecycle has the live initialize response.
+    const shimmedMcpServers: string[] = [];
     const rawMcpServers = await loadRuntimeMcpServers();
     if (rawMcpServers.length > 0) {
       // Attach the CURRENT (refreshed) OAuth bearer so the session connects with
@@ -316,6 +317,11 @@ export class AcpAgentV2 {
           autonomy: this.autonomy,
         },
       };
+      // With a ladder every connector the deferred projection publishes goes
+      // through the shim. The projection runs later (on the live initialize
+      // result), so record every candidate name now: a superset only turns a
+      // would-be hold on a same-named backend-loaded server into a denial.
+      if (this.autonomy) shimmedMcpServers.push(...freshened.map((server) => server.name));
     }
 
     // Self-healing replay: if a stored resumeSessionId was created by a different
@@ -385,6 +391,7 @@ export class AcpAgentV2 {
       permissionGate: this.autonomy
         ? createAutonomyPermissionGate(this.autonomy, this.agentConfig.agentBackend, {
             internalMcpServers,
+            shimmedMcpServers,
           })
         : undefined,
     };

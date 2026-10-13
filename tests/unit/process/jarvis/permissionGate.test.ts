@@ -145,6 +145,24 @@ describe('autonomy permission gate', () => {
     expect(rows).toHaveLength(0);
   });
 
+  it('a shimmed server: rung-2 write denied once in the ledger; rung-3 write left to the shim to record', async () => {
+    const rows: ApprovalRecord[] = [];
+    const make = (rung: AutonomyRung) =>
+      new PermissionResolver({
+        autoApproveAll: true,
+        gate: createAutonomyPermissionGate(
+          { agent: 'custom:pack-warrior-estimator', rung, hardFloorKeywords: [], logPath: LOG },
+          'claude',
+          { append: (_p, row) => rows.push(row), shimmedMcpServers: ['warrior-ghl'] }
+        ),
+      });
+    const call = () => request('mcp__warrior-ghl__ghl_create_contact', 'other');
+    expect((await make(2).evaluate(call(), vi.fn())).outcome).toEqual({ outcome: 'selected', optionId: 'deny' });
+    expect(rows).toHaveLength(1);
+    expect((await make(3).evaluate(call(), vi.fn())).outcome).toEqual({ outcome: 'selected', optionId: 'allow' });
+    expect(rows).toHaveLength(1);
+  });
+
   it('strips mode-switch options above the rung', async () => {
     const { resolver } = setup(2);
     const ui = vi.fn<(d: PermissionUIData) => void>();
