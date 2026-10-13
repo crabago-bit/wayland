@@ -49,6 +49,12 @@ export type SessionOptions = {
   onPermissionHoldExpired?: (info: { callId: string; title: string; deadlineMs: number; scheduled?: boolean }) => void;
   /** Pre-approval policy (JARVIS autonomy ladder), consulted before YOLO and the cache. */
   permissionGate?: PermissionGate;
+  /**
+   * Awaited right before EVERY prompt is sent - a direct one and one flushed
+   * from the queue after start, resume or the previous turn. A rejection
+   * aborts that prompt and puts the session into error with the reason.
+   */
+  beforePrompt?: () => Promise<void>;
 };
 
 const VALID_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = {
@@ -245,6 +251,7 @@ export class AcpSession {
         agentConfig: agentConfig,
         setStatus: (s) => this.setStatus(s),
         enterError: (msg) => this.enterError(msg),
+        beforePrompt: options?.beforePrompt,
       },
       options?.promptTimeoutMs ?? 300_000,
       {},
@@ -370,15 +377,18 @@ export class AcpSession {
 
   /**
    * Put the live session into `modeId` and WAIT for the agent to accept it.
-   * Unlike `setMode` (fire-and-forget, best effort), this rejects when the
-   * session is not active or the agent refuses - for callers that must not
-   * proceed in any other mode (the JARVIS autonomy ladder).
+   * Unlike `setMode` (fire-and-forget, best effort), a refusal by the agent
+   * REJECTS - for callers that must not proceed in any other mode (the JARVIS
+   * autonomy ladder).
+   *
+   * Resolves `null` when the session is not in a state that can take a mode
+   * change right now (starting, resuming, suspended, idle, error): that is
+   * "not yet", never a refusal. Allowed while `active` and mid-turn
+   * (`prompting`) - ACP `session/set_mode` is valid during a turn.
    */
-  async confirmMode(modeId: string): Promise<string> {
+  async confirmMode(modeId: string): Promise<string | null> {
     const { client, sessionId } = this.lifecycle;
-    if (this._status !== 'active' || !client || !sessionId) {
-      throw new AcpError('INVALID_STATE', `Cannot confirm session mode while ${this._status}`);
-    }
+    if ((this._status !== 'active' && this._status !== 'prompting') || !client || !sessionId) return null;
     this.configTracker.setDesiredMode(modeId);
     const { availableModes, currentModeId } = this.configTracker.modeSnapshot();
     const resolved = resolveAcpSessionModeId(modeId, availableModes, currentModeId);

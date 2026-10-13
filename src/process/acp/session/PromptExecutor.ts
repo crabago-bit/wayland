@@ -99,6 +99,8 @@ export type PromptHost = {
 
   setStatus(status: SessionStatus): void;
   enterError(message: string): void;
+  /** Strict pre-prompt guard (see `SessionOptions.beforePrompt`). */
+  beforePrompt?: () => Promise<void>;
 };
 
 export class PromptExecutor {
@@ -208,6 +210,19 @@ export class PromptExecutor {
       await lifecycle.reassertConfig();
     } catch {
       /* best effort - continue to prompt even if config sync fails */
+    }
+
+    // Strict guard (JARVIS autonomy ladder): unlike the best-effort re-assert
+    // above, a failure here means this prompt must not run at all.
+    if (this.host.beforePrompt) {
+      try {
+        await this.host.beforePrompt();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.host.messageTranslator.onTurnEnd();
+        this.host.enterError(message);
+        throw normalizeError(err);
+      }
     }
 
     // Retry INSIDE the awaited promise, deliberately: AcpAgentManager awaits
