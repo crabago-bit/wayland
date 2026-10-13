@@ -58,7 +58,11 @@ import {
   verifyLadderedBridge,
   resolveConfiguredSpawnAutonomy,
 } from '@process/services/jarvis/sessionAutonomy';
-import { buildLadderedSkillPlugin, ladderedSkillPluginOption } from '@process/services/jarvis/ladderedSkillPlugin';
+import {
+  buildLadderedSkillPlugin,
+  ladderedSkillPluginOption,
+  type LadderedSkillEntry,
+} from '@process/services/jarvis/ladderedSkillPlugin';
 
 /**
  * Temporary: backend-specific CLI login arguments.
@@ -157,6 +161,8 @@ export class AcpAgentV2 {
   /** The assistant's skills, for a laddered session's skill plugin. */
   private readonly enabledSkills?: string[];
   private readonly excludeBuiltinSkills?: string[];
+  /** Skills in the laddered skill plugin (set in ensureSession). */
+  private ladderedSkills?: LadderedSkillEntry[];
   /**
    * The JARVIS autonomy ladder for this agent, resolved once per session in
    * `ensureSession`. `undefined` = no configured rung = today's behaviour.
@@ -316,10 +322,11 @@ export class AcpAgentV2 {
       // resolveLadderedSessionMeta.
       // With no setting source the workspace `.claude/skills` is not read, so
       // the assistant's bounded skill set comes as a Wayland-owned plugin.
-      const skillPluginDir = await this.buildLadderedSkillPlugin();
+      const skillPlugin = await this.buildLadderedSkillPlugin();
+      this.ladderedSkills = skillPlugin?.skills;
       const meta = await resolveLadderedSessionMeta(
         this.agentConfig.agentBackend,
-        skillPluginDir ? ladderedSkillPluginOption(skillPluginDir) : {},
+        skillPlugin ? ladderedSkillPluginOption(skillPlugin.path) : {},
         this.agentConfig.env?.CLAUDE_CONFIG_DIR
       );
       if (meta) (this.agentConfig as { sessionMeta?: Record<string, unknown> }).sessionMeta = meta;
@@ -1067,7 +1074,7 @@ export class AcpAgentV2 {
    * The laddered skill plugin for this conversation (see buildLadderedSkillPlugin).
    * A failure only costs the skills: the session still starts, still laddered.
    */
-  private async buildLadderedSkillPlugin(): Promise<string | undefined> {
+  private async buildLadderedSkillPlugin(): Promise<Awaited<ReturnType<typeof buildLadderedSkillPlugin>>> {
     try {
       return await buildLadderedSkillPlugin({
         backend: this.agentConfig.agentBackend,
@@ -1079,6 +1086,14 @@ export class AcpAgentV2 {
       console.error('[AcpAgentV2] laddered skill plugin not built; the session starts without its skills:', error);
       return undefined;
     }
+  }
+
+  /**
+   * The skills a laddered session's plugin holds, with the names the session
+   * lists them under; `undefined` for a session that is not laddered.
+   */
+  getLadderedSkills(): readonly LadderedSkillEntry[] | undefined {
+    return this.ladderedSkills;
   }
 
   async kill(): Promise<void> {

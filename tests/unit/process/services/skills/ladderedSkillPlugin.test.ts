@@ -28,6 +28,7 @@ vi.mock('@process/utils/initStorage', async (importOriginal) => ({
 import {
   LADDERED_SKILL_PLUGIN_NAME,
   buildLadderedSkillPlugin,
+  describeLadderedSkills,
   removeLadderedSkillPlugin,
   sanitizeSkillMarkdown,
 } from '@process/services/jarvis/ladderedSkillPlugin';
@@ -36,6 +37,9 @@ import { setupAssistantWorkspace } from '@process/utils/initAgent';
 roots.base = fs.mkdtempSync(path.join(os.tmpdir(), 'laddered-skill-plugin-'));
 const config = path.join(roots.base, 'config');
 const pluginRoot = path.join(roots.base, 'plugins');
+const claudeSkills = path.join(roots.base, 'home', '.claude', 'skills');
+const skillSources = path.join(roots.base, 'data', 'skill-sources');
+const outside = path.join(roots.base, 'outside');
 
 function skill(dir: string, name: string, frontmatter = `name: ${name}\ndescription: ${name} skill`) {
   fs.mkdirSync(path.join(dir, name), { recursive: true });
@@ -58,7 +62,10 @@ function tree(dir: string): string[] {
 const noPrefs = { pinned: [], disabled: [], revision: 0 };
 
 beforeEach(() => {
-  fs.rmSync(config, { recursive: true, force: true });
+  vi.restoreAllMocks();
+  for (const dir of [config, claudeSkills, skillSources, outside]) fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(claudeSkills, { recursive: true });
+  fs.mkdirSync(skillSources, { recursive: true });
   skill(path.join(config, 'builtin-skills', '_builtin'), 'cron');
   skill(path.join(config, 'builtin-skills', '_builtin'), 'office-cli');
   skill(path.join(config, 'builtin-skills'), 'pdf');
@@ -74,16 +81,23 @@ afterAll(async () => {
   fs.rmSync(roots.base, { recursive: true, force: true });
 });
 
-async function build(extra: Partial<Parameters<typeof buildLadderedSkillPlugin>[0]> = {}) {
-  return (await buildLadderedSkillPlugin({
+async function buildFull(extra: Partial<Parameters<typeof buildLadderedSkillPlugin>[0]> = {}) {
+  const plugin = await buildLadderedSkillPlugin({
     backend: 'claude',
     sessionKey: 'conv-1',
     rootDir: pluginRoot,
     enabledSkills: ['pdf', 'crew-core-brand-context', 'quarantined'],
     _skillsPreferences: noPrefs,
     _libraryEntries: [{ name: 'quarantined', security: { verdict: 'blocked' } }],
+    roots: { claudeSkillsDir: claudeSkills, skillSourcesDir: skillSources },
     ...extra,
-  })) as string;
+  });
+  if (!plugin) throw new Error('no plugin');
+  return plugin;
+}
+
+async function build(extra: Partial<Parameters<typeof buildLadderedSkillPlugin>[0]> = {}) {
+  return (await buildFull(extra)).path;
 }
 
 describe('buildLadderedSkillPlugin', () => {
@@ -191,6 +205,111 @@ describe('buildLadderedSkillPlugin', () => {
 
   it('only Claude gets a plugin', async () => {
     expect(await buildLadderedSkillPlugin({ backend: 'codex', sessionKey: 'c', rootDir: pluginRoot })).toBeUndefined();
+  });
+});
+
+describe('skills the assistant enables that Wayland has no copy of', () => {
+  it('a plain name falls back to ~/.claude/skills, listed as wayland-skills:<name>', async () => {
+    skill(claudeSkills, 'shop-drawings');
+    const plugin = await buildFull({ enabledSkills: ['shop-drawings', 'pdf'] });
+    expect(plugin.skills.filter((s) => s.requested !== 'cron' && s.requested !== 'office-cli')).toEqual([
+      {
+        requested: 'shop-drawings',
+        sessionName: 'wayland-skills:shop-drawings',
+        source: 'claude-skills',
+        sourceDir: fs.realpathSync(path.join(claudeSkills, 'shop-drawings')),
+      },
+      expect.objectContaining({ requested: 'pdf', source: 'bundled' }),
+    ]);
+    expect(fs.existsSync(path.join(plugin.path, 'skills', 'shop-drawings', 'SKILL.md'))).toBe(true);
+  });
+
+  it('a Wayland copy wins over ~/.claude/skills', async () => {
+    skill(claudeSkills, 'crew-core-brand-context');
+    const plugin = await buildFull({ enabledSkills: ['crew-core-brand-context'] });
+    expect(plugin.skills.find((s) => s.requested === 'crew-core-brand-context')?.source).toBe('library');
+  });
+
+  it('refuses a ~/.claude/skills entry that resolves outside that root', async () => {
+    skill(outside, 'linked-out');
+    fs.symlinkSync(path.join(outside, 'linked-out'), path.join(claudeSkills, 'linked-out'));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const plugin = await buildFull({ enabledSkills: ['linked-out'] });
+    expect(plugin.skills.map((s) => s.requested)).not.toContain('linked-out');
+    expect(fs.existsSync(path.join(plugin.path, 'skills', 'linked-out'))).toBe(false);
+  });
+
+  it('accepts a ~/.claude/skills symlink that stays inside the root', async () => {
+    skill(claudeSkills, 'real-one');
+    fs.symlinkSync(path.join(claudeSkills, 'real-one'), path.join(claudeSkills, 'alias'));
+    const plugin = await buildFull({ enabledSkills: ['alias'] });
+    expect(plugin.skills.find((s) => s.requested === 'alias')?.source).toBe('claude-skills');
+  });
+
+  it('contractor-os:<x> resolves only against Wayland’s own copy of the plugin', async () => {
+    skill(path.join(skillSources, 'contractor-os', 'skills'), 'line-item-pricing');
+    const plugin = await buildFull({ enabledSkills: ['contractor-os:line-item-pricing'] });
+    const entry = plugin.skills.find((s) => s.requested === 'contractor-os:line-item-pricing');
+    expect(entry).toEqual({
+      requested: 'contractor-os:line-item-pricing',
+      sessionName: 'wayland-skills:contractor-os:line-item-pricing',
+      source: 'plugin-copy',
+      sourceDir: fs.realpathSync(path.join(skillSources, 'contractor-os', 'skills', 'line-item-pricing')),
+    });
+    // `:` is not portable in a file name; the skill keeps its name in frontmatter.
+    const text = fs.readFileSync(
+      path.join(plugin.path, 'skills', 'contractor-os__line-item-pricing', 'SKILL.md'),
+      'utf8'
+    );
+    expect(text.startsWith('---\nname: contractor-os:line-item-pricing\n')).toBe(true);
+  });
+
+  it('contractor-os:<x> missing from the copy uses a same-named ~/.claude/skills skill, and says so', async () => {
+    skill(claudeSkills, 'methodology');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const plugin = await buildFull({ enabledSkills: ['contractor-os:methodology', 'contractor-os:nowhere'] });
+    expect(plugin.skills.find((s) => s.requested === 'contractor-os:methodology')?.source).toBe('claude-skills');
+    expect(plugin.skills.map((s) => s.requested)).not.toContain('contractor-os:nowhere');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('contractor-os:methodology has no contractor-os copy'));
+  });
+
+  it('a fallback whose name is blocked in the library is never used', async () => {
+    skill(path.join(skillSources, 'contractor-os', 'skills'), 'evil');
+    skill(claudeSkills, 'evil');
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const plugin = await buildFull({
+      enabledSkills: ['contractor-os:evil', 'evil'],
+      _libraryEntries: [{ name: 'evil', security: { verdict: 'blocked' } }],
+    });
+    expect(plugin.skills.map((s) => s.requested).filter((n) => n.includes('evil'))).toEqual([]);
+  });
+
+  it('inside a skill, a symlinked file is copied only when it resolves inside the skill', async () => {
+    skill(claudeSkills, 'links');
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(path.join(outside, 'secret.txt'), 'secret');
+    fs.writeFileSync(path.join(claudeSkills, 'links', 'ref.md'), 'ref');
+    fs.symlinkSync(path.join(outside, 'secret.txt'), path.join(claudeSkills, 'links', 'secret.txt'));
+    fs.symlinkSync(path.join(claudeSkills, 'links', 'ref.md'), path.join(claudeSkills, 'links', 'alias.md'));
+    const plugin = await buildFull({ enabledSkills: ['links'] });
+    expect(fs.readdirSync(path.join(plugin.path, 'skills', 'links')).toSorted()).toEqual([
+      'SKILL.md',
+      'alias.md',
+      'ref.md',
+    ]);
+  });
+
+  it('describeLadderedSkills maps each enabled name to its session name', () => {
+    expect(describeLadderedSkills([])).toBe('');
+    const note = describeLadderedSkills([
+      {
+        requested: 'contractor-os:bid-plan',
+        sessionName: 'wayland-skills:contractor-os:bid-plan',
+        source: 'plugin-copy',
+        sourceDir: '/x',
+      },
+    ]);
+    expect(note).toContain('`contractor-os:bid-plan` → `wayland-skills:contractor-os:bid-plan`');
   });
 });
 

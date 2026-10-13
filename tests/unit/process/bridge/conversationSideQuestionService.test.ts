@@ -151,7 +151,10 @@ describe('ConversationSideQuestionService', () => {
     mockCancel.mockResolvedValue(undefined);
     mockClose.mockResolvedValue(undefined);
     mockOnDisconnect.mockImplementation(() => {});
-    mockBuildSkillPlugin.mockImplementation(async (opts: { sessionKey: string }) => `/data/plugins/${opts.sessionKey}`);
+    mockBuildSkillPlugin.mockImplementation(async (opts: { sessionKey: string }) => ({
+      path: `/data/plugins/${opts.sessionKey}`,
+      skills: [],
+    }));
     mockRemoveSkillPlugin.mockResolvedValue(undefined);
     mockProcessConfigGet.mockImplementation(async (key: string) => {
       if (key === 'acp.config') {

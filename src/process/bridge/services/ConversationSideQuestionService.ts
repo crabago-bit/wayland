@@ -229,7 +229,7 @@ export class ConversationSideQuestionService {
     });
     // A laddered fork carries the same skill plugin as its session (its own
     // copy, so the live session's plugin dir is never rebuilt under it).
-    const skillPluginDir = autonomy
+    const skillPlugin = autonomy
       ? await buildLadderedSkillPlugin({
           backend: extra.backend,
           sessionKey: `${conversation.id}.btw`,
@@ -243,13 +243,13 @@ export class ConversationSideQuestionService {
     const forkMeta = autonomy
       ? await resolveLadderedSessionMeta(extra.backend, {
           tools: [],
-          ...(skillPluginDir ? ladderedSkillPluginOption(skillPluginDir) : {}),
+          ...(skillPlugin ? ladderedSkillPluginOption(skillPlugin.path) : {}),
         })
       : undefined;
 
     return {
       ...(forkMeta ? { forkMeta } : {}),
-      ...(skillPluginDir ? { skillPluginDir } : {}),
+      ...(skillPlugin ? { skillPluginDir: skillPlugin.path } : {}),
       acpSessionId: extra.acpSessionId,
       backend: extra.backend,
       cliPath: cliPath.trim(),
