@@ -54,6 +54,12 @@ export type AgentConfig = {
    * Claude Code settings (see `LADDERED_CLAUDE_SESSION_META`).
    */
   sessionMeta?: Record<string, unknown>;
+  /**
+   * Directories outside the workspace the agent may READ (never write) through
+   * `fs/read_text_file`. A laddered Fuigo session's Wayland-owned skill plugin
+   * lives here: Fuigo reads a skill's SKILL.md and scripts through the client.
+   */
+  readOnlyRoots?: string[];
   mcpServers?: McpServer[];
   /**
    * Storage-backed connectors projected only after the live ACP initialize

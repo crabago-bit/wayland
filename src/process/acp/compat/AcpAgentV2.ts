@@ -64,6 +64,9 @@ import {
   withLadderedSkillPrompt,
 } from '@process/services/jarvis/ladderedSkillPlugin';
 
+/** Fuigo slash commands a laddered session refuses when they open a prompt. */
+const LADDERED_FUIGO_REFUSED_COMMAND = /^\s*\/(?:always-approve|plugins|reload-plugins)(?![\w-])/i;
+
 /**
  * Temporary: backend-specific CLI login arguments.
  * Will be replaced by `authCommand + args` config in PR #2349.
@@ -1103,6 +1106,18 @@ export class AcpAgentV2 {
     const skillPlugin = await this.buildLadderedSkillPlugin();
     this.skillPluginPath = skillPlugin?.path;
     this.skillPluginRemoved = false;
+    if (this.agentConfig.agentBackend === 'fuigo') {
+      // Fuigo: the plugin REPLACES the `<workspace>/.wayland` staging as the
+      // only `_meta.pluginDirs` entry (an empty list when it could not be
+      // built - never the staged copies, which keep frontmatter such as
+      // `allowed-tools`). Fuigo reads skill files through fs/read_text_file,
+      // so the plugin dir is readable (only) for this session.
+      const dirs = skillPlugin ? [skillPlugin.path] : [];
+      const config = this.agentConfig as { sessionMeta?: Record<string, unknown>; readOnlyRoots?: string[] };
+      config.sessionMeta = { pluginDirs: dirs };
+      config.readOnlyRoots = dirs;
+      return;
+    }
     const meta = await resolveLadderedSessionMeta(
       this.agentConfig.agentBackend,
       skillPlugin ? ladderedSkillPluginOption(skillPlugin.path) : {},
@@ -1241,6 +1256,17 @@ export class AcpAgentV2 {
 
       if (!this.session) {
         throw new AcpSessionError('INVALID_STATE', 'Session not available after reconnect');
+      }
+      // JARVIS autonomy: a Fuigo slash command at the head of a prompt is run
+      // by the engine, not the model. `/always-approve on` silences every
+      // permission request (measured on 1.0.19) and `/plugins add|trust` loads
+      // code and MCP servers - neither may reach a laddered session, whoever
+      // typed or relayed it.
+      if (this.autonomy && this.agentConfig.agentBackend === 'fuigo' && LADDERED_FUIGO_REFUSED_COMMAND.test(content)) {
+        throw new AcpSessionError(
+          'INVALID_STATE',
+          `Autonomy rung ${this.autonomy.rung} (${this.autonomy.agent}): engine commands that change approvals or plugins are not available to a laddered agent.`
+        );
       }
       // JARVIS autonomy: the laddered mode is confirmed by the session's
       // `beforePrompt` guard right before EVERY prompt it sends - this one, or

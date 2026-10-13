@@ -7,8 +7,12 @@ import {
   fuigoBudgetEnv,
   fuigoCompatIsolationEnv,
   fuigoHomeDir,
+  fuigoLadderedHomeDir,
   fuigoPluginDirs,
+  FUIGO_LADDERED_PERMISSION_RULES,
+  revokeFuigoFolderTrust,
 } from '@process/agent/fuigo/launch';
+import { resolveConfiguredSpawnAutonomy } from '@process/services/jarvis/sessionAutonomy';
 import { fuigoByokSpawnPlan, readFuigoByokProviders } from '@process/agent/fuigo/byok';
 import { resolveFuigoBinary } from '@process/agent/fuigo/runtime';
 import { resolveTurnOutputDirective } from '@process/services/artifacts/outputDirective';
@@ -891,6 +895,19 @@ ${collectedResponses.join('\n')}`;
     };
   }
 
+  /**
+   * Whether this spawn is an agent the JARVIS autonomy ladder governs - the
+   * same key AcpAgentV2 resolves its rung under (customAgentId, else the
+   * preset assistant id).
+   */
+  private async isLadderedSpawn(data: AcpAgentManagerData): Promise<boolean> {
+    const autonomy = await resolveConfiguredSpawnAutonomy({
+      backend: data.backend,
+      customAgentId: data.customAgentId || data.presetAssistantId,
+    });
+    return autonomy !== undefined;
+  }
+
   private async resolveAgentCliConfig(data: AcpAgentManagerData): Promise<{
     cliPath?: string;
     launch?: AcpLaunchSpec;
@@ -1012,7 +1029,12 @@ ${collectedResponses.join('\n')}`;
     if (data.backend === 'fuigo') {
       // One home for every conversation (memory, MCP config, trust grants and
       // the model cache carry across chats); Fuigo keys sessions by cwd.
-      mergedEnv.FUIGO_HOME = fuigoHomeDir(app.getPath('userData'));
+      // A JARVIS-laddered agent gets its own trust-free home instead (see
+      // fuigoLadderedHomeDir).
+      const laddered = await this.isLadderedSpawn(data);
+      mergedEnv.FUIGO_HOME = laddered
+        ? fuigoLadderedHomeDir(app.getPath('userData'))
+        : fuigoHomeDir(app.getPath('userData'));
       // The user's own providers become `[model.byok/…]` entries in the managed
       // config; each key (a keyless local server's placeholder included) rides
       // its own env var on this spawn and is never written to disk. With no
@@ -1020,7 +1042,8 @@ ${collectedResponses.join('\n')}`;
       const byok = await readFuigoByokProviders();
       const key = await this.readFluxKey();
       const plan = fuigoByokSpawnPlan(byok, { fluxKey: Boolean(key) });
-      ensureFuigoHome(mergedEnv.FUIGO_HOME, plan.config);
+      ensureFuigoHome(mergedEnv.FUIGO_HOME, laddered ? plan.config + FUIGO_LADDERED_PERMISSION_RULES : plan.config);
+      if (laddered) revokeFuigoFolderTrust(mergedEnv.FUIGO_HOME);
       Object.assign(mergedEnv, plan.env);
       if (key) mergedEnv.FUIGO_API_KEY = key;
       mergedEnv.FUIGO_MANAGED_BY_NPM = '1';
@@ -1453,7 +1476,10 @@ ${collectedResponses.join('\n')}`;
       // Fuigo 1.0.13 gates project instructions/skills/MCP on folder trust and,
       // with stdin not a TTY, resolves an ungranted cwd Untrusted without a
       // prompt. Desktop's workspace trust is the consent authority; forward it.
-      customArgs = buildFuigoAcpArgs({ trusted: isWorkspaceTrusted(data.workspace), maxTurns: data.maxTurns });
+      // A laddered agent is never trusted: trust is what makes Fuigo dial the
+      // workspace's own MCP servers past the tool-filter shim.
+      const trusted = !(await this.isLadderedSpawn(data)) && isWorkspaceTrusted(data.workspace);
+      customArgs = buildFuigoAcpArgs({ trusted, maxTurns: data.maxTurns });
     }
 
     // If cliPath is not configured, fall back to the backend's own launcher.

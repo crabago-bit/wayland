@@ -2384,7 +2384,7 @@
       "label": "Özerklik basamağı",
       "sectionLabel": "Özerklik",
       "hardFloorTitle": "Kesin sınır",
-      "hardFloorDesc": "Bunlardan herhangi biriyle eşleşen araç adları, OTONOM dahil her basamakta reddedilir. ACP bağlayıcılarında MCP araç filtresi ile uygulanır; Wayland Core, Codex ve Gemini arka uçları bağlayıcıları doğrudan yükler ve henüz kapsam dışıdır.",
+      "hardFloorDesc": "Bunlardan herhangi biriyle eşleşen araç adları, OTONOM dahil her basamakta reddedilir. ACP bağlayıcılarında MCP araç filtresi ile uygulanır; Codex ve Gemini arka uçları bağlayıcıları doğrudan yükler ve henüz kapsam dışıdır.",
       "remoteDenied": "Özerklik yalnızca masaüstü uygulamasından değiştirilebilir, eşleştirilmiş bir cihazdan değil"
     }
   },

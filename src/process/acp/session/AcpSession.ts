@@ -498,9 +498,9 @@ export class AcpSession {
    * no staged skill was readable. Real paths also close the other direction -
    * a symlink planted inside the workspace that points outside it is refused.
    */
-  private assertPathAllowed(filePath: string): void {
+  private assertPathAllowed(filePath: string, extraRoots: readonly string[] = []): void {
     const resolved = canonicalPathForGuard(filePath);
-    const allowedRoots = [this.agentConfig.cwd, ...(this.agentConfig.additionalDirectories ?? [])];
+    const allowedRoots = [this.agentConfig.cwd, ...(this.agentConfig.additionalDirectories ?? []), ...extraRoots];
     const withinAllowed =
       resolved !== null &&
       allowedRoots.some((root) => {
@@ -533,7 +533,9 @@ export class AcpSession {
       onExtMethod: (method, params) => this.handleExtMethod(method, params),
       onExtNotification: (method, params) => this.handleExtNotification(method, params),
       onReadTextFile: async (req) => {
-        if (!this.isFuigoPromptOffloadRead(req.path)) this.assertPathAllowed(req.path);
+        if (!this.isFuigoPromptOffloadRead(req.path)) {
+          this.assertPathAllowed(req.path, this.agentConfig.readOnlyRoots);
+        }
         try {
           const content = fs.readFileSync(req.path, 'utf-8');
           return { content };

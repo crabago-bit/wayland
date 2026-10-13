@@ -2411,7 +2411,7 @@
       "label": "Autonomiestufe",
       "sectionLabel": "Autonomie",
       "hardFloorTitle": "Harte Grenze",
-      "hardFloorDesc": "Tool-Namen, die auf einen dieser Begriffe passen, werden auf jeder Stufe abgelehnt - auch bei AUTONOM. Durchgesetzt bei ACP-Konnektoren über den MCP-Tool-Filter; die Backends Wayland Core, Codex und Gemini laden Konnektoren direkt und sind noch nicht abgedeckt.",
+      "hardFloorDesc": "Tool-Namen, die auf einen dieser Begriffe passen, werden auf jeder Stufe abgelehnt - auch bei AUTONOM. Durchgesetzt bei ACP-Konnektoren über den MCP-Tool-Filter; die Backends Codex und Gemini laden Konnektoren direkt und sind noch nicht abgedeckt.",
       "remoteDenied": "Die Autonomie kann nur in der Desktop-App geändert werden, nicht auf einem gekoppelten Gerät"
     }
   },

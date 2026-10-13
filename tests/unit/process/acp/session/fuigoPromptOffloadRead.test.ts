@@ -141,3 +141,28 @@ describe('AcpSession fs guard: Fuigo prompt offload', () => {
     await expect(read(noHome, promptFile)).rejects.toThrow('Path not allowed');
   });
 });
+
+describe('AcpSession fs guard: read-only roots (laddered skill plugin)', () => {
+  it('reads under a read-only root but never writes there, and nothing beside it opens up', async () => {
+    const { root, workspace } = fixture();
+    const plugin = path.join(root, 'laddered-skill-plugins', 'conv-1');
+    fs.mkdirSync(path.join(plugin, 'skills', 'pdf'), { recursive: true });
+    fs.writeFileSync(path.join(plugin, 'skills', 'pdf', 'SKILL.md'), 'skill body');
+    fs.writeFileSync(path.join(root, 'laddered-skill-plugins', 'other.md'), 'sibling');
+    const handlers = build({
+      agentBackend: 'fuigo',
+      agentSource: 'builtin',
+      agentId: 'conv-1',
+      cwd: workspace,
+      readOnlyRoots: [plugin],
+    } as AgentConfig);
+
+    await expect(read(handlers, path.join(plugin, 'skills', 'pdf', 'SKILL.md'))).resolves.toEqual({
+      content: 'skill body',
+    });
+    await expect(write(handlers, path.join(plugin, 'skills', 'pdf', 'SKILL.md'))).rejects.toThrow('Path not allowed');
+    await expect(read(handlers, path.join(root, 'laddered-skill-plugins', 'other.md'))).rejects.toThrow(
+      'Path not allowed'
+    );
+  });
+});

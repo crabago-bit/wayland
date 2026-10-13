@@ -2411,7 +2411,7 @@
       "label": "Niveau d'autonomie",
       "sectionLabel": "Autonomie",
       "hardFloorTitle": "Plancher absolu",
-      "hardFloorDesc": "Les noms d'outils correspondant à l'un de ces termes sont refusés à tous les niveaux, y compris AUTONOME. Appliqué aux connecteurs ACP via le filtre d'outils MCP ; les backends Wayland Core, Codex et Gemini chargent les connecteurs directement et ne sont pas encore couverts.",
+      "hardFloorDesc": "Les noms d'outils correspondant à l'un de ces termes sont refusés à tous les niveaux, y compris AUTONOME. Appliqué aux connecteurs ACP via le filtre d'outils MCP ; les backends Codex et Gemini chargent les connecteurs directement et ne sont pas encore couverts.",
       "remoteDenied": "L'autonomie ne peut être modifiée que depuis l'application de bureau, pas depuis un appareil appairé"
     }
   },

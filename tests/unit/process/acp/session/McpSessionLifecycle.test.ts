@@ -45,7 +45,11 @@ const hostedSubset = (): IMcpServer =>
     updatedAt: 1,
   }) as IMcpServer;
 
-function makeHarness(initResult: InitializeResponse, resumeSessionId?: string) {
+function makeHarness(
+  initResult: InitializeResponse,
+  resumeSessionId?: string,
+  extraConfig: Record<string, unknown> = {}
+) {
   const createSession = vi.fn().mockResolvedValue({ sessionId: 'created' });
   const loadSession = vi.fn().mockResolvedValue({ sessionId: 'loaded' });
   const client = {
@@ -70,6 +74,7 @@ function makeHarness(initResult: InitializeResponse, resumeSessionId?: string) {
         servers: [stdioSubset(), hostedSubset()],
         request: { publication: publication(), activeServerIds: ['stdio', 'hosted'] },
       },
+      ...extraConfig,
     },
     configTracker: new ConfigTracker(),
     callbacks: {
@@ -146,5 +151,35 @@ describe('SessionLifecycle live MCP projection', () => {
     expect(h.loadSession).toHaveBeenCalledOnce();
     expect(h.createSession).toHaveBeenCalledOnce();
     expect(h.loadSession.mock.calls[0][0].mcpServers).toEqual(h.createSession.mock.calls[0][0].mcpServers);
+  });
+});
+
+describe('SessionLifecycle session request _meta', () => {
+  const init = { protocolVersion: 1, agentCapabilities: {} } as InitializeResponse;
+  const fuigoMetadata = {
+    clientIdentifier: 'wayland-desktop',
+    startupHints: { nonInteractive: false },
+    pluginDirs: ['/workspace/.wayland'],
+    rules: 'persona',
+  };
+
+  it('sends the backend metadata unchanged when the session is not laddered', async () => {
+    const h = makeHarness(init, undefined, { sessionMetadata: fuigoMetadata });
+    await h.internals.spawnAndInit();
+    await h.internals.establishSession();
+    expect(h.createSession.mock.calls[0][0].metadata).toEqual(fuigoMetadata);
+  });
+
+  it('lets the ladder meta win on a clash (pluginDirs) and keeps every other key, on new and on load', async () => {
+    const h = makeHarness(init, 'resume-me', {
+      sessionMetadata: fuigoMetadata,
+      sessionMeta: { pluginDirs: ['/data/laddered-skill-plugins/conv-1'] },
+    });
+    await h.internals.spawnAndInit();
+    await h.internals.establishSession();
+    expect(h.loadSession.mock.calls[0][0].metadata).toEqual({
+      ...fuigoMetadata,
+      pluginDirs: ['/data/laddered-skill-plugins/conv-1'],
+    });
   });
 });

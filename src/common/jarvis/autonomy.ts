@@ -213,11 +213,12 @@ const READ_TOKEN_SET: ReadonlySet<string> = new Set(READ_TOOL_TOKENS);
  *
  * "Any connector" means any connector the tool-filter shim is interposed on -
  * which, since the hosted-connector bridge, is every stdio and every
- * http/streamable_http/sse connector an ACP session registers. THREE surfaces
- * are still outside it, all of them backends that load connectors themselves
- * rather than from the ACP `session/new` array: Wayland Core's own config.toml
- * `[mcp.servers]` table, the Codex `config.toml` written by `codexConfig.ts`,
- * and the Gemini backend's `GeminiAgentManager`. The floor does not reach those
+ * http/streamable_http/sse connector an ACP session registers (Fuigo included:
+ * a laddered Fuigo agent runs untrusted in its own engine home, so it dials
+ * only the servers Desktop sends). TWO surfaces are still outside it, both
+ * backends that load connectors themselves rather than from the ACP
+ * `session/new` array: the Codex `config.toml` written by `codexConfig.ts`, and
+ * the Gemini backend's `GeminiAgentManager`. The floor does not reach those
  * yet, and the settings copy says so.
  *
  * This ships in code rather than only in `~/.claude/crew-state/autonomy.md`

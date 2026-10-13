@@ -295,6 +295,68 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     expect(error).toHaveBeenCalled();
   });
 
+  it('a laddered Fuigo agent gets its plugin as the ONLY pluginDirs entry, readable, and no Claude meta', async () => {
+    stubStorage({ [`custom:${PACK}`]: 2 });
+    const agent = new AcpAgentV2({
+      id: 'conv-f',
+      backend: 'fuigo',
+      workingDir: '/workspace',
+      onStreamEvent: vi.fn(),
+      onSignalEvent: vi.fn(),
+      extra: { backend: 'fuigo', customAgentId: PACK, sessionMode: 'bypassPermissions' },
+    });
+    await agent.start();
+    // Replaces the `<workspace>/.wayland` staging (merged over sessionMetadata).
+    expect(capturedConfig.sessionMeta).toEqual({ pluginDirs: ['/data/skill-plugins/conv-f'] });
+    expect(capturedConfig.readOnlyRoots).toEqual(['/data/skill-plugins/conv-f']);
+    // Same shim, gate and clamp as every laddered backend.
+    const server = projectedServers().find((s) => s.name === 'warrior-ghl') as { args: string[] };
+    expect(server.args[0]).toContain(TOOL_FILTER_SCRIPT);
+    expect(capturedOptions?.permissionGate).toBeDefined();
+    expect(capturedOptions?.beforePrompt).toBeDefined();
+    expect(capturedConfig.initialDesired?.mode).toBe('default');
+  });
+
+  it('a laddered Fuigo agent refuses engine commands that change approvals or plugins', async () => {
+    stubStorage({ [`custom:${PACK}`]: 3 });
+    const agent = new AcpAgentV2({
+      id: 'conv-g',
+      backend: 'fuigo',
+      workingDir: '/workspace',
+      onStreamEvent: vi.fn(),
+      onSignalEvent: vi.fn(),
+      extra: { backend: 'fuigo', customAgentId: PACK },
+    });
+    await agent.start();
+    for (const content of ['/always-approve on', '  /plugins add /tmp/x', '/reload-plugins', '/PLUGINS trust /x']) {
+      const result = await agent.sendMessage({ content });
+      expect(result.success).toBe(false);
+      expect(result.success === false && result.error.message).toMatch(/not available to a laddered agent/);
+    }
+    expect(sessionSendMessage).not.toHaveBeenCalled();
+    // Ordinary text - including a mention of the command - still goes through.
+    expect((await agent.sendMessage({ content: 'what does /always-approve do?' })).success).toBe(true);
+    expect((await agent.sendMessage({ content: '/always-approvez' })).success).toBe(true);
+    expect(sessionSendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('a NON-laddered Fuigo chat keeps the workspace staging and its slash commands', async () => {
+    stubStorage({});
+    const agent = new AcpAgentV2({
+      id: 'conv-h',
+      backend: 'fuigo',
+      workingDir: '/workspace',
+      onStreamEvent: vi.fn(),
+      onSignalEvent: vi.fn(),
+      extra: { backend: 'fuigo' },
+    });
+    await agent.start();
+    expect(capturedConfig.sessionMeta).toBeUndefined();
+    expect(capturedConfig.readOnlyRoots).toBeUndefined();
+    expect(buildSkillPlugin).not.toHaveBeenCalled();
+    expect((await agent.sendMessage({ content: '/always-approve on' })).success).toBe(true);
+  });
+
   it('an agent with NO configured rung keeps today’s behaviour', async () => {
     stubStorage({ [`custom:${PACK}`]: 1 });
     const agent = await startAgent({ sessionMode: 'bypassPermissions', yoloMode: true });

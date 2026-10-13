@@ -5,8 +5,16 @@
  */
 
 /**
- * The assistant's skills for a LADDERED Claude session, delivered as a
+ * The assistant's skills for a LADDERED Claude or Fuigo session, delivered as a
  * Wayland-owned local plugin instead of through a Claude setting source.
+ *
+ * FUIGO. A laddered Fuigo session is spawned without folder trust (so the
+ * workspace's own `.fuigo/config.toml` MCP servers and permission rules are
+ * not loaded) and gets this same plugin as its ONLY `_meta.pluginDirs` entry,
+ * replacing the `<workspace>/.wayland` staging: Fuigo loads a plugin dir at
+ * CliOverride scope whatever the folder trust, and lists its skills by their
+ * plain frontmatter name (no plugin prefix, measured on 1.0.19). The staged
+ * copies keep frontmatter such as `allowed-tools`; these do not.
  *
  * A laddered Claude session loads no setting sources (see
  * resolveLadderedSessionMeta), so it no longer discovers the skills Wayland
@@ -66,6 +74,14 @@ import yaml from 'js-yaml';
 
 /** Plugin name; Claude namespaces its skills as `wayland-skills:<skill>`. */
 export const LADDERED_SKILL_PLUGIN_NAME = 'wayland-skills';
+
+/** Backends a laddered skill plugin is built for. */
+export const LADDERED_SKILL_PLUGIN_BACKENDS: ReadonlySet<string> = new Set(['claude', 'fuigo']);
+
+/** The name a backend lists a plugin skill under. Fuigo uses the bare frontmatter name. */
+function pluginSessionName(backend: string, skillName: string): string {
+  return backend === 'fuigo' ? skillName : `${LADDERED_SKILL_PLUGIN_NAME}:${skillName}`;
+}
 
 /** SKILL.md frontmatter keys that describe a skill and grant nothing. */
 export const SKILL_FRONTMATTER_KEYS = [
@@ -205,7 +221,7 @@ function assertPluginDir(root: string, dir: string): string {
 
 /**
  * Build the plugin dir for one session, or `undefined` when `backend` is not
- * Claude. The build is made in a sibling dir and swapped in, so a live session
+ * one of LADDERED_SKILL_PLUGIN_BACKENDS. The build is made in a sibling dir and swapped in, so a live session
  * reading the previous build under the same key never sees a gap.
  */
 export async function buildLadderedSkillPlugin(
@@ -219,7 +235,7 @@ export async function buildLadderedSkillPlugin(
     roots?: LadderedSkillRoots;
   }
 ): Promise<LadderedSkillPlugin | undefined> {
-  if (options.backend !== 'claude') return undefined;
+  if (!LADDERED_SKILL_PLUGIN_BACKENDS.has(options.backend)) return undefined;
   const key = ladderedSkillPluginKey(options.sessionKey);
   if (!key) throw new Error(`[ladderedSkillPlugin] invalid session key ${JSON.stringify(options.sessionKey)}`);
   const root = path.resolve(options.rootDir ?? ladderedSkillPluginRoot());
@@ -271,7 +287,7 @@ export async function buildLadderedSkillPlugin(
         await copySkillTree(source.dir, target, await fs.realpath(source.dir), skill.name);
         placed.push({
           requested: skill.name,
-          sessionName: `${LADDERED_SKILL_PLUGIN_NAME}:${skill.name}`,
+          sessionName: pluginSessionName(options.backend, skill.name),
           source: source.kind,
           sourceDir: source.dir,
         });

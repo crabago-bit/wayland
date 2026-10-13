@@ -26,6 +26,39 @@ export function fuigoHomeDir(userDataDir: string): string {
 }
 
 /**
+ * Engine home for agents the JARVIS autonomy ladder governs.
+ *
+ * Fuigo persists a `--trust` grant in `$FUIGO_HOME/trusted_folders.toml`, and
+ * a later spawn WITHOUT `--trust` still treats that folder as trusted - so it
+ * dials the workspace's own `.fuigo/config.toml` MCP servers directly (no
+ * tool-filter shim) and loads its permission rules (measured on 1.0.19). A
+ * laddered agent therefore never shares the home where ordinary chats grant
+ * trust: it gets this one, is never spawned with `--trust`, and the trust file
+ * is removed before every spawn (see revokeFuigoFolderTrust).
+ */
+export function fuigoLadderedHomeDir(userDataDir: string): string {
+  return path.join(userDataDir, 'fuigo-laddered');
+}
+
+/** Drop every persisted folder-trust grant in `homeDir` (laddered home only). */
+export function revokeFuigoFolderTrust(homeDir: string): void {
+  fs.rmSync(path.join(homeDir, 'trusted_folders.toml'), { force: true });
+}
+
+/**
+ * `[permission]` rules appended to the laddered home's managed config.
+ *
+ * In `default` mode Fuigo runs `touch` and `mkdir` without asking the client
+ * at all (every other write-capable command measured on 1.0.19 asks), so the
+ * permission gate never saw them. `ask` sends them through the gate like any
+ * other write; at rung 3-4 the gate passes them.
+ */
+export const FUIGO_LADDERED_PERMISSION_RULES = `
+[permission]
+ask = ["Bash(touch:*)", "Bash(mkdir:*)"]
+`;
+
+/**
  * Desktop-managed `$FUIGO_HOME/config.toml`, rewritten before every spawn.
  *
  * `[plugins] auto_discover = false` is the only way to stop Fuigo importing

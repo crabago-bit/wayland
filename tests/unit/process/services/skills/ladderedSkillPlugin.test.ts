@@ -338,8 +338,17 @@ describe('buildLadderedSkillPlugin', () => {
     });
   });
 
-  it('only Claude gets a plugin', async () => {
+  it('only Claude and Fuigo get a plugin', async () => {
     expect(await buildLadderedSkillPlugin({ backend: 'codex', sessionKey: 'c', rootDir: pluginRoot })).toBeUndefined();
+  });
+
+  it('a Fuigo plugin holds the same skills, listed under their plain names', async () => {
+    const plugin = await buildFull({ backend: 'fuigo', sessionKey: 'conv-fuigo' });
+    expect(plugin.path).toBe(path.join(pluginRoot, 'conv-fuigo'));
+    const pdf = plugin.skills.find((s) => s.requested === 'pdf');
+    // Fuigo lists a pluginDirs skill by its frontmatter name, with no plugin prefix.
+    expect(pdf?.sessionName).toBe('pdf');
+    expect(fs.existsSync(path.join(plugin.path, 'skills', 'pdf', 'SKILL.md'))).toBe(true);
   });
 });
 

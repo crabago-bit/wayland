@@ -150,7 +150,10 @@ import {
   fuigoBudgetEnv,
   fuigoCompatIsolationEnv,
   fuigoHomeDir,
+  fuigoLadderedHomeDir,
   fuigoPluginDirs,
+  FUIGO_LADDERED_PERMISSION_RULES,
+  revokeFuigoFolderTrust,
 } from '../../../src/process/agent/fuigo/launch';
 import { projectSessionMetadata } from '../../../src/process/acp/infra/AcpProtocol';
 
@@ -274,6 +277,23 @@ describe('launch helpers', () => {
       mkdirSync(join(ws, '.wayland'));
       expect(fuigoPluginDirs(ws)).toEqual([]);
     });
+  });
+
+  it('gives laddered agents a separate home and can revoke every folder-trust grant in it', () => {
+    expect(fuigoLadderedHomeDir('/u')).toBe(join('/u', 'fuigo-laddered'));
+    expect(fuigoLadderedHomeDir('/u')).not.toBe(fuigoHomeDir('/u'));
+    const home = mkdtempSync(join(tmpdir(), 'fuigo-laddered-home-'));
+    try {
+      writeFileSync(join(home, 'trusted_folders.toml'), '[folders."/ws"]\ntrusted = true\n');
+      revokeFuigoFolderTrust(home);
+      expect(() => statSync(join(home, 'trusted_folders.toml'))).toThrow();
+      // Idempotent: nothing to revoke is not an error.
+      expect(() => revokeFuigoFolderTrust(home)).not.toThrow();
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+    // The laddered home sends the commands Fuigo would run unasked through the gate.
+    expect(FUIGO_LADDERED_PERMISSION_RULES).toMatch(/\[permission\]\nask = \["Bash\(touch:\*\)", "Bash\(mkdir:\*\)"\]/);
   });
 
   it('sets both process budgets for unattended runs only', () => {
@@ -490,6 +510,27 @@ describe('AcpAgentManager Fuigo spawn contract', () => {
     isWorkspaceTrusted.mockReturnValue(false);
     const untrusted = await resolve({});
     expect(untrusted.customArgs).toEqual(['--permission-mode', 'default', 'agent', 'stdio']);
+  });
+
+  it('spawns a JARVIS-laddered agent in its own trust-free home, never with --trust', async () => {
+    // Fuigo persists a --trust grant per home and then dials the workspace's own
+    // `.fuigo/config.toml` MCP servers past the tool-filter shim (1.0.19).
+    mockGet.mockImplementation(async (key: string) =>
+      key === 'agents.autonomy' ? { 'custom:pack-warrior-estimator': 2 } : undefined
+    );
+    isWorkspaceTrusted.mockReturnValue(true);
+    const laddered = await resolve({ presetAssistantId: 'pack-warrior-estimator' });
+    expect(laddered.customArgs).toEqual(['--permission-mode', 'default', 'agent', 'stdio']);
+    expect(laddered.customEnv).toMatchObject({ FUIGO_HOME: join('/tmp/userData', 'fuigo-laddered') });
+    expect(ensureFuigoHomeMock).toHaveBeenCalledWith(
+      join('/tmp/userData', 'fuigo-laddered'),
+      FUIGO_MANAGED_CONFIG + FUIGO_LADDERED_PERMISSION_RULES
+    );
+
+    // An agent with no configured rung keeps the shared home and Desktop's trust.
+    const plain = await resolve({ presetAssistantId: 'builtin-concierge' });
+    expect(plain.customArgs).toEqual(['--permission-mode', 'default', '--trust', 'agent', 'stdio']);
+    expect(plain.customEnv).toMatchObject({ FUIGO_HOME: join('/tmp/userData', 'fuigo') });
   });
 
   it('forwards the conversation maxTurns to Fuigo as --max-turns', async () => {
