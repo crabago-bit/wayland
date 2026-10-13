@@ -424,6 +424,26 @@ export class AcpSession {
     }
   }
 
+  /**
+   * Put the live session into `modeId` and WAIT for the agent to accept it.
+   * Unlike `setMode` (fire-and-forget, best effort), this rejects when the
+   * session is not active or the agent refuses - for callers that must not
+   * proceed in any other mode (the JARVIS autonomy ladder).
+   */
+  async confirmMode(modeId: string): Promise<string> {
+    const { client, sessionId } = this.lifecycle;
+    if (this._status !== 'active' || !client || !sessionId) {
+      throw new AcpError('INVALID_STATE', `Cannot confirm session mode while ${this._status}`);
+    }
+    this.configTracker.setDesiredMode(modeId);
+    const { availableModes, currentModeId } = this.configTracker.modeSnapshot();
+    const resolved = resolveAcpSessionModeId(modeId, availableModes, currentModeId);
+    await client.setMode(sessionId, resolved);
+    this.configTracker.setCurrentMode(resolved);
+    this.callbacks.onModeUpdate(this.configTracker.modeSnapshot());
+    return resolved;
+  }
+
   setConfigOption(id: string, value: string | boolean): void {
     this.configTracker.setDesiredConfigOption(id, value);
     const { client, sessionId } = this.lifecycle;

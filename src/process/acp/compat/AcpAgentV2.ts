@@ -156,6 +156,15 @@ export class AcpAgentV2 {
    * `ensureSession`. `undefined` = no configured rung = today's behaviour.
    */
   private autonomy?: ToolFilterSpawnAutonomy;
+  /** The mode a laddered session must run in (already clamped to its rung). */
+  private ladderedMode?: string;
+  /**
+   * Whether the agent has CONFIRMED the laddered mode. False until the first
+   * strict apply, and again whenever the agent reports a mode outside the
+   * rung (e.g. the Claude bridge rebuilt its query from the user's
+   * `defaultMode`). While false the permission gate refuses every write.
+   */
+  private ladderedModeConfirmed = false;
 
   // Cached state from callbacks
   private cachedModelInfo: AcpModelInfo | null = null;
@@ -396,6 +405,7 @@ export class AcpAgentV2 {
         ? createAutonomyPermissionGate(this.autonomy, this.agentConfig.agentBackend, {
             internalMcpServers,
             shimmedMcpServers,
+            isModeConfirmed: () => this.ladderedModeConfirmed,
           })
         : undefined,
     };
@@ -439,10 +449,60 @@ export class AcpAgentV2 {
     }
     config.initialDesired = { ...config.initialDesired, mode: clamped };
     config.yoloMode = false;
+    this.ladderedMode = clamped;
     // Claude Code's own allow rules / defaultMode / hooks would approve calls
     // without ever asking us; start the session without user/local settings.
     const meta = ladderedSessionMeta(this.agentConfig.agentBackend);
     if (meta) (this.agentConfig as { sessionMeta?: Record<string, unknown> }).sessionMeta = meta;
+  }
+
+  /** True when the agent-reported `modeId` is one this session's rung allows. */
+  private isLadderedModeAllowed(modeId: string): boolean {
+    if (!this.autonomy) return true;
+    return clampSessionModeForRung(modeId, this.autonomy.rung, this.agentConfig.agentBackend) === modeId;
+  }
+
+  /**
+   * Strictly apply the laddered mode, or FAIL CLOSED: end the session and
+   * throw, so the turn never runs in a mode the rung does not allow.
+   */
+  private async enforceLadderedMode(): Promise<void> {
+    if (!this.autonomy || !this.session) return;
+    const target = this.ladderedMode ?? 'default';
+    try {
+      await this.session.confirmMode(target);
+      this.ladderedModeConfirmed = true;
+    } catch (err) {
+      this.ladderedModeConfirmed = false;
+      const reason = err instanceof Error ? err.message : String(err);
+      await this.kill().catch(() => {});
+      throw new AcpSessionError(
+        'INVALID_STATE',
+        `Autonomy rung ${this.autonomy.rung} (${this.autonomy.agent}): the agent did not accept session mode "${target}" (${reason}). The session was stopped instead of running outside its rung.`
+      );
+    }
+  }
+
+  /**
+   * The agent reported a mode change. If it left the rung's allowed set, refuse
+   * writes (via the gate) and re-apply the laddered mode right away; if that
+   * fails, stop the session.
+   */
+  private watchLadderedMode(currentModeId: string | null | undefined): void {
+    if (!this.autonomy || !currentModeId) return;
+    if (this.isLadderedModeAllowed(currentModeId)) return;
+    this.ladderedModeConfirmed = false;
+    console.warn(
+      `[AcpAgentV2] Autonomy rung ${this.autonomy.rung} (${this.autonomy.agent}): agent reported mode ${currentModeId}; re-applying ${this.ladderedMode ?? 'default'}`
+    );
+    void this.enforceLadderedMode().catch((err) => {
+      this.onSignalEvent?.({
+        type: 'error',
+        conversation_id: this.conversationId,
+        msg_id: `autonomy_mode_${this.conversationId}`,
+        data: err instanceof Error ? err.message : String(err),
+      });
+    });
   }
 
   /**
@@ -599,6 +659,7 @@ export class AcpAgentV2 {
 
       onModeUpdate: (mode: ModeSnapshot) => {
         this.cachedModes = mode;
+        this.watchLadderedMode(mode.currentModeId);
 
         // Resolve modeOp if pending
         if (this.modeOp) {
@@ -1040,6 +1101,11 @@ export class AcpAgentV2 {
       if (!this.session) {
         throw new AcpSessionError('INVALID_STATE', 'Session not available after reconnect');
       }
+      // JARVIS autonomy: every turn starts in a CONFIRMED laddered mode. The
+      // agent may have drifted (a rebuilt query starts from the user's
+      // defaultMode, and the start-up re-assert is best effort), and a mode
+      // like `auto` approves calls without ever asking the gate.
+      if (this.autonomy) await this.enforceLadderedMode();
       await this.session.sendMessage(content, data.files);
       return { success: true, data: null };
     } catch (err) {
@@ -1197,6 +1263,8 @@ export class AcpAgentV2 {
     let mode = requestedMode;
     if (this.autonomy) {
       mode = clampSessionModeForRung(requestedMode, this.autonomy.rung, this.agentConfig.agentBackend);
+      // Whatever the outcome, this is the mode every later turn is held to.
+      this.ladderedMode = mode;
       if (mode !== requestedMode && this.autonomy.rung <= 2) {
         // Below rung 3 the requested mode is refused outright, and the session
         // is (re)asserted into the clamped one so it can never drift there.
