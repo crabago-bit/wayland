@@ -92,6 +92,16 @@ export function ladderedSessionMeta(backend: string): Record<string, unknown> | 
   return backend === 'claude' ? { ...LADDERED_CLAUDE_SESSION_META } : undefined;
 }
 
+/**
+ * How long a held call waits for a person before it is refused: 15 minutes.
+ *
+ * Applied to EVERY laddered hold, not only to scheduled runs. A team member,
+ * workflow step or channel conversation at rung 2 otherwise waits forever on
+ * an approval nobody may be looking at, and stalls its leader with it. In an
+ * attended chat a refusal after 15 minutes costs one re-ask.
+ */
+export const AUTONOMY_HOLD_DEADLINE_MS = 15 * 60_000;
+
 type GateRequest = Parameters<PermissionGate['check']>[0];
 
 /**
@@ -175,6 +185,7 @@ export function createAutonomyPermissionGate(
         return {
           action: 'hold',
           options: once,
+          deadlineMs: AUTONOMY_HOLD_DEADLINE_MS,
           settle: (approved: boolean) =>
             record(
               verdict.tool,

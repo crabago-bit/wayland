@@ -89,11 +89,24 @@ export type PermissionGateVerdict =
       action: 'hold';
       options?: RequestPermissionRequest['options'];
       settle?: (approved: boolean) => void;
+      /**
+       * Bound on how long this hold may wait, in ms, even in an attended
+       * session; on expiry it is denied like an unattended hold. The shorter of
+       * this and the resolver's own unattended deadline applies.
+       */
+      deadlineMs?: number;
     };
 
 export type PermissionGate = {
   check(request: RequestPermissionRequest): PermissionGateVerdict;
 };
+
+/** The shorter of two optional, positive deadlines. */
+function shorterDeadline(a: number | undefined, b: number | undefined): number | undefined {
+  if (a === undefined || a <= 0) return b;
+  if (b === undefined || b <= 0) return a;
+  return Math.min(a, b);
+}
 
 /** The rejection a gate's `deny` answers with: the request's own reject option, else "no decision". */
 function denyResponse(request: RequestPermissionRequest): RequestPermissionResponse {
@@ -152,7 +165,7 @@ type PermissionResolverConfig = {
 type PendingPermissionWithContext = PendingPermission & {
   cacheKey: string;
   /** Set when a gate HELD this call: never cached, and `settle` hears the outcome. */
-  held?: { settle?: (approved: boolean) => void; allowOptionIds?: ReadonlySet<string> };
+  held?: { settle?: (approved: boolean) => void; allowOptionIds?: ReadonlySet<string>; deadlineMs?: number };
 };
 
 export class PermissionResolver {
@@ -236,7 +249,7 @@ export class PermissionResolver {
       const verdict = this.gate.check(originalRequest);
       if (verdict.action === 'deny') return denyResponse(originalRequest);
       if (verdict.options) request = { ...originalRequest, options: verdict.options };
-      if (verdict.action === 'hold') held = { settle: verdict.settle };
+      if (verdict.action === 'hold') held = { settle: verdict.settle, deadlineMs: verdict.deadlineMs };
     }
     if (held) return this.delegate(request, buildCacheKey(request), uiCallback, held);
 
@@ -282,7 +295,7 @@ export class PermissionResolver {
       // #1045: arm the deadline BEFORE the UI callback. `uiCallback` is
       // synchronous today, but arming after it would make the bound depend on
       // that staying true.
-      const deadlineMs = this.holdDeadlineMs;
+      const deadlineMs = shorterDeadline(this.holdDeadlineMs, held?.deadlineMs);
       if (deadlineMs !== undefined && deadlineMs > 0) {
         // Resolved here, from THIS request's own options, rather than at expiry:
         // the request is what says how this agent spells "no".
@@ -343,7 +356,9 @@ export class PermissionResolver {
         ? { outcome: { outcome: 'selected', optionId: denyOptionId } }
         : { outcome: { outcome: 'cancelled' } }
     );
-    this.onHoldExpired?.({ callId, title, deadlineMs });
+    // The expiry notice speaks of a SCHEDULED run; a gate-bounded hold in an
+    // attended session is recorded in the approvals ledger instead.
+    if (this.holdDeadlineMs !== undefined) this.onHoldExpired?.({ callId, title, deadlineMs });
   }
 
   resolve(callId: string, optionId: string): void {
