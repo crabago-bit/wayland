@@ -27,6 +27,8 @@ let capturedConfig: AgentConfig;
 let capturedCallbacks: SessionCallbacks;
 let capturedOptions: SessionOptions | undefined;
 const sessionSetMode = vi.fn();
+const VERIFIED_INIT = { agentInfo: { name: '@agentclientprotocol/claude-agent-acp', version: '0.74.0' } };
+let initializeResult: unknown = VERIFIED_INIT;
 const sessionConfirmMode = vi.fn();
 const sessionSendMessage = vi.fn();
 const sessionStop = vi.fn();
@@ -38,7 +40,12 @@ vi.mock('@process/acp/session/AcpSession', () => ({
       capturedCallbacks = callbacks;
       capturedOptions = options;
     }
-    start = vi.fn(() => setTimeout(() => capturedCallbacks.onStatusChange('active'), 0));
+    start = vi.fn(() =>
+      setTimeout(() => {
+        capturedCallbacks.onInitialize?.(initializeResult);
+        capturedCallbacks.onStatusChange('active');
+      }, 0)
+    );
     stop = sessionStop;
     setMode = sessionSetMode;
     confirmMode = sessionConfirmMode;
@@ -114,6 +121,7 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     sessionConfirmMode.mockReset().mockResolvedValue('default');
     sessionSendMessage.mockReset().mockResolvedValue(undefined);
     sessionStop.mockReset().mockResolvedValue(undefined);
+    initializeResult = VERIFIED_INIT;
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -309,5 +317,28 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     const tip = onStreamEvent.mock.calls.map((c) => c[0]).find((m) => m.type === 'tips');
     expect(tip.data.content).toMatch(/autonomy ladder \(rung 2\)/);
     expect(tip.data.content).not.toMatch(/scheduled run/);
+  });
+
+  it.each([
+    ['an old bridge', { agentInfo: { name: '@agentclientprotocol/claude-agent-acp', version: '0.44.0' } }],
+    ['a new major', { agentInfo: { name: '@agentclientprotocol/claude-agent-acp', version: '1.0.0' } }],
+    ['another agent', { agentInfo: { name: 'some-fork', version: '0.80.0' } }],
+    ['no agentInfo', {}],
+  ])('fails CLOSED for a laddered agent on %s (override not confirmable)', async (_label, init) => {
+    stubStorage({ [`custom:${PACK}`]: 3 });
+    initializeResult = init;
+    const agent = await startAgent({ customAgentId: PACK });
+    const result = await agent.sendMessage({ content: 'hi' });
+    expect(result.success).toBe(false);
+    expect(result.error?.message).toMatch(/cannot be confirmed/);
+    expect(sessionSendMessage).not.toHaveBeenCalled();
+    expect(sessionStop).toHaveBeenCalled();
+  });
+
+  it('an unverified bridge does not affect a NON-laddered chat', async () => {
+    stubStorage({});
+    initializeResult = {};
+    const agent = await startAgent({});
+    expect((await agent.sendMessage({ content: 'hi' })).success).toBe(true);
   });
 });

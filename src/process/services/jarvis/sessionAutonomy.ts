@@ -136,6 +136,44 @@ export async function resolveLadderedSessionMeta(
 }
 
 /**
+ * The Claude ACP bridge versions whose `_meta.claudeCode.options` handling was
+ * checked against source: the options are spread into the SDK query AFTER the
+ * bridge's default `settingSources`, so ours win (claude-agent-acp 0.74.0,
+ * `acp-agent.js` createSession). Wayland resolves the latest bridge at launch,
+ * so a laddered session confirms the running bridge is inside this range - an
+ * unverified bridge might silently ignore the override, and the session then
+ * fails closed (laddered agents only).
+ */
+export const LADDER_VERIFIED_CLAUDE_BRIDGE = {
+  name: '@agentclientprotocol/claude-agent-acp',
+  minVersion: [0, 74, 0] as const,
+  belowMajor: 1,
+};
+
+/** Whether a laddered session on `backend` may trust the agent it initialized. */
+export function verifyLadderedBridge(
+  backend: string,
+  initializeResult: unknown
+): { ok: true } | { ok: false; reason: string } {
+  if (backend !== 'claude') return { ok: true };
+  const info = (initializeResult as { agentInfo?: { name?: unknown; version?: unknown } } | null)?.agentInfo;
+  const name = typeof info?.name === 'string' ? info.name : '';
+  const version = typeof info?.version === 'string' ? info.version : '';
+  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
+  if (name !== LADDER_VERIFIED_CLAUDE_BRIDGE.name || !match) {
+    return { ok: false, reason: `unrecognised Claude ACP bridge ${name || '(no agentInfo)'} ${version}`.trim() };
+  }
+  const v = match.slice(1, 4).map(Number);
+  const [minMajor, minMinor, minPatch] = LADDER_VERIFIED_CLAUDE_BRIDGE.minVersion;
+  const atLeastMin =
+    v[0] > minMajor || (v[0] === minMajor && (v[1] > minMinor || (v[1] === minMinor && v[2] >= minPatch)));
+  if (!atLeastMin || v[0] >= LADDER_VERIFIED_CLAUDE_BRIDGE.belowMajor) {
+    return { ok: false, reason: `Claude ACP bridge ${version} is outside the range verified for the autonomy ladder` };
+  }
+  return { ok: true };
+}
+
+/**
  * How long a held call waits for a person before it is refused: 15 minutes.
  *
  * Applied to EVERY laddered hold, not only to scheduled runs. A team member,

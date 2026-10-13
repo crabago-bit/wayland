@@ -21,7 +21,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ProcessAcpClient, withClaudeCodeOptions } from '@process/acp/infra/ProcessAcpClient';
-import { resolveLadderedSessionMeta, resolveLadderedSettingSources } from '@process/services/jarvis/sessionAutonomy';
+import {
+  resolveLadderedSessionMeta,
+  resolveLadderedSettingSources,
+  verifyLadderedBridge,
+} from '@process/services/jarvis/sessionAutonomy';
 
 const AGENT = `
 const fs = require('node:fs');
@@ -163,5 +167,26 @@ describe('withClaudeCodeOptions', () => {
       withClaudeCodeOptions({ other: 1, claudeCode: { options: { settingSources: [] }, x: 2 } }, { resume: 'r' })
     ).toEqual({ other: 1, claudeCode: { x: 2, options: { settingSources: [], resume: 'r' } } });
     expect(withClaudeCodeOptions(undefined, { resume: 'r' })).toEqual({ claudeCode: { options: { resume: 'r' } } });
+  });
+});
+
+const init = (version?: string, name = '@agentclientprotocol/claude-agent-acp') => ({
+  agentInfo: { name, ...(version ? { version } : {}) },
+});
+
+describe('verifyLadderedBridge - only a bridge verified to honour the override', () => {
+  it.each(['0.74.0', '0.74.3', '0.80.1', '0.99.0'])('accepts claude-agent-acp %s', (version) => {
+    expect(verifyLadderedBridge('claude', init(version))).toEqual({ ok: true });
+  });
+  it.each(['0.44.0', '0.73.9', '1.0.0', '2.1.0'])('refuses claude-agent-acp %s', (version) => {
+    expect(verifyLadderedBridge('claude', init(version)).ok).toBe(false);
+  });
+  it('refuses another agent, a missing version and a missing initialize result', () => {
+    expect(verifyLadderedBridge('claude', init('0.74.0', 'other')).ok).toBe(false);
+    expect(verifyLadderedBridge('claude', init()).ok).toBe(false);
+    expect(verifyLadderedBridge('claude', undefined).ok).toBe(false);
+  });
+  it('does not apply to backends without the settings override', () => {
+    expect(verifyLadderedBridge('codex', undefined)).toEqual({ ok: true });
   });
 });
