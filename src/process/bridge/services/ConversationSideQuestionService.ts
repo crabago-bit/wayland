@@ -15,10 +15,17 @@ import type { AcpClient } from '@process/acp/infra/IAcpClient';
 import { LegacyConnectorFactory } from '@process/acp/compat/LegacyConnectorFactory';
 import type { IConversationService } from '@process/services/IConversationService';
 import { ProcessConfig } from '@process/utils/initStorage';
+import { resolveConfiguredSpawnAutonomy, resolveLadderedSessionMeta } from '@process/services/jarvis/sessionAutonomy';
 
 const ACP_SIDE_QUESTION_TIMEOUT_MS = 30_000;
 
 type ResolvedAcpContext = {
+  /**
+   * JARVIS autonomy: `_meta` for the fork when the conversation's agent is on
+   * the ladder - no user/unsafe-project settings and no tools, so a /btw side
+   * question can never run with the user's Claude Code allow list.
+   */
+  forkMeta?: Record<string, unknown>;
   acpSessionId: string;
   backend: AcpBackend;
   cliPath?: string;
@@ -160,6 +167,7 @@ export class ConversationSideQuestionService {
               sessionId: context.acpSessionId,
               cwd: context.workspace,
               mcpServers: [],
+              ...(context.forkMeta ? { meta: context.forkMeta } : {}),
             });
           } catch {
             throw new AcpSideQuestionUnsupportedError('ACP forked side questions are not supported for this backend.');
@@ -204,7 +212,16 @@ export class ConversationSideQuestionService {
       return null;
     }
 
+    const autonomy = await resolveConfiguredSpawnAutonomy({
+      backend: extra.backend,
+      customAgentId: extra.customAgentId || extra.presetAssistantId,
+    });
+    const forkMeta = autonomy
+      ? await resolveLadderedSessionMeta(extra.backend, extra.workspace, { tools: [] })
+      : undefined;
+
     return {
+      ...(forkMeta ? { forkMeta } : {}),
       acpSessionId: extra.acpSessionId,
       backend: extra.backend,
       cliPath: cliPath.trim(),
