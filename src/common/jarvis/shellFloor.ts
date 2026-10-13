@@ -264,11 +264,19 @@ function unwrap(tokens: Token[]): Token[] {
 // ─── Classifiers ────────────────────────────────────────────────────────────
 
 /**
- * The bc8dbb966 delete pattern, kept as an ADDITIONAL deny over the raw text:
- * `rm`/`rmdir`/`unlink`/`shred` starting any word after a separator or quote.
- * It over-matches a command that merely quotes "rm" - deliberately.
+ * The bc8dbb966 delete pattern, kept as an ADDITIONAL deny: `rm`/`rmdir`/
+ * `unlink`/`shred` starting any word after a separator. It runs over the
+ * command line with the quoted ARGUMENTS of read-only commands and commit
+ * messages removed (see `evaluableText`), so `git commit -m "rm stale files"`
+ * and `grep -rn "rm -rf" docs` merely mention it.
  */
-const SHELL_DELETE = /(?:^|[\s;&|(`"'])(?:sudo\s+|xargs\s+)?(?:rm|rmdir|unlink|shred)(?:\s|$)/i;
+const SHELL_DELETE = /(?:^|[\s;&|(`])(?:sudo\s+|xargs\s+)?(?:rm|rmdir|unlink|shred)(?:\s|$)/i;
+
+/** The same pattern also matching right after a quote - for text a shell will EVALUATE. */
+const SHELL_DELETE_IN_PAYLOAD = /(?:^|[\s;&|(`"'])(?:sudo\s+|xargs\s+)?(?:rm|rmdir|unlink|shred)(?:\s|$)/i;
+
+/** A command line that feeds text to a shell to evaluate: `... | sh`, `| bash`, `eval`. */
+const EVALUATES_TEXT = /\|\s*(?:sudo\s+)?(?:ba|z|da|k)?sh\b(?!\s+-[a-z]*c)|(?:^|[\s;&|(])eval\s/i;
 
 const DELETE_COMMANDS: ReadonlySet<string> = new Set(['rm', 'rmdir', 'unlink', 'shred', 'srm', 'wipe']);
 const PACKAGE_MANAGERS: ReadonlySet<string> = new Set(['npm', 'pnpm', 'yarn', 'bun']);
@@ -541,6 +549,29 @@ function classifySegment(tokens: Token[], keywords: readonly string[], depth: nu
   return NOT_FLOOR;
 }
 
+/** True for a segment whose quoted arguments are only data: a read-only command or a commit/tag message. */
+function quotesAreData(segment: Segment): boolean {
+  const words = values(unwrap(segment));
+  const head = basename(lower(words[0]));
+  if (READ_ONLY_COMMANDS.has(head)) return true;
+  return head === 'git' && ['commit', 'tag', 'notes'].includes(lower(words[1]));
+}
+
+/**
+ * The command line as the shell would run it, with the quoted arguments of
+ * read-only commands and commit messages left out. Everything else - a
+ * `bash -c "..."` payload included - is kept, unquoted, so the delete pattern
+ * sees it at a word boundary.
+ */
+function evaluableText(segments: Segment[]): string {
+  return segments
+    .map((segment) => {
+      const keep = quotesAreData(segment) ? segment.filter((t) => !t.quoted) : segment;
+      return values(keep).join(' ');
+    })
+    .join(' ; ');
+}
+
 /**
  * Does `commandLine` hit the hard floor? Checks the raw delete pattern, then
  * every segment (recursing into wrappers, `-c` payloads, find -exec and
@@ -552,8 +583,13 @@ export function classifyShellCommand(
   depth: number = 0
 ): ShellFloorVerdict {
   if (!commandLine) return NOT_FLOOR;
-  if (SHELL_DELETE.test(commandLine)) return floor('command deletes data');
-  for (const segment of tokenizeShell(commandLine)) {
+  // Text piped into a shell or eval'd is code, quotes and all.
+  if (EVALUATES_TEXT.test(commandLine) && SHELL_DELETE_IN_PAYLOAD.test(commandLine)) {
+    return floor('command deletes data');
+  }
+  const segments = tokenizeShell(commandLine);
+  if (SHELL_DELETE.test(evaluableText(segments))) return floor('command deletes data');
+  for (const segment of segments) {
     const verdict = classifySegment(segment, keywords, depth);
     if (verdict.floor) return verdict;
   }

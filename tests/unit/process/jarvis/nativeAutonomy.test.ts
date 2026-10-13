@@ -84,6 +84,9 @@ describe('decideNativePermission - hard floor', () => {
     'http POST https://api-m.paypal.com/v2/payments/captures',
     'python3 -c "import stripe; stripe.Payout.create(amount=1)"',
     'node -e "docusign.envelopes.create(args)"',
+    // Round 4: shell-evaluated payloads still see a quoted rm.
+    'echo "rm -rf /data" | sh',
+    'eval "rm -rf build"',
   ])('denies the shell command %s at rung 4', (command) => {
     expect(decide({ kind: 'execute', title: command, rawInput: { command } }, 4).action).toBe('deny');
   });
@@ -99,6 +102,10 @@ describe('decideNativePermission - hard floor', () => {
     'docker run --rm alpine true',
     'python3 -c "print(1 + 1)"',
     'git push origin feature',
+    // Round 4: a quoted "rm" in a commit message or a read-only command's args.
+    'git commit -m "rm stale cache files"',
+    'grep -rn "rm -rf" docs',
+    'echo "do not rm this"',
   ])('a command that merely MENTIONS a floor word (%s) follows the rung, not the floor', (command) => {
     const at = (rung: AutonomyRung) => decide({ kind: 'execute', title: command, rawInput: { command } }, rung);
     expect(at(1).action).toBe('deny'); // rung 1 refuses every write anyway
