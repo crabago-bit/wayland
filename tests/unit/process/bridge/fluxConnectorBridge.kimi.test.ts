@@ -57,6 +57,10 @@ vi.mock('@/common', () => ({
       openclawStatus: { provider: (h: () => Promise<unknown>) => providers.set('openclawStatus', h) },
       setupOpenClaw: { provider: (h: () => Promise<unknown>) => providers.set('openclawSetup', h) },
       removeOpenClaw: { provider: (h: () => Promise<unknown>) => providers.set('openclawRemove', h) },
+      // LOCAL ADDITION (WarriorHi): the Hermes connector registers beside the upstream four.
+      hermesStatus: { provider: (h: () => Promise<unknown>) => providers.set('hermesStatus', h) },
+      setupHermes: { provider: (h: () => Promise<unknown>) => providers.set('hermesSetup', h) },
+      removeHermes: { provider: (h: () => Promise<unknown>) => providers.set('hermesRemove', h) },
     },
   },
 }));

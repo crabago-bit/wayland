@@ -32,6 +32,9 @@ const OPENCLAW_CHANNELS = [
   'flux-connector:remove-openclaw',
 ];
 
+// LOCAL ADDITION (WarriorHi): the Hermes connector slots in beside upstream's four.
+const HERMES_CHANNELS = ['flux-connector:hermes-status', 'flux-connector:setup-hermes', 'flux-connector:remove-hermes'];
+
 describe('flux connector channels', () => {
   it('declares the kimi trio on ipcBridge.fluxConnector', () => {
     expect(typeof ipcBridge.fluxConnector.kimiStatus?.invoke).toBe('function');
@@ -83,7 +86,7 @@ describe('flux connector channels', () => {
     expect(isAllowedForRemote('subscribe-flux-connector:setup-kimi')).toBe(false);
   });
 
-  it('exposes exactly twelve flux-connector channels (opencode + codex + kimi + openclaw)', () => {
+  it('exposes exactly fifteen flux-connector channels (opencode + codex + kimi + openclaw + hermes)', () => {
     const declared = [..._getRegisteredKeysForTests().providers].filter((key) => key.startsWith('flux-connector:'));
     expect(declared.sort()).toEqual(
       [
@@ -93,6 +96,7 @@ describe('flux connector channels', () => {
         ...CODEX_CHANNELS,
         ...KIMI_CHANNELS,
         ...OPENCLAW_CHANNELS,
+        ...HERMES_CHANNELS,
       ].sort()
     );
   });

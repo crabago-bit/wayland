@@ -59,6 +59,16 @@ vi.mock('@/common', () => ({
       removeOpenClaw: {
         provider: (handler: () => Promise<unknown>) => providers.set('openclawRemove', handler),
       },
+      // LOCAL ADDITION (WarriorHi): the Hermes connector registers beside the upstream four.
+      hermesStatus: {
+        provider: (handler: () => Promise<unknown>) => providers.set('hermesStatus', handler),
+      },
+      setupHermes: {
+        provider: (handler: () => Promise<unknown>) => providers.set('hermesSetup', handler),
+      },
+      removeHermes: {
+        provider: (handler: () => Promise<unknown>) => providers.set('hermesRemove', handler),
+      },
     },
   },
 }));
@@ -193,7 +203,7 @@ describe('fluxConnectorBridge', () => {
     expect(readConnectedFluxKey).not.toHaveBeenCalled();
   });
 
-  it('initFluxConnectorBridge registers all opencode + codex + kimi + openclaw providers', async () => {
+  it('initFluxConnectorBridge registers all opencode + codex + kimi + openclaw + hermes providers', async () => {
     const { initFluxConnectorBridge } = await import('@process/bridge/fluxConnectorBridge');
 
     initFluxConnectorBridge();
@@ -210,5 +220,8 @@ describe('fluxConnectorBridge', () => {
     expect(providers.has('openclawStatus')).toBe(true);
     expect(providers.has('openclawSetup')).toBe(true);
     expect(providers.has('openclawRemove')).toBe(true);
+    expect(providers.has('hermesStatus')).toBe(true);
+    expect(providers.has('hermesSetup')).toBe(true);
+    expect(providers.has('hermesRemove')).toBe(true);
   });
 });
