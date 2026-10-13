@@ -21,7 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ProcessAcpClient } from '@process/acp/infra/ProcessAcpClient';
-import { LADDERED_CLAUDE_SESSION_META, ladderedSessionMeta } from '@process/services/jarvis/sessionAutonomy';
+import { resolveLadderedSessionMeta, resolveLadderedSettingSources } from '@process/services/jarvis/sessionAutonomy';
 
 const AGENT = `
 const fs = require('node:fs');
@@ -84,14 +84,13 @@ async function record(meta?: Record<string, unknown>) {
 }
 
 describe('laddered Claude sessions start without user/local Claude Code settings', () => {
-  it('sends _meta.claudeCode.options.settingSources = ["project"] on session/new AND session/load', async () => {
-    const meta = ladderedSessionMeta('claude');
+  it('sends _meta.claudeCode.options.settingSources on session/new AND session/load', async () => {
+    const workspace = fs.mkdtempSync(path.join(dir, 'ws-'));
+    const meta = await resolveLadderedSessionMeta('claude', workspace, {}, '/nonexistent-home');
     expect(meta).toEqual({ claudeCode: { options: { settingSources: ['project'] } } });
     const calls = await record(meta);
     expect(calls.map((c) => c.method)).toEqual(['session/new', 'session/load']);
-    for (const call of calls) {
-      expect(call.params._meta).toEqual(LADDERED_CLAUDE_SESSION_META);
-    }
+    for (const call of calls) expect(call.params._meta).toEqual(meta);
   }, 20_000);
 
   it('a session without the ladder sends no _meta (today’s behaviour)', async () => {
@@ -99,8 +98,52 @@ describe('laddered Claude sessions start without user/local Claude Code settings
     for (const call of calls) expect(call.params._meta).toBeUndefined();
   }, 20_000);
 
-  it('only Claude gets the settings override', () => {
-    expect(ladderedSessionMeta('codex')).toBeUndefined();
-    expect(ladderedSessionMeta('qwen')).toBeUndefined();
+  it('only Claude gets the settings override', async () => {
+    expect(await resolveLadderedSessionMeta('codex', dir)).toBeUndefined();
+    expect(await resolveLadderedSessionMeta('qwen', dir)).toBeUndefined();
+  });
+});
+
+describe('resolveLadderedSettingSources - project settings only when provably safe', () => {
+  const project = (settings?: Record<string, unknown> | string, file = 'settings.json') => {
+    const ws = fs.mkdtempSync(path.join(dir, 'proj-'));
+    if (settings !== undefined) {
+      fs.mkdirSync(path.join(ws, '.claude'), { recursive: true });
+      fs.writeFileSync(
+        path.join(ws, '.claude', file),
+        typeof settings === 'string' ? settings : JSON.stringify(settings)
+      );
+    }
+    return ws;
+  };
+  const home = () => fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-home-'));
+
+  it('a clean workspace keeps project settings (workspace skills, CLAUDE.md)', async () => {
+    expect(await resolveLadderedSettingSources(project(), home())).toEqual(['project']);
+    expect(await resolveLadderedSettingSources(project({ model: 'opus' }), home())).toEqual(['project']);
+  });
+
+  it('cwd = $HOME (where .claude/settings.json IS the user file) loads nothing', async () => {
+    const h = home();
+    expect(await resolveLadderedSettingSources(h, h)).toEqual([]);
+  });
+
+  it('cwd an ancestor of $HOME loads nothing', async () => {
+    const h = home();
+    expect(await resolveLadderedSettingSources(path.dirname(h), h)).toEqual([]);
+    expect(await resolveLadderedSettingSources('/', h)).toEqual([]);
+  });
+
+  it.each([
+    ['allow rules', { permissions: { allow: ['Bash(curl *)'] } }, 'settings.json'],
+    ['a defaultMode', { permissions: { defaultMode: 'auto' } }, 'settings.json'],
+    ['hooks', { hooks: { PreToolUse: [] } }, 'settings.json'],
+    ['local allow rules', { permissions: { allow: ['Edit'] } }, 'settings.local.json'],
+  ])('a workspace whose project settings carry %s loads nothing', async (_label, settings, file) => {
+    expect(await resolveLadderedSettingSources(project(settings, file), home())).toEqual([]);
+  });
+
+  it('an unreadable project settings file loads nothing (not provably safe)', async () => {
+    expect(await resolveLadderedSettingSources(project('{ not json'), home())).toEqual([]);
   });
 });

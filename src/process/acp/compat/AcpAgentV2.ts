@@ -53,7 +53,7 @@ import { clampSessionModeForRung } from '@/common/jarvis/nativeAutonomy';
 import type { ToolFilterSpawnAutonomy } from '@process/services/mcpServices/builtinMcpRuntime';
 import {
   createAutonomyPermissionGate,
-  ladderedSessionMeta,
+  resolveLadderedSessionMeta,
   resolveConfiguredSpawnAutonomy,
 } from '@process/services/jarvis/sessionAutonomy';
 
@@ -296,7 +296,14 @@ export class AcpAgentV2 {
       backend: this.agentConfig.agentBackend,
       customAgentId: this.customAgentId,
     });
-    if (this.autonomy) this.applyAutonomyModeClamp(this.autonomy);
+    if (this.autonomy) {
+      this.applyAutonomyModeClamp(this.autonomy);
+      // Claude Code's own allow rules / defaultMode / hooks would approve calls
+      // without ever asking us; start without user/local (and unsafe project)
+      // settings. See resolveLadderedSettingSources.
+      const meta = await resolveLadderedSessionMeta(this.agentConfig.agentBackend, this.agentConfig.cwd);
+      if (meta) (this.agentConfig as { sessionMeta?: Record<string, unknown> }).sessionMeta = meta;
+    }
 
     // Load and refresh storage-backed connectors now, but defer their transport
     // projection until SessionLifecycle has the live initialize response.
@@ -450,10 +457,6 @@ export class AcpAgentV2 {
     config.initialDesired = { ...config.initialDesired, mode: clamped };
     config.yoloMode = false;
     this.ladderedMode = clamped;
-    // Claude Code's own allow rules / defaultMode / hooks would approve calls
-    // without ever asking us; start the session without user/local settings.
-    const meta = ladderedSessionMeta(this.agentConfig.agentBackend);
-    if (meta) (this.agentConfig as { sessionMeta?: Record<string, unknown> }).sessionMeta = meta;
   }
 
   /** True when the agent-reported `modeId` is one this session's rung allows. */
