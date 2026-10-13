@@ -121,6 +121,7 @@ import { readConnectedFluxKey } from '@process/connectors/fluxKey';
 import type { McpConfigProjection } from '@process/acp/session/McpConfig';
 import { createMcpSessionState, type McpSessionBackend, type McpSessionState } from '@/common/mcp/sessionReceipt';
 import { createMcpSessionDigestKey } from '@process/services/mcpServices/mcpSessionTruthGate';
+import { describeLadderedSkills } from '@process/services/jarvis/ladderedSkillPlugin';
 
 interface AcpAgentManagerData {
   workspace?: string;
@@ -2302,6 +2303,10 @@ ${collectedResponses.join('\n')}`;
           if (rulesBody.length > 0) {
             contentToSend = `[Assistant Rules - You MUST follow these instructions]\n${rulesBody}\n\n[User Request]\n${contentToSend}`;
           }
+          // A laddered Claude session lists its skills under the skill plugin's
+          // prefix (`wayland-skills:<name>`), not the names the rules use.
+          const ladderedSkillNote = describeLadderedSkills(this.agent?.getLadderedSkills?.() ?? []);
+          if (ladderedSkillNote) contentToSend = `${ladderedSkillNote}\n\n${contentToSend}`;
         }
 
         // Per-turn skill auto-load (every genuine user turn, all backends).

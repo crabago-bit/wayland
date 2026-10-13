@@ -74,7 +74,16 @@ vi.mock('@process/services/jarvis/approvalsPath', () => ({
   resolveApprovalsLogPath: () => '/data/jarvis/approvals.jsonl',
 }));
 vi.mock('@process/services/jarvis/hardFloor', () => ({ readHardFloorKeywords: () => ['wire'] }));
-const buildSkillPlugin = vi.fn(async (opts: { sessionKey: string }) => `/data/skill-plugins/${opts.sessionKey}`);
+const pluginSkill = {
+  requested: 'contractor-os:line-item-pricing',
+  sessionName: 'wayland-skills:contractor-os:line-item-pricing',
+  source: 'plugin-copy',
+  sourceDir: '/data/skill-sources/contractor-os/skills/line-item-pricing',
+};
+const buildSkillPlugin = vi.fn(async (opts: { sessionKey: string }) => ({
+  path: `/data/skill-plugins/${opts.sessionKey}`,
+  skills: [pluginSkill],
+}));
 vi.mock('@process/services/jarvis/ladderedSkillPlugin', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@process/services/jarvis/ladderedSkillPlugin')>()),
   buildLadderedSkillPlugin: (opts: { sessionKey: string }) => buildSkillPlugin(opts),
@@ -231,6 +240,12 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     });
   });
 
+  it('exposes the plugin’s skills with the names the session lists them under', async () => {
+    stubStorage({ [`custom:${PACK}`]: 3 });
+    const agent = await startAgent({ customAgentId: PACK });
+    expect(agent.getLadderedSkills()).toEqual([pluginSkill]);
+  });
+
   it('a skill plugin that fails to build costs only the skills: still laddered, no plugins', async () => {
     stubStorage({ [`custom:${PACK}`]: 2 });
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -252,6 +267,7 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     expect(capturedConfig.yoloMode).toBe(true);
     expect(capturedConfig.sessionMeta).toBeUndefined();
     expect(buildSkillPlugin).not.toHaveBeenCalled();
+    expect(agent.getLadderedSkills()).toBeUndefined();
     void agent.setMode('bypassPermissions');
     expect(sessionSetMode).toHaveBeenCalledWith('bypassPermissions');
   });

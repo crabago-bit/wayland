@@ -10,32 +10,50 @@
  *
  * A laddered Claude session loads no setting sources (see
  * resolveLadderedSessionMeta), so it no longer discovers the skills Wayland
- * copies into the workspace's `.claude/skills` - those are only read through
- * the `project` source. The Claude Agent SDK's `plugins` option (forwarded by
- * the ACP bridge from `_meta.claudeCode.options`, like `settingSources`) loads
- * a local plugin directory as `--plugin-dir`, independent of setting sources.
+ * copies into the workspace's `.claude/skills` (read through the `project`
+ * source) nor the operator's `~/.claude/skills` (the `user` source). The
+ * Claude Agent SDK's `plugins` option (forwarded by the ACP bridge from
+ * `_meta.claudeCode.options`, like `settingSources`) loads a local plugin
+ * directory as `--plugin-dir`, independent of setting sources.
  *
- * WHAT THE PLUGIN HOLDS. Exactly the bounded set setupAssistantWorkspace would
- * place (resolveBoundedSkillSet: _builtin + pinned + the assistant's
- * enabledSkills, minus disabled and `security.verdict === 'blocked'`), and
- * nothing else: a manifest with a name, version and description, and
- * `skills/`. No hooks, MCP servers, commands, agents, output styles or
- * settings - every plugin surface that could run code or grant permissions
- * is absent, and the SDK is told to skip MCP discovery for it as well.
+ * WHAT THE PLUGIN HOLDS. The bounded set setupAssistantWorkspace would place
+ * (resolveBoundedSkillSet: _builtin + pinned + the assistant's enabledSkills,
+ * minus disabled and `security.verdict === 'blocked'`), and nothing else: a
+ * manifest with a name, version and description, and `skills/`. No hooks, MCP
+ * servers, commands, agents, output styles or settings - every plugin surface
+ * that could run code or grant permissions is absent, and the SDK is told to
+ * skip MCP discovery for it as well.
+ *
+ * WHERE A SKILL COMES FROM (resolveLadderedSkillSource). Wayland's own copies
+ * first. A skill the assistant enables that Wayland has no copy of - the pack
+ * skills the `user` source used to provide - falls back to:
+ *  - `<ns>:<x>` (e.g. `contractor-os:line-item-pricing`): the Wayland-owned
+ *    copy of that plugin's skills at `<dataDir>/skill-sources/<ns>/skills/<x>`
+ *    (see scripts/refresh-skill-source.mjs), else a same-named
+ *    `~/.claude/skills/<x>` (logged);
+ *  - a plain name: `~/.claude/skills/<name>`.
+ * A fallback must resolve (realpath) to a directory INSIDE its resolved root,
+ * so an entry symlinked out of that root is refused, and its name must not be
+ * blocked in the skill library.
  *
  * A skill's own SKILL.md frontmatter can ALSO carry hooks, `allowed-tools`
  * (tools usable without asking while the skill is active - i.e. past the
  * ladder's permission gate), `shell`, `agent`, `context` and MCP servers.
  * Only descriptive keys are kept (SKILL_FRONTMATTER_KEYS); a SKILL.md whose
- * frontmatter cannot be parsed drops the whole skill.
+ * frontmatter cannot be parsed drops the whole skill. Its `name` is set to the
+ * name the assistant enabled, so the session sees `wayland-skills:<that name>`.
+ * Inside a skill only regular files and directories are copied; a symlinked
+ * file is copied only when it resolves inside the skill.
  *
  * WHERE IT LIVES. Under Wayland's data dir, never inside the agent's
  * workspace; rebuilt from scratch for every session and left read-only.
  */
 
 import { getDataPath } from '@process/utils/utils';
-import { resolveBoundedSkillSet, type BoundedSkillSetOptions } from '@process/utils/initAgent';
+import { getBuiltinSkillsCopyDir } from '@process/utils/initStorage';
+import { resolveBoundedSkillSet, type BoundedSkillSetOptions, type BoundedSkillSource } from '@process/utils/initAgent';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import yaml from 'js-yaml';
 
@@ -57,9 +75,47 @@ export const SKILL_FRONTMATTER_KEYS = [
 
 const FRONTMATTER_RE = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
 
+/** Where a plugin skill was copied from. */
+export type LadderedSkillSourceKind =
+  | 'builtin' // config/builtin-skills/_builtin
+  | 'bundled' // config/builtin-skills/<name>
+  | 'library' // config/skills/<name>
+  | 'extra' // an extra skill path (cron job skills)
+  | 'claude-skills' // ~/.claude/skills/<name>
+  | 'plugin-copy'; // <dataDir>/skill-sources/<ns>/skills/<x>
+
+/** One skill in a built plugin. */
+export type LadderedSkillEntry = {
+  /** The name the assistant enabled (e.g. `contractor-os:line-item-pricing`). */
+  requested: string;
+  /** The name the Claude session lists it under. */
+  sessionName: string;
+  source: LadderedSkillSourceKind;
+  sourceDir: string;
+};
+
+export type LadderedSkillPlugin = { path: string; skills: LadderedSkillEntry[] };
+
+/** Roots the fallbacks resolve against (test seam). */
+export type LadderedSkillRoots = {
+  /** `~/.claude/skills` */
+  claudeSkillsDir: string;
+  /** `<dataDir>/skill-sources` */
+  skillSourcesDir: string;
+};
+
 /** Root under which per-session plugin dirs are built. */
 export function ladderedSkillPluginRoot(): string {
   return path.join(getDataPath(), 'laddered-skill-plugins');
+}
+
+/** Wayland-owned copies of third-party plugins' skills (`<ns>/skills/<x>`). */
+export function skillSourcesRoot(): string {
+  return path.join(getDataPath(), 'skill-sources');
+}
+
+function defaultRoots(): LadderedSkillRoots {
+  return { claudeSkillsDir: path.join(os.homedir(), '.claude', 'skills'), skillSourcesDir: skillSourcesRoot() };
 }
 
 /** The `_meta.claudeCode.options` entry that loads a built plugin dir. */
@@ -70,9 +126,23 @@ export function ladderedSkillPluginOption(pluginDir: string): {
 }
 
 /**
- * Build the plugin dir for one session and return its path, or `undefined`
- * when `backend` is not Claude. Any previous build under the same key is
- * removed first.
+ * A first-message note telling the model the names its skills are listed
+ * under in this session (its instructions name them without the plugin
+ * prefix). Empty when the plugin holds no skills.
+ */
+export function describeLadderedSkills(skills: readonly LadderedSkillEntry[]): string {
+  if (skills.length === 0) return '';
+  const lines = skills.map((skill) => `- \`${skill.requested}\` → \`${skill.sessionName}\``);
+  return [
+    '[Skills in this session]',
+    'Your skills are loaded as a plugin. Invoke a skill your instructions name by its session name:',
+    ...lines,
+  ].join('\n');
+}
+
+/**
+ * Build the plugin dir for one session, or `undefined` when `backend` is not
+ * Claude. Any previous build under the same key is removed first.
  */
 export async function buildLadderedSkillPlugin(
   options: BoundedSkillSetOptions & {
@@ -81,15 +151,21 @@ export async function buildLadderedSkillPlugin(
     sessionKey: string;
     /** Test seam; defaults to ladderedSkillPluginRoot(). */
     rootDir?: string;
+    /** Test seam; defaults to ~/.claude/skills and <dataDir>/skill-sources. */
+    roots?: LadderedSkillRoots;
   }
-): Promise<string | undefined> {
+): Promise<LadderedSkillPlugin | undefined> {
   if (options.backend !== 'claude') return undefined;
   const root = options.rootDir ?? ladderedSkillPluginRoot();
   const pluginDir = path.join(root, options.sessionKey.replace(/[^A-Za-z0-9._-]/g, '_'));
   await removeLadderedSkillPlugin(pluginDir);
 
   const libraryEntries = options._libraryEntries ?? (await loadLibraryEntries());
+  const blocked = new Set(
+    (libraryEntries ?? []).filter((entry) => entry.security?.verdict === 'blocked').map((entry) => entry.name)
+  );
   const skills = await resolveBoundedSkillSet({ ...options, _libraryEntries: libraryEntries });
+  const roots = options.roots ?? defaultRoots();
 
   await fs.mkdir(path.join(pluginDir, '.claude-plugin'), { recursive: true });
   await fs.writeFile(
@@ -107,13 +183,14 @@ export async function buildLadderedSkillPlugin(
   const skillsDir = path.join(pluginDir, 'skills');
   await fs.mkdir(skillsDir);
 
+  const placed: LadderedSkillEntry[] = [];
   for (const skill of skills) {
-    // A name that is not a single path segment could escape skills/.
-    if (!skill.name || skill.name === '.' || skill.name === '..' || /[\\/]/.test(skill.name)) continue;
-    const target = path.join(skillsDir, skill.name);
-    const source = await fs.stat(skill.sourceDir).catch((): undefined => undefined);
-    if (!source?.isDirectory()) {
-      console.warn(`[ladderedSkillPlugin] ${skill.label} directory not found: ${skill.sourceDir}`);
+    const dirName = pluginSkillDirName(skill.name);
+    if (!dirName) continue;
+    const target = path.join(skillsDir, dirName);
+    const source = await resolveLadderedSkillSource(skill, roots, blocked);
+    if (!source) {
+      console.warn(`[ladderedSkillPlugin] ${skill.label} directory not found: ${skill.name}`);
       continue;
     }
     const taken = await fs.lstat(target).then(
@@ -122,7 +199,13 @@ export async function buildLadderedSkillPlugin(
     );
     if (taken) continue; // first source under this name wins, as in the workspace
     try {
-      await copySkillTree(skill.sourceDir, target);
+      await copySkillTree(source.dir, target, await fs.realpath(source.dir), skill.name);
+      placed.push({
+        requested: skill.name,
+        sessionName: `${LADDERED_SKILL_PLUGIN_NAME}:${skill.name}`,
+        source: source.kind,
+        sourceDir: source.dir,
+      });
     } catch (error) {
       console.warn(`[ladderedSkillPlugin] dropped ${skill.label} ${skill.name}:`, error);
       await removeLadderedSkillPlugin(target);
@@ -130,13 +213,81 @@ export async function buildLadderedSkillPlugin(
   }
 
   await makeReadOnly(pluginDir);
-  return pluginDir;
+  return { path: pluginDir, skills: placed };
 }
 
 /** Remove a plugin dir built by buildLadderedSkillPlugin (read-only dirs included). */
 export async function removeLadderedSkillPlugin(dir: string): Promise<void> {
   await makeWritable(dir);
   await fs.rm(dir, { recursive: true, force: true });
+}
+
+/**
+ * Where one bounded-set skill is copied from, or `undefined` when there is no
+ * acceptable source. See the module comment for the order.
+ */
+export async function resolveLadderedSkillSource(
+  skill: BoundedSkillSource,
+  roots: LadderedSkillRoots,
+  blocked: ReadonlySet<string> = new Set()
+): Promise<{ dir: string; kind: LadderedSkillSourceKind } | undefined> {
+  if (skill.label !== 'skill') {
+    if (!(await isDirectory(skill.sourceDir))) return undefined;
+    return { dir: skill.sourceDir, kind: skill.label === 'builtin skill' ? 'builtin' : 'extra' };
+  }
+
+  const colon = skill.name.indexOf(':');
+  if (colon < 0) {
+    if (await isDirectory(skill.sourceDir)) {
+      const bundled = isInside(path.resolve(getBuiltinSkillsCopyDir()), path.resolve(skill.sourceDir));
+      return { dir: skill.sourceDir, kind: bundled ? 'bundled' : 'library' };
+    }
+    const dir = await containedSkillDir(roots.claudeSkillsDir, skill.name);
+    return dir ? { dir, kind: 'claude-skills' } : undefined;
+  }
+
+  const namespace = skill.name.slice(0, colon);
+  const name = skill.name.slice(colon + 1);
+  if (blocked.has(name)) return undefined;
+  if (isSegment(namespace)) {
+    const dir = await containedSkillDir(path.join(roots.skillSourcesDir, namespace, 'skills'), name);
+    if (dir) return { dir, kind: 'plugin-copy' };
+  }
+  const dir = await containedSkillDir(roots.claudeSkillsDir, name);
+  if (!dir) return undefined;
+  console.warn(`[ladderedSkillPlugin] ${skill.name} has no ${namespace} copy; using ~/.claude/skills/${name}`);
+  return { dir, kind: 'claude-skills' };
+}
+
+/** `<root>/<name>` when it is a directory whose realpath stays inside realpath(root). */
+async function containedSkillDir(root: string, name: string): Promise<string | undefined> {
+  if (!isSegment(name)) return undefined;
+  try {
+    const realRoot = await fs.realpath(root);
+    const real = await fs.realpath(path.join(root, name));
+    if (!isInside(realRoot, real) || !(await isDirectory(real))) return undefined;
+    return real;
+  } catch {
+    return undefined;
+  }
+}
+
+function isInside(root: string, candidate: string): boolean {
+  return candidate.startsWith(root + path.sep);
+}
+
+function isSegment(name: string): boolean {
+  return name.length > 0 && name !== '.' && name !== '..' && !/[\\/:]/.test(name);
+}
+
+/** The directory a skill gets under skills/ (`:` is not portable in a file name). */
+function pluginSkillDirName(name: string): string | undefined {
+  const dirName = name.replace(/:/g, '__');
+  return dirName && dirName !== '.' && dirName !== '..' && !/[\\/]/.test(dirName) ? dirName : undefined;
+}
+
+async function isDirectory(dir: string): Promise<boolean> {
+  return (await fs.stat(dir).catch((): undefined => undefined))?.isDirectory() ?? false;
 }
 
 async function loadLibraryEntries(): Promise<BoundedSkillSetOptions['_libraryEntries']> {
@@ -150,10 +301,11 @@ async function loadLibraryEntries(): Promise<BoundedSkillSetOptions['_libraryEnt
 
 /**
  * Copy a skill directory: regular files and directories only (a symlinked file
- * is copied as its content, a symlinked directory is skipped), and every
- * SKILL.md reduced to descriptive frontmatter.
+ * is copied as its content when it resolves inside `realRoot`; any other
+ * symlink is skipped), and every SKILL.md reduced to descriptive frontmatter.
+ * The top-level SKILL.md is renamed to `skillName`.
  */
-async function copySkillTree(src: string, dest: string): Promise<void> {
+async function copySkillTree(src: string, dest: string, realRoot: string, skillName?: string): Promise<void> {
   await fs.mkdir(dest, { recursive: true });
   for (const entry of await fs.readdir(src, { withFileTypes: true })) {
     const from = path.join(src, entry.name);
@@ -161,15 +313,17 @@ async function copySkillTree(src: string, dest: string): Promise<void> {
     let isDir = entry.isDirectory();
     let isFile = entry.isFile();
     if (entry.isSymbolicLink()) {
-      const target = await fs.stat(from).catch((): undefined => undefined);
+      const real = await fs.realpath(from).catch((): undefined => undefined);
+      const target = real && isInside(realRoot, real) ? await fs.stat(real) : undefined;
       isDir = false;
       isFile = target?.isFile() ?? false;
     }
     if (isDir) {
-      await copySkillTree(from, to);
+      await copySkillTree(from, to, realRoot);
     } else if (isFile) {
       if (entry.name.toLowerCase() === 'skill.md') {
-        await fs.writeFile(to, sanitizeSkillMarkdown(await fs.readFile(from, 'utf8')));
+        const override = skillName && entry.name === 'SKILL.md' ? skillName : undefined;
+        await fs.writeFile(to, sanitizeSkillMarkdown(await fs.readFile(from, 'utf8'), override));
       } else {
         await fs.copyFile(from, to);
       }
@@ -178,21 +332,23 @@ async function copySkillTree(src: string, dest: string): Promise<void> {
 }
 
 /**
- * SKILL.md with only SKILL_FRONTMATTER_KEYS left in its frontmatter. Throws
- * when the frontmatter is not a YAML mapping, so the skill is dropped.
+ * SKILL.md with only SKILL_FRONTMATTER_KEYS left in its frontmatter (and
+ * `name` set to `name` when given). Throws when the frontmatter is not a YAML
+ * mapping, so the skill is dropped.
  */
-export function sanitizeSkillMarkdown(content: string): string {
+export function sanitizeSkillMarkdown(content: string, name?: string): string {
   const match = FRONTMATTER_RE.exec(content);
-  if (!match) return content;
-  const parsed = yaml.load(match[1]);
-  if (parsed === null || parsed === undefined) return content.slice(match[0].length);
-  if (typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('SKILL.md frontmatter is not a mapping');
+  const body = match ? content.slice(match[0].length) : content;
+  const parsed = match ? yaml.load(match[1]) : undefined;
+  if (parsed !== null && parsed !== undefined && (typeof parsed !== 'object' || Array.isArray(parsed))) {
+    throw new Error('SKILL.md frontmatter is not a mapping');
+  }
   const kept: Record<string, unknown> = {};
   for (const key of SKILL_FRONTMATTER_KEYS) {
-    const value = (parsed as Record<string, unknown>)[key];
+    const value = (parsed as Record<string, unknown> | null | undefined)?.[key];
     if (isPlainValue(value)) kept[key] = value;
   }
-  const body = content.slice(match[0].length);
+  if (name) kept.name = name;
   return Object.keys(kept).length > 0 ? `---\n${yaml.dump(kept, { lineWidth: -1 })}---\n${body}` : body;
 }
 
