@@ -29,6 +29,7 @@ import {
   LADDERED_SKILL_PLUGIN_NAME,
   buildLadderedSkillPlugin,
   describeLadderedSkills,
+  USER_SKILL_ROOTS,
   removeLadderedSkillPlugin,
   sanitizeSkillMarkdown,
 } from '@process/services/jarvis/ladderedSkillPlugin';
@@ -40,6 +41,7 @@ const pluginRoot = path.join(roots.base, 'plugins');
 const claudeSkills = path.join(roots.base, 'home', '.claude', 'skills');
 const skillSources = path.join(roots.base, 'data', 'skill-sources');
 const outside = path.join(roots.base, 'outside');
+const coreSkills = path.join(roots.base, 'home', '.config', 'wayland-core', 'skills');
 
 function skill(dir: string, name: string, frontmatter = `name: ${name}\ndescription: ${name} skill`) {
   fs.mkdirSync(path.join(dir, name), { recursive: true });
@@ -63,8 +65,11 @@ const noPrefs = { pinned: [], disabled: [], revision: 0 };
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  for (const dir of [config, claudeSkills, skillSources, outside]) fs.rmSync(dir, { recursive: true, force: true });
+  for (const dir of [config, claudeSkills, coreSkills, skillSources, outside]) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
   fs.mkdirSync(claudeSkills, { recursive: true });
+  fs.mkdirSync(coreSkills, { recursive: true });
   fs.mkdirSync(skillSources, { recursive: true });
   skill(path.join(config, 'builtin-skills', '_builtin'), 'cron');
   skill(path.join(config, 'builtin-skills', '_builtin'), 'office-cli');
@@ -89,7 +94,13 @@ async function buildFull(extra: Partial<Parameters<typeof buildLadderedSkillPlug
     enabledSkills: ['pdf', 'crew-core-brand-context', 'quarantined'],
     _skillsPreferences: noPrefs,
     _libraryEntries: [{ name: 'quarantined', security: { verdict: 'blocked' } }],
-    roots: { claudeSkillsDir: claudeSkills, skillSourcesDir: skillSources },
+    roots: {
+      userSkillRoots: [
+        { dir: claudeSkills, kind: 'claude-skills' },
+        { dir: coreSkills, kind: 'wayland-core-skills' },
+      ],
+      skillSourcesDir: skillSources,
+    },
     ...extra,
   });
   if (!plugin) throw new Error('no plugin');
@@ -237,6 +248,42 @@ describe('skills the assistant enables that Wayland has no copy of', () => {
     const plugin = await buildFull({ enabledSkills: ['linked-out'] });
     expect(plugin.skills.map((s) => s.requested)).not.toContain('linked-out');
     expect(fs.existsSync(path.join(plugin.path, 'skills', 'linked-out'))).toBe(false);
+  });
+
+  it('accepts a ~/.claude/skills entry symlinked into ~/.config/wayland-core/skills, and looks there by name', async () => {
+    skill(coreSkills, 'openconstructionerp-ops');
+    skill(coreSkills, 'warrior-stack-architecture');
+    fs.symlinkSync(
+      path.join(coreSkills, 'openconstructionerp-ops'),
+      path.join(claudeSkills, 'openconstructionerp-ops')
+    );
+    const plugin = await buildFull({ enabledSkills: ['openconstructionerp-ops', 'warrior-stack-architecture'] });
+    expect(plugin.skills.filter((s) => s.requested !== 'cron' && s.requested !== 'office-cli')).toEqual([
+      {
+        requested: 'openconstructionerp-ops',
+        sessionName: 'wayland-skills:openconstructionerp-ops',
+        source: 'claude-skills',
+        sourceDir: fs.realpathSync(path.join(coreSkills, 'openconstructionerp-ops')),
+      },
+      {
+        requested: 'warrior-stack-architecture',
+        sessionName: 'wayland-skills:warrior-stack-architecture',
+        source: 'wayland-core-skills',
+        sourceDir: fs.realpathSync(path.join(coreSkills, 'warrior-stack-architecture')),
+      },
+    ]);
+  });
+
+  it('a wayland-core entry symlinked outside both roots is refused too', async () => {
+    skill(outside, 'escaped');
+    fs.symlinkSync(path.join(outside, 'escaped'), path.join(coreSkills, 'escaped'));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const plugin = await buildFull({ enabledSkills: ['escaped'] });
+    expect(plugin.skills.map((s) => s.requested)).not.toContain('escaped');
+  });
+
+  it('only the two listed roots are allowed', () => {
+    expect(USER_SKILL_ROOTS.map((root) => root.dir)).toEqual(['.claude/skills', '.config/wayland-core/skills']);
   });
 
   it('accepts a ~/.claude/skills symlink that stays inside the root', async () => {

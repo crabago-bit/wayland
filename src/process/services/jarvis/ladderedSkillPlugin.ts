@@ -29,12 +29,12 @@
  * skills the `user` source used to provide - falls back to:
  *  - `<ns>:<x>` (e.g. `contractor-os:line-item-pricing`): the Wayland-owned
  *    copy of that plugin's skills at `<dataDir>/skill-sources/<ns>/skills/<x>`
- *    (see scripts/refresh-skill-source.mjs), else a same-named
- *    `~/.claude/skills/<x>` (logged);
- *  - a plain name: `~/.claude/skills/<name>`.
- * A fallback must resolve (realpath) to a directory INSIDE its resolved root,
- * so an entry symlinked out of that root is refused, and its name must not be
- * blocked in the skill library.
+ *    (see scripts/refresh-skill-source.mjs), else a same-named skill in the
+ *    USER_SKILL_ROOTS (logged);
+ *  - a plain name: `<root>/<name>` for each of USER_SKILL_ROOTS, in order.
+ * A fallback must resolve (realpath) to a directory INSIDE one of the allowed
+ * roots (realpath'd), so an entry symlinked anywhere else is refused, and its
+ * name must not be blocked in the skill library.
  *
  * A skill's own SKILL.md frontmatter can ALSO carry hooks, `allowed-tools`
  * (tools usable without asking while the skill is active - i.e. past the
@@ -82,6 +82,7 @@ export type LadderedSkillSourceKind =
   | 'library' // config/skills/<name>
   | 'extra' // an extra skill path (cron job skills)
   | 'claude-skills' // ~/.claude/skills/<name>
+  | 'wayland-core-skills' // ~/.config/wayland-core/skills/<name>
   | 'plugin-copy'; // <dataDir>/skill-sources/<ns>/skills/<x>
 
 /** One skill in a built plugin. */
@@ -96,10 +97,20 @@ export type LadderedSkillEntry = {
 
 export type LadderedSkillPlugin = { path: string; skills: LadderedSkillEntry[] };
 
+/**
+ * The ONLY folders outside Wayland a laddered skill may come from, in lookup
+ * order (relative to the home directory). A skill found in one may be a
+ * symlink into another, never anywhere else.
+ */
+export const USER_SKILL_ROOTS = [
+  { dir: '.claude/skills', kind: 'claude-skills' },
+  { dir: '.config/wayland-core/skills', kind: 'wayland-core-skills' },
+] as const satisfies ReadonlyArray<{ dir: string; kind: LadderedSkillSourceKind }>;
+
 /** Roots the fallbacks resolve against (test seam). */
 export type LadderedSkillRoots = {
-  /** `~/.claude/skills` */
-  claudeSkillsDir: string;
+  /** USER_SKILL_ROOTS as absolute paths, in lookup order. */
+  userSkillRoots: ReadonlyArray<{ dir: string; kind: LadderedSkillSourceKind }>;
   /** `<dataDir>/skill-sources` */
   skillSourcesDir: string;
 };
@@ -115,7 +126,10 @@ export function skillSourcesRoot(): string {
 }
 
 function defaultRoots(): LadderedSkillRoots {
-  return { claudeSkillsDir: path.join(os.homedir(), '.claude', 'skills'), skillSourcesDir: skillSourcesRoot() };
+  return {
+    userSkillRoots: USER_SKILL_ROOTS.map((root) => ({ dir: path.join(os.homedir(), root.dir), kind: root.kind })),
+    skillSourcesDir: skillSourcesRoot(),
+  };
 }
 
 /** The `_meta.claudeCode.options` entry that loads a built plugin dir. */
@@ -242,31 +256,43 @@ export async function resolveLadderedSkillSource(
       const bundled = isInside(path.resolve(getBuiltinSkillsCopyDir()), path.resolve(skill.sourceDir));
       return { dir: skill.sourceDir, kind: bundled ? 'bundled' : 'library' };
     }
-    const dir = await containedSkillDir(roots.claudeSkillsDir, skill.name);
-    return dir ? { dir, kind: 'claude-skills' } : undefined;
+    return userSkillDir(roots, skill.name);
   }
 
   const namespace = skill.name.slice(0, colon);
   const name = skill.name.slice(colon + 1);
   if (blocked.has(name)) return undefined;
   if (isSegment(namespace)) {
-    const dir = await containedSkillDir(path.join(roots.skillSourcesDir, namespace, 'skills'), name);
+    const pluginRoot = path.join(roots.skillSourcesDir, namespace, 'skills');
+    const dir = await containedSkillDir(pluginRoot, name, [pluginRoot]);
     if (dir) return { dir, kind: 'plugin-copy' };
   }
-  const dir = await containedSkillDir(roots.claudeSkillsDir, name);
-  if (!dir) return undefined;
-  console.warn(`[ladderedSkillPlugin] ${skill.name} has no ${namespace} copy; using ~/.claude/skills/${name}`);
-  return { dir, kind: 'claude-skills' };
+  const found = await userSkillDir(roots, name);
+  if (found) console.warn(`[ladderedSkillPlugin] ${skill.name} has no ${namespace} copy; using ${found.dir}`);
+  return found;
 }
 
-/** `<root>/<name>` when it is a directory whose realpath stays inside realpath(root). */
-async function containedSkillDir(root: string, name: string): Promise<string | undefined> {
+/** The first `<root>/<name>` across the user skill roots, contained in any of them. */
+async function userSkillDir(
+  roots: LadderedSkillRoots,
+  name: string
+): Promise<{ dir: string; kind: LadderedSkillSourceKind } | undefined> {
+  const allowed = roots.userSkillRoots.map((root) => root.dir);
+  for (const root of roots.userSkillRoots) {
+    const dir = await containedSkillDir(root.dir, name, allowed);
+    if (dir) return { dir, kind: root.kind };
+  }
+  return undefined;
+}
+
+/** `<root>/<name>` when it is a directory whose realpath is inside realpath() of an allowed root. */
+async function containedSkillDir(root: string, name: string, allowed: readonly string[]): Promise<string | undefined> {
   if (!isSegment(name)) return undefined;
   try {
-    const realRoot = await fs.realpath(root);
     const real = await fs.realpath(path.join(root, name));
-    if (!isInside(realRoot, real) || !(await isDirectory(real))) return undefined;
-    return real;
+    const realRoots = await Promise.all(allowed.map((dir) => fs.realpath(dir).catch((): undefined => undefined)));
+    if (!realRoots.some((realRoot) => realRoot && isInside(realRoot, real))) return undefined;
+    return (await isDirectory(real)) ? real : undefined;
   } catch {
     return undefined;
   }
