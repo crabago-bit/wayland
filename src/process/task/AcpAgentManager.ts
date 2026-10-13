@@ -2087,6 +2087,10 @@ ${collectedResponses.join('\n')}`;
           // rung key must fall back to it, or the ladder reads the bare backend
           // key. Separate field so nothing else customAgentId drives changes.
           autonomyAgentId: data.customAgentId || data.presetAssistantId,
+          // A laddered Claude session loads no setting source, so it gets these
+          // as a Wayland-owned skill plugin instead of the workspace copies.
+          enabledSkills: data.enabledSkills,
+          excludeBuiltinSkills: data.excludeBuiltinSkills,
           // Forward team MCP stdio config so AcpAgent.loadBuiltinSessionMcpServers() can inject it
           teamMcpStdioConfig: (data as unknown as Record<string, unknown>).teamMcpStdioConfig as
             | { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> }

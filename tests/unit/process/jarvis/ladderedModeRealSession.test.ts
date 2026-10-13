@@ -136,6 +136,11 @@ vi.mock('@process/services/jarvis/approvalsLog', async (importOriginal) => ({
   appendApprovalTo: vi.fn(),
 }));
 vi.mock('@process/services/jarvis/hardFloor', () => ({ readHardFloorKeywords: () => [] }));
+// The skill plugin is built on disk; its own tests cover it.
+vi.mock('@process/services/jarvis/ladderedSkillPlugin', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@process/services/jarvis/ladderedSkillPlugin')>()),
+  buildLadderedSkillPlugin: async () => undefined,
+}));
 
 const editRequest = (callId: string): RequestPermissionRequest => ({
   sessionId: 's-1',

@@ -81,7 +81,9 @@ export async function resolveConfiguredSpawnAutonomy(agent: {
  *    agent that can write files (rung 3+) could drop an allow-listing
  *    `.claude/settings.json` into its workspace by a path the write guard
  *    cannot see (`cp evil.json .claude/`, a path built at runtime). The cost
- *    is that the workspace CLAUDE.md and `.claude/skills` are not loaded;
+ *    is that the workspace CLAUDE.md and `.claude/skills` are not loaded (the
+ *    assistant's skills come back as a Wayland-owned plugin, passed by the
+ *    caller in `extraOptions` - see ladderedSkillPlugin);
  *  - credentials are NOT settings: CLAUDE_CONFIG_DIR is untouched, nothing is
  *    copied or linked, and the Max subscription login keeps working.
  *

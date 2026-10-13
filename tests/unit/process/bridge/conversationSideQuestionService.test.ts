@@ -17,8 +17,12 @@ const {
   mockClose,
   mockOnDisconnect,
   mockProcessConfigGet,
+  mockBuildSkillPlugin,
+  mockRemoveSkillPlugin,
   handlersRef,
 } = vi.hoisted(() => ({
+  mockBuildSkillPlugin: vi.fn(),
+  mockRemoveSkillPlugin: vi.fn(),
   mockStart: vi.fn(),
   mockForkSession: vi.fn(),
   mockPrompt: vi.fn(),
@@ -43,6 +47,12 @@ vi.mock('@process/acp/compat/LegacyConnectorFactory', () => ({
       };
     }
   },
+}));
+
+vi.mock('@process/services/jarvis/ladderedSkillPlugin', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@process/services/jarvis/ladderedSkillPlugin')>()),
+  buildLadderedSkillPlugin: (...args: unknown[]) => mockBuildSkillPlugin(...args),
+  removeLadderedSkillPlugin: (...args: unknown[]) => mockRemoveSkillPlugin(...args),
 }));
 
 vi.mock('@process/utils/initStorage', () => ({
@@ -141,6 +151,8 @@ describe('ConversationSideQuestionService', () => {
     mockCancel.mockResolvedValue(undefined);
     mockClose.mockResolvedValue(undefined);
     mockOnDisconnect.mockImplementation(() => {});
+    mockBuildSkillPlugin.mockImplementation(async (opts: { sessionKey: string }) => `/data/plugins/${opts.sessionKey}`);
+    mockRemoveSkillPlugin.mockResolvedValue(undefined);
     mockProcessConfigGet.mockImplementation(async (key: string) => {
       if (key === 'acp.config') {
         return { claude: { cliPath: 'claude' } };
@@ -302,6 +314,7 @@ describe('ConversationSideQuestionService', () => {
         backend: 'claude',
         workspace: '/tmp/jarvis-btw-nonexistent-ws',
         presetAssistantId: 'pack-warrior-estimator',
+        enabledSkills: ['crew-core-brand-context'],
       },
     } as Partial<TChatConversation>);
     const service = new ConversationSideQuestionService(makeService(conversation));
@@ -309,5 +322,25 @@ describe('ConversationSideQuestionService', () => {
     const params = mockForkSession.mock.calls[0][0] as { meta?: { claudeCode: { options: Record<string, unknown> } } };
     expect(params.meta?.claudeCode.options.tools).toEqual([]);
     expect(params.meta?.claudeCode.options.settingSources).toEqual([]);
+    // Its own copy of the session's skill plugin, removed once the fork is done.
+    expect(mockBuildSkillPlugin).toHaveBeenCalledWith({
+      backend: 'claude',
+      sessionKey: 'conv-1.btw',
+      enabledSkills: ['crew-core-brand-context'],
+      excludeBuiltinSkills: undefined,
+    });
+    expect(params.meta?.claudeCode.options.plugins).toEqual([
+      { type: 'local', path: '/data/plugins/conv-1.btw', skipMcpDiscovery: true },
+    ]);
+    expect(mockRemoveSkillPlugin).toHaveBeenCalledWith('/data/plugins/conv-1.btw');
+  });
+
+  it('a non-laddered fork gets no skill plugin and no _meta (unchanged)', async () => {
+    const service = new ConversationSideQuestionService(makeService(makeClaudeConversation()));
+    await service.ask('conv-1', 'what file did we use?');
+    const params = mockForkSession.mock.calls[0][0] as { meta?: unknown };
+    expect(params.meta).toBeUndefined();
+    expect(mockBuildSkillPlugin).not.toHaveBeenCalled();
+    expect(mockRemoveSkillPlugin).not.toHaveBeenCalled();
   });
 });

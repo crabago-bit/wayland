@@ -22,6 +22,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ProcessAcpClient, withClaudeCodeOptions } from '@process/acp/infra/ProcessAcpClient';
 import { resolveLadderedSessionMeta, verifyLadderedBridge } from '@process/services/jarvis/sessionAutonomy';
+import { ladderedSkillPluginOption } from '@process/services/jarvis/ladderedSkillPlugin';
 
 const AGENT = `
 const fs = require('node:fs');
@@ -95,6 +96,18 @@ describe('laddered Claude sessions start without user/local Claude Code settings
     // The fork keeps the override next to its own `resume`.
     expect(calls[2].params._meta).toEqual({
       claudeCode: { options: { settingSources: [], resume: 's-1' } },
+    });
+  }, 20_000);
+
+  it('carries the skill plugin on session/new, session/load and the fork', async () => {
+    const plugin = { type: 'local', path: '/data/laddered-skill-plugins/conv-1', skipMcpDiscovery: true };
+    const meta = await resolveLadderedSessionMeta('claude', ladderedSkillPluginOption(plugin.path));
+    expect(meta).toEqual({ claudeCode: { options: { plugins: [plugin], settingSources: [] } } });
+    const calls = await record(meta);
+    expect(calls[0].params._meta).toEqual(meta);
+    expect(calls[1].params._meta).toEqual(meta);
+    expect(calls[2].params._meta).toEqual({
+      claudeCode: { options: { plugins: [plugin], settingSources: [], resume: 's-1' } },
     });
   }, 20_000);
 
