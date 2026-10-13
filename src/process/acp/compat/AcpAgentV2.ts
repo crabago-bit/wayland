@@ -146,7 +146,7 @@ export class AcpAgentV2 {
   // legacy path exists: the live projection is always minted against a current
   // correlated launch. Falls back to a self-minted identity only when unset.
   private readonly mcpPublicationBinding?: McpSessionPublicationBinding;
-  /** `custom:<id>` half of the JARVIS autonomy key; see `autonomyAgentKey`. */
+  /** `custom:<id>` half of the JARVIS autonomy key (custom OR preset assistant id); see `autonomyAgentKey`. */
   private readonly customAgentId?: string;
   /**
    * The JARVIS autonomy ladder for this agent, resolved once per session in
@@ -211,7 +211,7 @@ export class AcpAgentV2 {
     this.onAvailableCommandsUpdate = config.onAvailableCommandsUpdate;
     this.onMcpProjection = config.onMcpProjection;
     this.mcpPublicationBinding = (config as { mcpPublication?: McpSessionPublicationBinding }).mcpPublication;
-    this.customAgentId = config.extra?.customAgentId;
+    this.customAgentId = config.extra?.autonomyAgentId ?? config.extra?.customAgentId;
     this.agentConfig = toAgentConfig(config);
   }
 
