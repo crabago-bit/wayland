@@ -84,9 +84,11 @@ const buildSkillPlugin = vi.fn(async (opts: { sessionKey: string }) => ({
   path: `/data/skill-plugins/${opts.sessionKey}`,
   skills: [pluginSkill],
 }));
+const removeSkillPlugin = vi.fn(async (_dir: string) => {});
 vi.mock('@process/services/jarvis/ladderedSkillPlugin', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@process/services/jarvis/ladderedSkillPlugin')>()),
   buildLadderedSkillPlugin: (opts: { sessionKey: string }) => buildSkillPlugin(opts),
+  removeLadderedSkillPlugin: (dir: string) => removeSkillPlugin(dir),
 }));
 
 const PACK = 'pack-warrior-estimator';
@@ -137,6 +139,7 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     sessionStop.mockReset().mockResolvedValue(undefined);
     initializeResult = VERIFIED_INIT;
     buildSkillPlugin.mockClear();
+    removeSkillPlugin.mockClear();
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -174,6 +177,12 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
           settingSources: [],
           plugins: [{ type: 'local', path: '/data/skill-plugins/conv-1', skipMcpDiscovery: true }],
         },
+      },
+      // The names the session lists the skills under, on every new/load/fork.
+      systemPrompt: {
+        append: expect.stringContaining(
+          '`contractor-os:line-item-pricing` → `wayland-skills:contractor-os:line-item-pricing`'
+        ),
       },
     });
 
@@ -240,10 +249,25 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     });
   });
 
-  it('exposes the plugin’s skills with the names the session lists them under', async () => {
+  it('kill() removes the plugin dir and the next start() rebuilds it before the session restarts', async () => {
     stubStorage({ [`custom:${PACK}`]: 3 });
     const agent = await startAgent({ customAgentId: PACK });
-    expect(agent.getLadderedSkills()).toEqual([pluginSkill]);
+    expect(buildSkillPlugin).toHaveBeenCalledTimes(1);
+    await agent.kill();
+    expect(removeSkillPlugin).toHaveBeenCalledWith('/data/skill-plugins/conv-1');
+    await agent.kill(); // a second kill has nothing left to remove
+    expect(removeSkillPlugin).toHaveBeenCalledTimes(1);
+    buildSkillPlugin.mockResolvedValueOnce({ path: '/data/skill-plugins/conv-1.alt', skills: [] });
+    await agent.start();
+    expect(buildSkillPlugin).toHaveBeenCalledTimes(2);
+    expect(capturedConfig.sessionMeta).toEqual({
+      claudeCode: {
+        options: {
+          settingSources: [],
+          plugins: [{ type: 'local', path: '/data/skill-plugins/conv-1.alt', skipMcpDiscovery: true }],
+        },
+      },
+    });
   });
 
   it('a skill plugin that fails to build costs only the skills: still laddered, no plugins', async () => {
@@ -267,7 +291,8 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     expect(capturedConfig.yoloMode).toBe(true);
     expect(capturedConfig.sessionMeta).toBeUndefined();
     expect(buildSkillPlugin).not.toHaveBeenCalled();
-    expect(agent.getLadderedSkills()).toBeUndefined();
+    await agent.kill();
+    expect(removeSkillPlugin).not.toHaveBeenCalled();
     void agent.setMode('bypassPermissions');
     expect(sessionSetMode).toHaveBeenCalledWith('bypassPermissions');
   });

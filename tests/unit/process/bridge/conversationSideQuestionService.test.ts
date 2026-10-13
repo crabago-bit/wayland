@@ -326,16 +326,22 @@ describe('ConversationSideQuestionService', () => {
     expect(params.meta?.claudeCode.options.tools).toEqual([]);
     expect(params.meta?.claudeCode.options.settingSources).toEqual([]);
     // Its own copy of the session's skill plugin, removed once the fork is done.
+    // A unique key per fork, so concurrent forks never share (or clobber) a dir.
     expect(mockBuildSkillPlugin).toHaveBeenCalledWith({
       backend: 'claude',
-      sessionKey: 'conv-1.btw',
+      sessionKey: expect.stringMatching(/^conv-1\.btw-[0-9a-f-]{36}$/),
       enabledSkills: ['crew-core-brand-context'],
       excludeBuiltinSkills: undefined,
     });
+    const key = (mockBuildSkillPlugin.mock.calls[0][0] as { sessionKey: string }).sessionKey;
     expect(params.meta?.claudeCode.options.plugins).toEqual([
-      { type: 'local', path: '/data/plugins/conv-1.btw', skipMcpDiscovery: true },
+      { type: 'local', path: `/data/plugins/${key}`, skipMcpDiscovery: true },
     ]);
-    expect(mockRemoveSkillPlugin).toHaveBeenCalledWith('/data/plugins/conv-1.btw');
+    expect(mockRemoveSkillPlugin).toHaveBeenCalledWith(`/data/plugins/${key}`);
+
+    await service.ask('conv-1', 'and another?');
+    const second = (mockBuildSkillPlugin.mock.calls[1][0] as { sessionKey: string }).sessionKey;
+    expect(second).not.toBe(key);
   });
 
   it('a non-laddered fork gets no skill plugin and no _meta (unchanged)', async () => {
