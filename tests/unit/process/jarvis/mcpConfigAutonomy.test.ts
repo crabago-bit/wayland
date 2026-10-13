@@ -20,7 +20,6 @@ import {
 } from '@process/services/mcpServices/builtinMcpRuntime';
 import type { ToolFilterSpawnAutonomy } from '@process/services/mcpServices/builtinMcpRuntime';
 import { createMcpSessionDigestKey } from '@process/services/mcpServices/mcpSessionTruthGate';
-import { wrapWCoreServersWithAutonomy } from '@process/agent/acp/mcpSessionConfig';
 import type { IMcpServer } from '@/common/config/storage';
 
 type Stdio = { name: string; command: string; args: string[]; env: { name: string; value: string }[] };
@@ -151,25 +150,5 @@ describe('McpConfig.projectStorageConfig - JARVIS autonomy ladder', () => {
     expect(local.args.join(' ')).not.toContain(TOOL_FILTER_SCRIPT);
     expect(local.args).not.toContain('--rung');
     expect(remote).toMatchObject({ type: 'http', url: 'https://connector.example/mcp' });
-  });
-});
-
-describe('wrapWCoreServersWithAutonomy - Wayland Core config.toml path', () => {
-  it('rewrites stdio and hosted connectors into shim stdio launches', () => {
-    const [local, remote] = wrapWCoreServersWithAutonomy([stdio(), hosted('sse')], autonomy);
-    expect(local.transport.type).toBe('stdio');
-    const localArgs = (local.transport as { args: string[] }).args;
-    expect(ladderArgs(localArgs).agent).toEqual(['custom:pack-warrior-estimator']);
-    expect(localArgs.slice(localArgs.indexOf('--') + 1)).toEqual(['/usr/bin/ghl-mcp', '--stdio']);
-    expect(remote.transport.type).toBe('stdio');
-    const remoteArgs = (remote.transport as { args: string[] }).args;
-    expect(remoteArgs).toContain('--url-env');
-    expect((remote.transport as { env: Record<string, string> }).env[TOOL_FILTER_URL_ENV]).toBe(
-      'https://connector.example/mcp'
-    );
-    expect((remote.transport as { env: Record<string, string> }).env[TOOL_FILTER_HEADERS_ENV]).toBeDefined();
-    // Identity and selection metadata are preserved.
-    expect(local.name).toBe('warrior-ghl');
-    expect(remote.id).toBe('h-sse');
   });
 });

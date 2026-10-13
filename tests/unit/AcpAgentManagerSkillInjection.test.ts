@@ -317,6 +317,8 @@ describe('AcpAgentManager - first-message skill injection', () => {
     await manager.setModel('flux-reasoning');
     expect(agent.setModelByConfigOption).toHaveBeenLastCalledWith('flux-reasoning');
     expect(internals.fuigoRulesStale).toBe(true);
+  });
+
   it('falls back to prompt injection for supported backend WITH customWorkspace', async () => {
     const manager = createManager({
       backend: 'claude',

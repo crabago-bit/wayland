@@ -21,6 +21,7 @@ import { loadRuntimeMcpServers } from '@process/services/mcpServices/runtimeMcpS
 import { TOOL_FILTER_SCRIPT } from '@process/services/mcpServices/builtinMcpRuntime';
 import { resetAutonomyRungCache } from '@process/services/jarvis/sessionAutonomy';
 import { ProcessConfig } from '@process/utils/initStorage';
+import { McpConfig } from '@process/acp/session/McpConfig';
 import type { IMcpServer } from '@/common/config/storage';
 
 let capturedConfig: AgentConfig;
@@ -117,6 +118,20 @@ function stubStorage(rungs: Record<string, number> | 'throw') {
   }) as never);
 }
 
+/**
+ * The user connectors exactly as SessionLifecycle publishes them: AcpAgentV2
+ * stores the storage source (with the ladder in its request) and the session
+ * projects it against the live initialize capabilities.
+ */
+function projectedServers() {
+  const source = capturedConfig.mcpStorageSource;
+  if (!source) return [];
+  return McpConfig.projectStorageConfig(source.servers, {
+    ...source.request,
+    capabilities: { stdio: true, http: true, sse: true },
+  }).servers;
+}
+
 async function startAgent(extra: Partial<NonNullable<OldAcpAgentConfig['extra']>> = {}): Promise<AcpAgentV2> {
   const agent = new AcpAgentV2({
     id: 'conv-1',
@@ -149,7 +164,7 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     stubStorage({ [`custom:${PACK}`]: 2 });
     const agent = await startAgent({ customAgentId: PACK, sessionMode: 'bypassPermissions', yoloMode: true });
 
-    const server = capturedConfig.mcpServers?.find((s) => s.name === 'warrior-ghl') as { args: string[] };
+    const server = projectedServers().find((s) => s.name === 'warrior-ghl') as { args: string[] };
     expect(server.args[0]).toContain(TOOL_FILTER_SCRIPT);
     expect(server.args).toEqual(
       expect.arrayContaining([
@@ -284,7 +299,7 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     stubStorage({ [`custom:${PACK}`]: 1 });
     const agent = await startAgent({ sessionMode: 'bypassPermissions', yoloMode: true });
 
-    const server = capturedConfig.mcpServers?.find((s) => s.name === 'warrior-ghl') as { args: string[] };
+    const server = projectedServers().find((s) => s.name === 'warrior-ghl') as { args: string[] };
     expect(server.args.join(' ')).not.toContain(TOOL_FILTER_SCRIPT);
     expect(capturedOptions?.permissionGate).toBeUndefined();
     expect(capturedConfig.initialDesired?.mode).toBe('bypassPermissions');
@@ -302,7 +317,7 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     stubStorage('throw');
     await startAgent({ customAgentId: PACK });
-    const server = capturedConfig.mcpServers?.find((s) => s.name === 'warrior-ghl') as { args: string[] };
+    const server = projectedServers().find((s) => s.name === 'warrior-ghl') as { args: string[] };
     expect(server.args).not.toContain('--rung');
     expect(capturedOptions?.permissionGate).toBeUndefined();
     expect(error).toHaveBeenCalled();
@@ -315,7 +330,7 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     await startAgent({ customAgentId: PACK });
     stubStorage('throw');
     await startAgent({ customAgentId: PACK });
-    const server = capturedConfig.mcpServers?.find((s) => s.name === 'warrior-ghl') as { args: string[] };
+    const server = projectedServers().find((s) => s.name === 'warrior-ghl') as { args: string[] };
     expect(server.args[server.args.indexOf('--rung') + 1]).toBe('1');
     // A plain chat stays off the ladder on the cached copy too.
     await startAgent({});

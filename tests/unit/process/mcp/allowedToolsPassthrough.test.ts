@@ -83,7 +83,8 @@ describe('#1167 path 1b - ACP session descriptors, hosted http/sse', () => {
     const [server] = buildAcpSessionMcpServers([httpServer(['alpha'], type)], ALL);
     expect(server.type).toBe('stdio');
     expect(JSON.stringify(server)).toContain('builtin-mcp-tool-filter');
-    expect(JSON.stringify(server)).not.toContain('https://example.test/mcp');
+    // The URL rides in the shim's env (`--url-env`), never on its command line.
+    expect(JSON.stringify((server as { args?: string[] }).args)).not.toContain('https://example.test/mcp');
   });
 
   it.each(['http', 'sse'] as const)('refuses an unenforceable explicit subset on %s without stdio', (type) => {
