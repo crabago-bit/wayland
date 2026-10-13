@@ -50,55 +50,42 @@ export type WorkspaceSkillEntry = {
   security?: { verdict: string };
 };
 
+/** Options that decide an assistant's BOUNDED skill set (see setupAssistantWorkspace). */
+export type BoundedSkillSetOptions = {
+  enabledSkills?: string[];
+  /** Builtin skill names to exclude from auto-injection (e.g. 'cron' for cron-spawned conversations) */
+  excludeBuiltinSkills?: string[];
+  /** Absolute paths to extra skill directories to symlink (e.g. cron job skill dirs) */
+  extraSkillPaths?: string[];
+  /**
+   * Injectable skills.preferences override for testing.
+   * When omitted, loaded lazily from ProcessConfig on first call.
+   */
+  _skillsPreferences?: WorkspaceSkillsPreferences | null;
+  /**
+   * Injectable library entries for the blocked-verdict guard.
+   * When omitted, no library-level verdict check is performed (safe: B8 is the primary gate).
+   */
+  _libraryEntries?: WorkspaceSkillEntry[];
+};
+
+/** One skill of the bounded set: where it comes from and the directory name it gets. */
+export type BoundedSkillSource = {
+  name: string;
+  sourceDir: string;
+  label: 'builtin skill' | 'skill' | 'extra skill';
+};
+
 /**
- * Set up native workspace structure for assistant (skill symlinks only)
+ * Resolve the BOUNDED SET of skills an assistant gets natively: _builtin
+ * auto-skills + pinned skills + the assistant's own enabledSkills (+ extra
+ * skill paths), minus disabled and `security.verdict === 'blocked'` entries.
+ * Sources are not checked for existence here; callers skip missing ones.
  *
- * Symlinks into CLI-native skills directories for auto-discovery.
- * The BOUNDED SET rule: only _builtin auto-skills + pinned skills +
- * assistant's own enabledSkills are symlinked.  Library-only entries
- * are NEVER symlinked - they are reached on-demand via wayland_search_skills.
- *
- * Defense-in-depth: skills with security.verdict === 'blocked' are never
- * symlinked regardless of any other setting (B8 quarantines them physically;
- * this is the second filter).
- *
- * Invoked (via setupWorkspaceSkills) for temp workspaces and for project
- * workspaces (#455); a non-project user-picked custom workspace is left alone.
- * For project workspaces a managed `.gitignore` keeps these dot-dirs out of the
- * user's git, so skills resolve without polluting the folder.
- *
- * Note: Rules/personality are injected via system prompt, NOT written to context files
+ * Shared by setupAssistantWorkspace (workspace skill dirs) and the laddered
+ * Claude skill plugin, so both deliver exactly the same set.
  */
-export async function setupAssistantWorkspace(
-  workspace: string,
-  options: {
-    agentType?: string;
-    backend?: string;
-    enabledSkills?: string[];
-    /** Builtin skill names to exclude from auto-injection (e.g. 'cron' for cron-spawned conversations) */
-    excludeBuiltinSkills?: string[];
-    /** Absolute paths to extra skill directories to symlink (e.g. cron job skill dirs) */
-    extraSkillPaths?: string[];
-    /**
-     * Injectable skills.preferences override for testing.
-     * When omitted, loaded lazily from ProcessConfig on first call.
-     */
-    _skillsPreferences?: WorkspaceSkillsPreferences | null;
-    /**
-     * Injectable library entries for the blocked-verdict guard.
-     * When omitted, no library-level verdict check is performed (safe: B8 is the primary gate).
-     */
-    _libraryEntries?: WorkspaceSkillEntry[];
-  }
-): Promise<void> {
-  // Determine skills directories from ACP_BACKENDS_ALL config
-  const key = options.backend || options.agentType || '';
-  const skillsDirs = getSkillsDirsForBackend(key);
-
-  // If no native skill directory is known for this CLI, skip symlink setup.
-  // The caller should use prompt injection as fallback.
-  if (!skillsDirs) return;
-
+export async function resolveBoundedSkillSet(options: BoundedSkillSetOptions): Promise<BoundedSkillSource[]> {
   // Load skills.preferences to get the pinned + disabled sets.
   // Use injectable override when provided (enables unit testing without real storage).
   let prefs: WorkspaceSkillsPreferences | null;
@@ -132,6 +119,83 @@ export async function setupAssistantWorkspace(
 
   const autoSkillsDir = getAutoSkillsDir();
   const userSkillsDir = getSkillsDir();
+  const result: BoundedSkillSource[] = [];
+
+  // Always place _builtin skills for all native-skill backends
+  let autoSkillNames: string[] = [];
+  try {
+    autoSkillNames = await fs.readdir(autoSkillsDir);
+  } catch {
+    // _builtin dir not ready yet, skip
+  }
+  const excludeSet = new Set(options.excludeBuiltinSkills ?? []);
+  for (const skillName of autoSkillNames) {
+    if (excludeSet.has(skillName)) continue;
+    // Defense-in-depth: never symlink a blocked builtin skill
+    if (isBlocked(skillName)) continue;
+    result.push({ name: skillName, sourceDir: path.join(autoSkillsDir, skillName), label: 'builtin skill' });
+  }
+
+  // Symlink the bounded always-on set:
+  //   - assistant's own enabledSkills
+  //   - globally pinned skills (skills.preferences.pinned)
+  // Library-only entries are intentionally excluded here.
+  const alwaysOnSkills = new Set([...(options.enabledSkills ?? []), ...pinnedSet]);
+  for (const skillName of alwaysOnSkills) {
+    // Skip if already symlinked as a builtin skill
+    if (autoSkillNames.includes(skillName)) continue;
+    // Defense-in-depth: never symlink a blocked or disabled skill
+    if (isBlocked(skillName)) continue;
+
+    // Try builtin-skills/ first, then user skills/
+    const builtinCandidate = path.join(getBuiltinSkillsCopyDir(), skillName);
+    const userCandidate = path.join(userSkillsDir, skillName);
+    const sourceSkillDir = existsSync(builtinCandidate) ? builtinCandidate : userCandidate;
+    result.push({ name: skillName, sourceDir: sourceSkillDir, label: 'skill' });
+  }
+
+  // Symlink extra skill directories (e.g. cron job SKILL.md dirs)
+  for (const extraPath of options.extraSkillPaths ?? []) {
+    result.push({ name: path.basename(extraPath), sourceDir: extraPath, label: 'extra skill' });
+  }
+  return result;
+}
+
+/**
+ * Set up native workspace structure for assistant (skill symlinks only)
+ *
+ * Symlinks into CLI-native skills directories for auto-discovery.
+ * The BOUNDED SET rule (resolveBoundedSkillSet): only _builtin auto-skills +
+ * pinned skills + assistant's own enabledSkills are symlinked.  Library-only
+ * entries are NEVER symlinked - they are reached on-demand via wayland_search_skills.
+ *
+ * Defense-in-depth: skills with security.verdict === 'blocked' are never
+ * symlinked regardless of any other setting (B8 quarantines them physically;
+ * this is the second filter).
+ *
+ * Invoked (via setupWorkspaceSkills) for temp workspaces and for project
+ * workspaces (#455); a non-project user-picked custom workspace is left alone.
+ * For project workspaces a managed `.gitignore` keeps these dot-dirs out of the
+ * user's git, so skills resolve without polluting the folder.
+ *
+ * Note: Rules/personality are injected via system prompt, NOT written to context files
+ */
+export async function setupAssistantWorkspace(
+  workspace: string,
+  options: BoundedSkillSetOptions & {
+    agentType?: string;
+    backend?: string;
+  }
+): Promise<void> {
+  // Determine skills directories from ACP_BACKENDS_ALL config
+  const key = options.backend || options.agentType || '';
+  const skillsDirs = getSkillsDirsForBackend(key);
+
+  // If no native skill directory is known for this CLI, skip symlink setup.
+  // The caller should use prompt injection as fallback.
+  if (!skillsDirs) return;
+
+  const skills = await resolveBoundedSkillSet(options);
 
   for (const skillsRelDir of skillsDirs) {
     const targetSkillsDir = path.join(workspace, skillsRelDir);
@@ -182,42 +246,8 @@ export async function setupAssistantWorkspace(
       }
     };
 
-    // Always place _builtin skills for all native-skill backends
-    let autoSkillNames: string[] = [];
-    try {
-      autoSkillNames = await fs.readdir(autoSkillsDir);
-    } catch {
-      // _builtin dir not ready yet, skip
-    }
-    const excludeSet = new Set(options.excludeBuiltinSkills ?? []);
-    for (const skillName of autoSkillNames) {
-      if (excludeSet.has(skillName)) continue;
-      // Defense-in-depth: never symlink a blocked builtin skill
-      if (isBlocked(skillName)) continue;
-      await placeSkill(path.join(autoSkillsDir, skillName), path.join(targetSkillsDir, skillName), 'builtin skill');
-    }
-
-    // Symlink the bounded always-on set:
-    //   - assistant's own enabledSkills
-    //   - globally pinned skills (skills.preferences.pinned)
-    // Library-only entries are intentionally excluded here.
-    const alwaysOnSkills = new Set([...(options.enabledSkills ?? []), ...pinnedSet]);
-    for (const skillName of alwaysOnSkills) {
-      // Skip if already symlinked as a builtin skill
-      if (autoSkillNames.includes(skillName)) continue;
-      // Defense-in-depth: never symlink a blocked or disabled skill
-      if (isBlocked(skillName)) continue;
-
-      // Try builtin-skills/ first, then user skills/
-      const builtinCandidate = path.join(getBuiltinSkillsCopyDir(), skillName);
-      const userCandidate = path.join(userSkillsDir, skillName);
-      const sourceSkillDir = existsSync(builtinCandidate) ? builtinCandidate : userCandidate;
-      await placeSkill(sourceSkillDir, path.join(targetSkillsDir, skillName), 'skill');
-    }
-
-    // Symlink extra skill directories (e.g. cron job SKILL.md dirs)
-    for (const extraPath of options.extraSkillPaths ?? []) {
-      await placeSkill(extraPath, path.join(targetSkillsDir, path.basename(extraPath)), 'extra skill');
+    for (const skill of skills) {
+      await placeSkill(skill.sourceDir, path.join(targetSkillsDir, skill.name), skill.label);
     }
   }
 }
