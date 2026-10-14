@@ -26,7 +26,14 @@ const { mockGet, capturedAgentConfigs, isWorkspaceTrusted } = vi.hoisted(() => (
   isWorkspaceTrusted: vi.fn(() => false),
 }));
 
-vi.mock('electron', () => ({ app: { getPath: vi.fn(() => '/tmp/userData') } }));
+const electronState = vi.hoisted(() => ({
+  app: { getPath: (_name: string) => '/tmp/userData' } as { getPath: (name: string) => string } | undefined,
+}));
+vi.mock('electron', () => ({
+  get app() {
+    return electronState.app;
+  },
+}));
 const { ensureFuigoHomeMock } = vi.hoisted(() => ({ ensureFuigoHomeMock: vi.fn() }));
 vi.mock('@process/agent/fuigo/launch', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/process/agent/fuigo/launch')>();
@@ -531,6 +538,22 @@ describe('AcpAgentManager Fuigo spawn contract', () => {
     const plain = await resolve({ presetAssistantId: 'builtin-concierge' });
     expect(plain.customArgs).toEqual(['--permission-mode', 'default', '--trust', 'agent', 'stdio']);
     expect(plain.customEnv).toMatchObject({ FUIGO_HOME: join('/tmp/userData', 'fuigo') });
+  });
+
+  it('finds the engine home without Electron (standalone WebUI server: DATA_DIR)', async () => {
+    // In the bun WebUI server `electron` resolves to the npm package, whose `app`
+    // is undefined; `app.getPath` there failed every Fuigo turn before spawn.
+    const saved = { app: electronState.app, dataDir: process.env.DATA_DIR };
+    electronState.app = undefined;
+    process.env.DATA_DIR = '/srv/stage-data';
+    try {
+      const res = await resolve({});
+      expect(res.customEnv).toMatchObject({ FUIGO_HOME: join('/srv/stage-data', 'fuigo') });
+    } finally {
+      electronState.app = saved.app;
+      if (saved.dataDir === undefined) delete process.env.DATA_DIR;
+      else process.env.DATA_DIR = saved.dataDir;
+    }
   });
 
   it('forwards the conversation maxTurns to Fuigo as --max-turns', async () => {

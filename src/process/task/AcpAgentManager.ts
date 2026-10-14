@@ -91,6 +91,7 @@ import {
 } from '@process/task/claudeConfig';
 import { materializeFluxHermesHome } from '@process/task/hermesConfig';
 import { app } from 'electron';
+import { getPlatformServices } from '@/common/platform';
 import BaseAgentManager from './BaseAgentManager';
 import { IpcAgentEventEmitter } from './IpcAgentEventEmitter';
 import { hasCronCommands } from './CronCommandDetector';
@@ -1032,9 +1033,12 @@ ${collectedResponses.join('\n')}`;
       // A JARVIS-laddered agent gets its own trust-free home instead (see
       // fuigoLadderedHomeDir).
       const laddered = await this.isLadderedSpawn(data);
-      mergedEnv.FUIGO_HOME = laddered
-        ? fuigoLadderedHomeDir(app.getPath('userData'))
-        : fuigoHomeDir(app.getPath('userData'));
+      // The standalone WebUI server has no Electron `app` (the `electron`
+      // import resolves to the npm package, whose `app` is undefined); its data
+      // root comes from the platform services, which Electron maps to the same
+      // `userData`.
+      const userData = app?.getPath ? app.getPath('userData') : getPlatformServices().paths.getDataDir();
+      mergedEnv.FUIGO_HOME = laddered ? fuigoLadderedHomeDir(userData) : fuigoHomeDir(userData);
       // The user's own providers become `[model.byok/…]` entries in the managed
       // config; each key (a keyless local server's placeholder included) rides
       // its own env var on this spawn and is never written to disk. With no
