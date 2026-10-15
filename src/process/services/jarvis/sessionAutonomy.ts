@@ -15,7 +15,9 @@
  * in the settings UI; it is not enforced on them.) An UNREADABLE rung store
  * falls back to the last copy this process read successfully. With no such
  * copy we cannot tell who is on the ladder, and laddering EVERY agent would
- * break ordinary chats, so the session runs unladdered and an error is logged.
+ * break ordinary chats, so the session runs unladdered and an error is logged -
+ * unless the caller passes `failClosed` (the spawn path does for agent-keyed
+ * spawns, the only kind that can be laddered today), which throws instead.
  */
 
 import { autonomyAgentKey, toAutonomyRung } from '@/common/jarvis/autonomy';
@@ -38,13 +40,38 @@ export function resetAutonomyRungCache(): void {
 }
 
 /**
+ * One spawn's resolved ladder: `autonomy` is the snapshot, or `undefined` for
+ * an unladdered agent. The wrapper marks the value as RESOLVED, so a consumer
+ * handed one never re-reads the store.
+ */
+export type SpawnLadder = { autonomy: ToolFilterSpawnAutonomy | undefined };
+
+/** Thrown by {@link resolveConfiguredSpawnAutonomy} with `failClosed` when the rung store cannot be read. */
+export class AutonomyStoreUnreadableError extends Error {
+  constructor(agentKey: string, cause: unknown) {
+    super(
+      `Autonomy settings (agents.autonomy) are unreadable and no earlier copy exists, so ${agentKey} cannot be ` +
+        'checked against the autonomy ladder; refusing to start it.'
+    );
+    this.name = 'AutonomyStoreUnreadableError';
+    this.cause = cause;
+  }
+}
+
+/**
  * The ladder snapshot for one agent, or `undefined` when the agent has no
  * configured rung (today's behaviour).
+ *
+ * `failClosed`: when the store is unreadable and no last-good copy exists,
+ * throw {@link AutonomyStoreUnreadableError} instead of resolving unladdered.
  */
-export async function resolveConfiguredSpawnAutonomy(agent: {
-  backend: string;
-  customAgentId?: string;
-}): Promise<ToolFilterSpawnAutonomy | undefined> {
+export async function resolveConfiguredSpawnAutonomy(
+  agent: {
+    backend: string;
+    customAgentId?: string;
+  },
+  options: { failClosed?: boolean } = {}
+): Promise<ToolFilterSpawnAutonomy | undefined> {
   const key = autonomyAgentKey(agent);
   let stored: Record<string, unknown> | undefined;
   try {
@@ -53,6 +80,7 @@ export async function resolveConfiguredSpawnAutonomy(agent: {
   } catch (error) {
     stored = lastGoodRungs;
     if (!stored) {
+      if (options.failClosed) throw new AutonomyStoreUnreadableError(key, error);
       console.error(`[jarvis] agents.autonomy unreadable and no prior copy; ${key} runs WITHOUT the ladder:`, error);
       return undefined;
     }

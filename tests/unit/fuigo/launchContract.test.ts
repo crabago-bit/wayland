@@ -163,6 +163,7 @@ import {
   revokeFuigoFolderTrust,
 } from '../../../src/process/agent/fuigo/launch';
 import { projectSessionMetadata } from '../../../src/process/acp/infra/AcpProtocol';
+import { resetAutonomyRungCache } from '../../../src/process/services/jarvis/sessionAutonomy';
 
 type Resolved = { cliPath?: string; customArgs?: string[]; customEnv?: Record<string, string> };
 
@@ -538,6 +539,60 @@ describe('AcpAgentManager Fuigo spawn contract', () => {
     const plain = await resolve({ presetAssistantId: 'builtin-concierge' });
     expect(plain.customArgs).toEqual(['--permission-mode', 'default', '--trust', 'agent', 'stdio']);
     expect(plain.customEnv).toMatchObject({ FUIGO_HOME: join('/tmp/userData', 'fuigo') });
+  });
+
+  it('reads the ladder ONCE per spawn and hands the same snapshot to the session', async () => {
+    resetAutonomyRungCache();
+    mockGet.mockImplementation(async (key: string) =>
+      key === 'agents.autonomy' ? { 'custom:pack-warrior-estimator': 2 } : undefined
+    );
+    isWorkspaceTrusted.mockReturnValue(true);
+    const m = new AcpAgentManager({ conversation_id: 'c-lad', backend: 'fuigo', workspace: '/tmp/ws' });
+    await m.initAgent({
+      conversation_id: 'c-lad',
+      backend: 'fuigo',
+      workspace: '/tmp/ws',
+      presetAssistantId: 'pack-warrior-estimator',
+    } as never);
+    expect(mockGet.mock.calls.filter(([key]) => key === 'agents.autonomy')).toHaveLength(1);
+    const cfg = capturedAgentConfigs[0] as { customArgs: string[]; customEnv: Record<string, string>; extra: never };
+    expect(cfg.customEnv.FUIGO_HOME).toBe(join('/tmp/userData', 'fuigo-laddered'));
+    expect(cfg.customArgs).not.toContain('--trust');
+    expect((cfg.extra as { spawnAutonomy: unknown }).spawnAutonomy).toMatchObject({
+      autonomy: { agent: 'custom:pack-warrior-estimator', rung: 2 },
+    });
+  });
+
+  it('a first ladder read that faults (no earlier copy) fails an agent-keyed spawn closed', async () => {
+    // Before: the home check read a fault as "not laddered" (shared home, --trust)
+    // while a later read laddered the session.
+    resetAutonomyRungCache();
+    let reads = 0;
+    mockGet.mockImplementation(async (key: string) => {
+      if (key !== 'agents.autonomy') return undefined;
+      reads += 1;
+      if (reads === 1) throw new Error('store busy');
+      return { 'custom:pack-warrior-estimator': 2 };
+    });
+    isWorkspaceTrusted.mockReturnValue(true);
+    ensureFuigoHomeMock.mockClear();
+    await expect(resolve({ presetAssistantId: 'pack-warrior-estimator' })).rejects.toThrow(
+      /agents\.autonomy\) are unreadable/
+    );
+    expect(ensureFuigoHomeMock).not.toHaveBeenCalled();
+  });
+
+  it('a faulted ladder read leaves a plain (no agent id) chat on the shared home', async () => {
+    resetAutonomyRungCache();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockGet.mockImplementation(async (key: string) => {
+      if (key === 'agents.autonomy') throw new Error('store busy');
+      return undefined;
+    });
+    const res = await resolve({});
+    expect(res.customEnv).toMatchObject({ FUIGO_HOME: join('/tmp/userData', 'fuigo') });
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
   });
 
   it('finds the engine home without Electron (standalone WebUI server: DATA_DIR)', async () => {

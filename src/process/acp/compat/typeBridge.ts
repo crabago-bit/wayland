@@ -12,6 +12,7 @@ import {
 } from '@/common/types/acpTypes';
 import type { McpServer } from '@agentclientprotocol/sdk';
 import type { McpConfigProjection } from '@process/acp/session/McpConfig';
+import type { SpawnLadder } from '@process/services/jarvis/sessionAutonomy';
 import type { AgentConfig, AgentSource, ConfigOption, InitialDesiredConfig, ModelSnapshot } from '@process/acp/types';
 import { getEnhancedEnv, loadFullShellEnvironment } from '@process/utils/shellEnv';
 /**
@@ -62,6 +63,12 @@ export type OldAcpAgentConfig = {
     customAgentId?: string;
     /** JARVIS autonomy: `customAgentId ?? presetAssistantId`, the id the rung is keyed by. */
     autonomyAgentId?: string;
+    /**
+     * JARVIS autonomy: the ladder the owning manager already resolved for this
+     * spawn (its Fuigo home and trust follow it). When present the session
+     * enforces exactly this and never re-reads `agents.autonomy`.
+     */
+    spawnAutonomy?: SpawnLadder;
     /** The assistant's enabledSkills; a laddered Claude session gets them as a plugin. */
     enabledSkills?: string[];
     /** Builtin auto-injected skills to exclude (with enabledSkills above). */

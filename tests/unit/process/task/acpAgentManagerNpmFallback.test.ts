@@ -104,10 +104,19 @@ import AcpAgentManager from '../../../../src/process/task/AcpAgentManager';
 import { ACP_BACKENDS_ALL, CODEX_ACP_NPX_PACKAGE, type AcpBackend } from '../../../../src/common/types/acpTypes';
 
 type Resolver = (data: Record<string, unknown>) => Promise<{ cliPath?: string }>;
+type BuiltinResolver = (
+  data: Record<string, unknown>,
+  ladder: { autonomy: undefined }
+) => Promise<{ cliPath?: string }>;
 
 function resolveBuiltin(backend: AcpBackend): Resolver {
   const manager = new AcpAgentManager({ conversation_id: 'c1', backend, workspace: '/tmp/ws' });
-  return (data) => (manager as unknown as { resolveBuiltinBackendConfig: Resolver }).resolveBuiltinBackendConfig(data);
+  // The spawn's ladder is resolved once by resolveAgentCliConfig; these
+  // builtins are unladdered.
+  return (data) =>
+    (manager as unknown as { resolveBuiltinBackendConfig: BuiltinResolver }).resolveBuiltinBackendConfig(data, {
+      autonomy: undefined,
+    });
 }
 
 describe('resolveBuiltinBackendConfig — npm fallback for builtins', () => {

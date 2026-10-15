@@ -56,6 +56,7 @@ import {
   resolveLadderedSessionMeta,
   verifyLadderedBridge,
   resolveConfiguredSpawnAutonomy,
+  type SpawnLadder,
 } from '@process/services/jarvis/sessionAutonomy';
 import {
   buildLadderedSkillPlugin,
@@ -161,6 +162,8 @@ export class AcpAgentV2 {
   private readonly mcpPublicationBinding?: McpSessionPublicationBinding;
   /** `custom:<id>` half of the JARVIS autonomy key (custom OR preset assistant id); see `autonomyAgentKey`. */
   private readonly customAgentId?: string;
+  /** The ladder the owning manager resolved for this spawn, if any (see ensureSession). */
+  private readonly spawnLadder?: SpawnLadder;
   /** The assistant's skills, for a laddered session's skill plugin. */
   private readonly enabledSkills?: string[];
   private readonly excludeBuiltinSkills?: string[];
@@ -243,6 +246,7 @@ export class AcpAgentV2 {
     this.onMcpProjection = config.onMcpProjection;
     this.mcpPublicationBinding = (config as { mcpPublication?: McpSessionPublicationBinding }).mcpPublication;
     this.customAgentId = config.extra?.autonomyAgentId ?? config.extra?.customAgentId;
+    this.spawnLadder = config.extra?.spawnAutonomy;
     this.enabledSkills = config.extra?.enabledSkills;
     this.excludeBuiltinSkills = config.extra?.excludeBuiltinSkills;
     this.agentConfig = toAgentConfig(config);
@@ -313,10 +317,15 @@ export class AcpAgentV2 {
     // connector shim, the native-tool permission gate, and the mode clamp.
     // Every path that runs this agent (chat, channel, cron, team) comes through
     // here, so an unattended run is enforced exactly like an attended one.
-    this.autonomy = await resolveConfiguredSpawnAutonomy({
-      backend: this.agentConfig.agentBackend,
-      customAgentId: this.customAgentId,
-    });
+    // The owning manager already resolved the ladder for this spawn (its Fuigo
+    // home and trust follow it); enforce that snapshot rather than a second
+    // read that could disagree with it.
+    this.autonomy = this.spawnLadder
+      ? this.spawnLadder.autonomy
+      : await resolveConfiguredSpawnAutonomy({
+          backend: this.agentConfig.agentBackend,
+          customAgentId: this.customAgentId,
+        });
     if (this.autonomy) {
       this.applyAutonomyModeClamp(this.autonomy);
       // Unverified until the agent's initialize result says otherwise.

@@ -399,6 +399,32 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     expect(capturedOptions?.permissionGate).toBeUndefined();
   });
 
+  it('enforces the ladder the manager resolved for the spawn and never re-reads the store', async () => {
+    resetAutonomyRungCache();
+    // The store now says rung 1, but the spawn (and its Fuigo home) was chosen
+    // on the manager's rung-2 snapshot: the session must agree with the spawn.
+    stubStorage({ [`custom:${PACK}`]: 1 });
+    const get = vi.mocked(ProcessConfig.get);
+    const autonomy = {
+      agent: `custom:${PACK}`,
+      rung: 2 as const,
+      hardFloorKeywords: ['wire'],
+      logPath: '/data/jarvis/approvals.jsonl',
+    };
+    await startAgent({ customAgentId: PACK, spawnAutonomy: { autonomy } });
+    expect(get.mock.calls.some(([key]) => key === 'agents.autonomy')).toBe(false);
+    const server = projectedServers().find((s) => s.name === 'warrior-ghl') as { args: string[] };
+    expect(server.args[server.args.indexOf('--rung') + 1]).toBe('2');
+    expect(capturedOptions?.permissionGate).toBeDefined();
+  });
+
+  it('a manager-resolved UNLADDERED spawn stays unladdered even if the store now lists the agent', async () => {
+    stubStorage({ [`custom:${PACK}`]: 1 });
+    await startAgent({ customAgentId: PACK, spawnAutonomy: { autonomy: undefined } });
+    expect(capturedOptions?.permissionGate).toBeUndefined();
+    expect(capturedOptions?.beforePrompt).toBeUndefined();
+  });
+
   it('every laddered prompt is guarded: the session gets a beforePrompt that confirms the clamped mode', async () => {
     stubStorage({ [`custom:${PACK}`]: 2 });
     await startAgent({ customAgentId: PACK, sessionMode: 'bypassPermissions' });

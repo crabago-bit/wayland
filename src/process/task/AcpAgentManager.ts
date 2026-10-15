@@ -12,7 +12,7 @@ import {
   FUIGO_LADDERED_PERMISSION_RULES,
   revokeFuigoFolderTrust,
 } from '@process/agent/fuigo/launch';
-import { resolveConfiguredSpawnAutonomy } from '@process/services/jarvis/sessionAutonomy';
+import { resolveConfiguredSpawnAutonomy, type SpawnLadder } from '@process/services/jarvis/sessionAutonomy';
 import { fuigoByokSpawnPlan, readFuigoByokProviders } from '@process/agent/fuigo/byok';
 import { resolveFuigoBinary } from '@process/agent/fuigo/runtime';
 import { resolveTurnOutputDirective } from '@process/services/artifacts/outputDirective';
@@ -897,28 +897,46 @@ ${collectedResponses.join('\n')}`;
   }
 
   /**
-   * Whether this spawn is an agent the JARVIS autonomy ladder governs - the
-   * same key AcpAgentV2 resolves its rung under (customAgentId, else the
-   * preset assistant id).
+   * The JARVIS ladder snapshot for this spawn, under the same key AcpAgentV2
+   * would resolve its rung by (customAgentId, else the preset assistant id).
+   *
+   * Resolved ONCE per spawn and shared by every decision that depends on it:
+   * the Fuigo home, Fuigo folder trust, and (forwarded on `extra`) the
+   * session's gate, shim and mode clamp in AcpAgentV2. Resolving it separately
+   * at each point let a storage fault split them - e.g. a faulted first read
+   * after boot put the agent in the SHARED Fuigo home while a later read
+   * laddered the session.
+   *
+   * An agent-keyed spawn (a preset, custom or remote agent - the only kind
+   * that can be laddered today) fails closed when the store is unreadable and
+   * no earlier copy exists: it would otherwise run unladdered in the shared
+   * home. A plain backend chat keeps running unladdered.
    */
-  private async isLadderedSpawn(data: AcpAgentManagerData): Promise<boolean> {
-    const autonomy = await resolveConfiguredSpawnAutonomy({
-      backend: data.backend,
-      customAgentId: data.customAgentId || data.presetAssistantId,
-    });
-    return autonomy !== undefined;
+  private async resolveSpawnLadder(data: AcpAgentManagerData): Promise<SpawnLadder> {
+    const customAgentId = data.customAgentId || data.presetAssistantId;
+    const autonomy = await resolveConfiguredSpawnAutonomy(
+      { backend: data.backend, customAgentId },
+      { failClosed: Boolean(customAgentId) }
+    );
+    return { autonomy };
   }
 
-  private async resolveAgentCliConfig(data: AcpAgentManagerData): Promise<{
+  private async resolveAgentCliConfig(
+    data: AcpAgentManagerData,
+    ladder?: SpawnLadder
+  ): Promise<{
     cliPath?: string;
     launch?: AcpLaunchSpec;
     customArgs?: string[];
     customEnv?: Record<string, string>;
     yoloMode?: boolean;
+    spawnLadder: SpawnLadder;
   }> {
+    const spawnLadder = ladder ?? (await this.resolveSpawnLadder(data));
+    const laddered = spawnLadder.autonomy !== undefined;
     const resolved = data.customAgentId
-      ? await this.resolveCustomAgentCliConfig(data)
-      : await this.resolveBuiltinBackendConfig(data);
+      ? await this.resolveCustomAgentCliConfig(data, spawnLadder)
+      : await this.resolveBuiltinBackendConfig(data, spawnLadder);
 
     // Bridge connected-provider API keys (from the in-app model registry) into
     // the spawned agent's env. A custom agent's explicit env wins over the
@@ -1032,7 +1050,6 @@ ${collectedResponses.join('\n')}`;
       // the model cache carry across chats); Fuigo keys sessions by cwd.
       // A JARVIS-laddered agent gets its own trust-free home instead (see
       // fuigoLadderedHomeDir).
-      const laddered = await this.isLadderedSpawn(data);
       // The standalone WebUI server has no Electron `app` (the `electron`
       // import resolves to the npm package, whose `app` is undefined); its data
       // root comes from the platform services, which Electron maps to the same
@@ -1098,9 +1115,9 @@ ${collectedResponses.join('\n')}`;
     }
 
     if (Object.keys(mergedEnv).length > 0) {
-      return { ...resolved, customEnv: mergedEnv };
+      return { ...resolved, customEnv: mergedEnv, spawnLadder };
     }
-    return resolved;
+    return { ...resolved, spawnLadder };
   }
 
   /**
@@ -1343,7 +1360,10 @@ ${collectedResponses.join('\n')}`;
    * Resolve CLI config for a custom agent backend.
    * Looks up assistants config by UUID, falling back to extension-contributed adapters.
    */
-  private async resolveCustomAgentCliConfig(data: AcpAgentManagerData): Promise<{
+  private async resolveCustomAgentCliConfig(
+    data: AcpAgentManagerData,
+    spawnLadder: SpawnLadder
+  ): Promise<{
     cliPath?: string;
     launch?: AcpLaunchSpec;
     customArgs?: string[];
@@ -1392,7 +1412,7 @@ ${collectedResponses.join('\n')}`;
       // fallback; only rows that DO carry defaultCliPath (a Hermes profile) take
       // the custom path below that forwards their env. resolveBuiltinBackendConfig
       // already prefers an explicit data.cliPath, so custom agents keep theirs.
-      return this.resolveBuiltinBackendConfig(data);
+      return this.resolveBuiltinBackendConfig(data, spawnLadder);
     }
 
     return {
@@ -1412,7 +1432,10 @@ ${collectedResponses.join('\n')}`;
    * Resolve CLI config for a built-in backend (claude, qwen, codex, etc.).
    * Also handles yoloMode migration and codex sandbox mode.
    */
-  private async resolveBuiltinBackendConfig(data: AcpAgentManagerData): Promise<{
+  private async resolveBuiltinBackendConfig(
+    data: AcpAgentManagerData,
+    spawnLadder: SpawnLadder
+  ): Promise<{
     cliPath?: string;
     launch?: AcpLaunchSpec;
     customArgs?: string[];
@@ -1482,7 +1505,7 @@ ${collectedResponses.join('\n')}`;
       // prompt. Desktop's workspace trust is the consent authority; forward it.
       // A laddered agent is never trusted: trust is what makes Fuigo dial the
       // workspace's own MCP servers past the tool-filter shim.
-      const trusted = !(await this.isLadderedSpawn(data)) && isWorkspaceTrusted(data.workspace);
+      const trusted = spawnLadder.autonomy === undefined && isWorkspaceTrusted(data.workspace);
       customArgs = buildFuigoAcpArgs({ trusted, maxTurns: data.maxTurns });
     }
 
@@ -2093,7 +2116,7 @@ ${collectedResponses.join('\n')}`;
           await repairStagedTideSkill(data.workspace, stagedTideSkill);
         }
       }
-      const { cliPath, launch, customArgs, customEnv, yoloMode } = await this.resolveAgentCliConfig(data);
+      const { cliPath, launch, customArgs, customEnv, yoloMode, spawnLadder } = await this.resolveAgentCliConfig(data);
       const agentConfig = {
         id: data.conversation_id,
         backend: data.backend,
@@ -2153,6 +2176,10 @@ ${collectedResponses.join('\n')}`;
           // rung key must fall back to it, or the ladder reads the bare backend
           // key. Separate field so nothing else customAgentId drives changes.
           autonomyAgentId: data.customAgentId || data.presetAssistantId,
+          // The ladder snapshot this spawn's home and trust were chosen by.
+          // AcpAgentV2 enforces exactly this one rather than re-reading the
+          // store, so a storage fault cannot split home and session.
+          spawnAutonomy: spawnLadder,
           // A laddered Claude session loads no setting source, so it gets these
           // as a Wayland-owned skill plugin instead of the workspace copies.
           enabledSkills: data.enabledSkills,
