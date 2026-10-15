@@ -60,6 +60,18 @@ export type AgentConfig = {
    * lives here: Fuigo reads a skill's SKILL.md and scripts through the client.
    */
   readOnlyRoots?: string[];
+  /**
+   * Directories outside the workspace the agent may also WRITE through
+   * `fs/write_text_file` (e.g. Grok's own memory dir, see grokFsRoots).
+   */
+  writableRoots?: string[];
+  /**
+   * Paths `fs/*` never serves, even inside the workspace or an extra root (an
+   * agent CLI's own credentials). A denial covers the path itself, anything
+   * below it, and its dot-suffixed siblings (`auth.json` also denies
+   * `auth.json.bak-*` and `auth.json.lock`). Compared as real paths.
+   */
+  deniedPaths?: string[];
   mcpServers?: McpServer[];
   /**
    * Storage-backed connectors projected only after the live ACP initialize

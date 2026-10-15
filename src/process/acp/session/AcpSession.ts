@@ -500,6 +500,18 @@ export class AcpSession {
    */
   private assertPathAllowed(filePath: string, extraRoots: readonly string[] = []): void {
     const resolved = canonicalPathForGuard(filePath);
+    const denied =
+      resolved === null ||
+      (this.agentConfig.deniedPaths ?? []).some((deniedPath) => {
+        const real = canonicalPathForGuard(deniedPath);
+        return (
+          real !== null &&
+          (resolved === real || resolved.startsWith(real + path.sep) || resolved.startsWith(`${real}.`))
+        );
+      });
+    if (denied) {
+      throw new Error(`Path not allowed: ${filePath} is outside permitted directories`);
+    }
     const allowedRoots = [this.agentConfig.cwd, ...(this.agentConfig.additionalDirectories ?? []), ...extraRoots];
     const withinAllowed =
       resolved !== null &&
@@ -544,7 +556,7 @@ export class AcpSession {
         }
       },
       onWriteTextFile: async (req) => {
-        this.assertPathAllowed(req.path);
+        this.assertPathAllowed(req.path, this.agentConfig.writableRoots);
         // An irreversible side effect that never passes through handleMessage, so
         // it would otherwise leave `turnRanTool` false and let a retry replay the
         // turn and write the file a second time (#774).

@@ -357,6 +357,46 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     expect((await agent.sendMessage({ content: '/always-approve on' })).success).toBe(true);
   });
 
+  it('a Grok chat may read and write its own memory dir; the credentials are denied', async () => {
+    stubStorage({});
+    const agent = new AcpAgentV2({
+      id: 'conv-grok',
+      backend: 'grok',
+      workingDir: '/workspace',
+      customEnv: { GROK_HOME: '/srv/grok' },
+      onStreamEvent: vi.fn(),
+      extra: { backend: 'grok', customEnv: { GROK_HOME: '/srv/grok' } },
+    });
+    await agent.start();
+    expect(capturedConfig.readOnlyRoots).toEqual(['/srv/grok/memory-v2']);
+    expect(capturedConfig.writableRoots).toEqual(['/srv/grok/memory-v2']);
+    expect(capturedConfig.deniedPaths).toEqual(['/srv/grok/auth.json', '/srv/grok/auth']);
+  });
+
+  it('a LADDERED Grok agent gets no extra root, and the credentials stay denied', async () => {
+    stubStorage({ [`custom:${PACK}`]: 2 });
+    const agent = new AcpAgentV2({
+      id: 'conv-grok-l',
+      backend: 'grok',
+      workingDir: '/workspace',
+      customEnv: { GROK_HOME: '/srv/grok' },
+      onStreamEvent: vi.fn(),
+      extra: { backend: 'grok', customAgentId: PACK, customEnv: { GROK_HOME: '/srv/grok' } },
+    });
+    await agent.start();
+    expect(capturedOptions?.permissionGate).toBeDefined();
+    expect(capturedConfig.readOnlyRoots ?? []).toEqual([]);
+    expect(capturedConfig.writableRoots ?? []).toEqual([]);
+    expect(capturedConfig.deniedPaths).toEqual(['/srv/grok/auth.json', '/srv/grok/auth']);
+  });
+
+  it('other backends get no Grok roots', async () => {
+    stubStorage({});
+    await startAgent({});
+    expect(capturedConfig.writableRoots).toBeUndefined();
+    expect(capturedConfig.deniedPaths).toBeUndefined();
+  });
+
   it('an agent with NO configured rung keeps today’s behaviour', async () => {
     stubStorage({ [`custom:${PACK}`]: 1 });
     const agent = await startAgent({ sessionMode: 'bypassPermissions', yoloMode: true });

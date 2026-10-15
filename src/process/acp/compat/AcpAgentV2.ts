@@ -24,6 +24,7 @@ import {
 } from '@process/acp/compat/typeBridge';
 import { AcpError as AcpSessionError } from '@process/acp/errors/AcpError';
 import { AcpSession, type SessionOptions } from '@process/acp/session/AcpSession';
+import { grokFsRoots } from '@process/agent/grok/fsRoots';
 import { CRASH_MARKER_PROCESS_EXIT, CRASH_MARKER_TRANSPORT_CLOSE } from '@process/acp/session/crashMarkers';
 import { readClaudeModelInfoFromCcSwitch } from '@process/services/ccSwitchModelSource';
 import { buildClaudeSlotModelInfo } from '@process/agent/acp/utils';
@@ -361,6 +362,17 @@ export class AcpAgentV2 {
       // With no setting source the workspace `.claude/skills` is not read, so
       // the assistant's bounded skill set comes as a Wayland-owned plugin.
       await this.applyLadderedSessionMeta();
+    }
+
+    // Grok Build keeps its cross-session memory under its own home and reads
+    // and edits it through the client fs (see grokFsRoots). Its credentials
+    // are never served, laddered or not; a laddered agent gets no extra root.
+    if (this.agentConfig.agentBackend === 'grok') {
+      const grok = grokFsRoots(this.agentConfig.env);
+      const config = this.agentConfig as { readOnlyRoots?: string[]; writableRoots?: string[]; deniedPaths?: string[] };
+      config.deniedPaths = grok.deniedPaths;
+      config.readOnlyRoots = this.autonomy ? [] : grok.readOnlyRoots;
+      config.writableRoots = this.autonomy ? [] : grok.writableRoots;
     }
 
     // Load and refresh storage-backed connectors now, but defer their transport
