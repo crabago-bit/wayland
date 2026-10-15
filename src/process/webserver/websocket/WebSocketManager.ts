@@ -233,9 +233,16 @@ export class WebSocketManager {
    * Setup close handler
    */
   private setupCloseHandler(ws: WebSocket): void {
-    ws.on('close', () => {
+    const openedAt = Date.now();
+    ws.on('close', (code: number, reason: Buffer) => {
+      const info = this.clients.get(ws);
       this.clients.delete(ws);
-      console.log('[WebSocketManager] Client disconnected');
+      const lived = Math.round((Date.now() - openedAt) / 1000);
+      const sincePing = info ? Math.round((Date.now() - info.lastPing) / 1000) : -1;
+      const why = reason?.length ? reason.toString().slice(0, 80) : '';
+      console.log(
+        `[WebSocketManager] Client disconnected code=${code}${why ? ` reason="${why}"` : ''} lived=${lived}s sinceLastPing=${sincePing}s`
+      );
     });
   }
 
