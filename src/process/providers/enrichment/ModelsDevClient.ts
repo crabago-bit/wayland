@@ -20,7 +20,7 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { app } from 'electron';
+import { appDataDir, appIsPackaged } from '@process/utils/appPaths';
 import { writeFileAtomic } from '@process/utils/atomicWrite';
 import { validateRegistry, type ModelsDevRegistry } from './modelsDevSchema';
 
@@ -104,7 +104,7 @@ export class ModelsDevClient {
   // ─── Rung 2: last-good cache ────────────────────────────────────────────────
 
   private cacheFilePath(): string {
-    return path.join(app.getPath('userData'), CACHE_FILE_NAME);
+    return path.join(appDataDir(), CACHE_FILE_NAME);
   }
 
   /** Atomically persist a validated registry as the last-good cache. */
@@ -132,7 +132,7 @@ export class ModelsDevClient {
    * `process.resourcesPath` via an `extraResources` entry.
    */
   private snapshotFilePath(): string {
-    const isPackaged = app.isPackaged === true;
+    const isPackaged = appIsPackaged();
     const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
     if (isPackaged && resourcesPath) {
       return path.join(resourcesPath, SNAPSHOT_FILE_NAME);

@@ -10,7 +10,7 @@
  * - API keys are NEVER included in the sync payload (see gatherPayload()).
  */
 
-import { app } from 'electron';
+import { appDataDir } from '@process/utils/appPaths';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { generateSalt, deriveKey } from './crypto/deriveKey';
@@ -21,7 +21,7 @@ import type { SyncPayload, SyncState, SyncStatus, SyncResult } from './types';
 const STATE_FILE = 'sync-state.json';
 
 function statePath(): string {
-  return path.join(app.getPath('userData'), STATE_FILE);
+  return path.join(appDataDir(), STATE_FILE);
 }
 
 function readState(): SyncState | null {

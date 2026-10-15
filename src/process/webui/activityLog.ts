@@ -1,4 +1,4 @@
-import { app } from 'electron';
+import { appDataDir } from '@process/utils/appPaths';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -15,7 +15,7 @@ export type ActivityEvent = {
 const RING_SIZE = 200;
 
 function logPath(): string {
-  return path.join(app.getPath('userData'), 'webui-activity.json');
+  return path.join(appDataDir(), 'webui-activity.json');
 }
 
 function readLog(): ActivityEvent[] {

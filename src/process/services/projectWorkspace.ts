@@ -71,7 +71,10 @@ export async function defaultWorkspaceBaseDir(): Promise<string> {
   // Memoized: the documents dir doesn't change at runtime, and sharing a single
   // import keeps concurrent allocations from each re-importing electron.
   if (!_baseDirPromise) {
-    const pending = import('electron').then(({ app }) => path.join(app.getPath('documents'), 'Wayland'));
+    // Electron's documents dir, or `<home>/Documents` in the standalone server.
+    const pending = import('@process/utils/appPaths').then(({ appUserDir }) =>
+      path.join(appUserDir('documents'), 'Wayland')
+    );
     _baseDirPromise = pending;
     // Cache the SUCCESS, not the attempt. Caching the promise unconditionally meant
     // ONE rejected read was replayed for the whole process lifetime - and

@@ -17,7 +17,7 @@ import { mcpService } from '@/process/services/mcpServices/McpService';
 import { ipcBridge } from '@/common';
 import { LegacyConnectorFactory } from '@process/acp/compat/LegacyConnectorFactory';
 import { noopProtocolHandlers } from '@process/acp/types';
-import { app } from 'electron';
+import { appDataDir } from '@process/utils/appPaths';
 import * as os from 'os';
 
 export function initAcpConversationBridge(workerTaskManager: IWorkerTaskManager): void {
@@ -95,7 +95,7 @@ export function initAcpConversationBridge(workerTaskManager: IWorkerTaskManager)
   // exports as FUIGO_HOME on every spawn.
   ipcBridge.acpConversation.getFuigoEngineStatus.provider(() => {
     try {
-      const data = { ...fuigoEngineStatus(), homeDir: fuigoHomeDir(app.getPath('userData')) };
+      const data = { ...fuigoEngineStatus(), homeDir: fuigoHomeDir(appDataDir()) };
       return Promise.resolve({ success: true as const, data });
     } catch (error) {
       return Promise.resolve({

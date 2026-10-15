@@ -7,6 +7,7 @@
 import { existsSync, mkdirSync, renameSync, statSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { appDataDir } from '@process/utils/appPaths';
 
 /**
  * Append-only JSONL audit log for webhook deliveries.
@@ -34,18 +35,13 @@ let cachedPath: string | null = null;
 
 function resolveLogPath(): string {
   if (cachedPath !== null) return cachedPath;
-  // Lazy-load electron's app - falls back to tmpdir when running in vitest /
-  // CLI / pre-app contexts.
+  // Electron userData, or the platform data dir (DATA_DIR) in the server;
+  // tmpdir when neither resolves (pre-app contexts).
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require('electron') as { app?: { getPath?: (n: string) => string } };
-    const userData = electron.app?.getPath?.('userData');
-    if (userData) {
-      cachedPath = path.join(userData, 'webhook-audit.log');
-      return cachedPath;
-    }
+    cachedPath = path.join(appDataDir(), 'webhook-audit.log');
+    return cachedPath;
   } catch {
-    // electron unavailable - fall through.
+    // no data dir - fall through.
   }
   cachedPath = path.join(os.tmpdir(), 'wayland-webhook-audit.log');
   return cachedPath;

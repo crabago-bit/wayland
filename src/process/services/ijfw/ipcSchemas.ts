@@ -9,7 +9,7 @@
  */
 
 import * as path from 'node:path';
-import { app } from 'electron';
+import { appUserDir } from '@process/utils/appPaths';
 import { z } from 'zod';
 import { IJFW_ERROR_REASONS, type IjfwErrorReason } from '@/common/types/ijfw';
 
@@ -55,7 +55,7 @@ const queryStringSchema = z.string().min(1).max(2000);
 
 // SEC-002: positive-root containment, not denylist.
 function getAllowedExportRoots(): string[] {
-  return [app.getPath('downloads'), app.getPath('documents')].map((p) => path.resolve(p));
+  return [appUserDir('downloads'), appUserDir('documents')].map((p) => path.resolve(p));
 }
 
 const exportPathSchema = z.string().refine((p) => {
@@ -221,9 +221,7 @@ export const jsonRpcResponseSchema = z
     jsonrpc: z.literal('2.0'),
     id: z.number().int().nonnegative(),
     result: z.unknown().optional(),
-    error: z
-      .object({ code: z.number().int(), message: z.string() })
-      .optional(),
+    error: z.object({ code: z.number().int(), message: z.string() }).optional(),
   })
   .strict();
 
@@ -231,7 +229,7 @@ export type JsonRpcResponse = z.infer<typeof jsonRpcResponseSchema>;
 
 // Standardized errorReason enum (mirrors @/common/types/ijfw IjfwErrorReason).
 export const ijfwErrorReasonSchema = z.enum(
-  IJFW_ERROR_REASONS as unknown as readonly [IjfwErrorReason, ...IjfwErrorReason[]],
+  IJFW_ERROR_REASONS as unknown as readonly [IjfwErrorReason, ...IjfwErrorReason[]]
 );
 
 // Renderer → main argument schema for `brain.invoke`. Pre-flight only - the

@@ -31,6 +31,7 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { createGunzip } from 'node:zlib';
 import * as tar from 'tar';
+import { appDataDir } from '@process/utils/appPaths';
 
 /**
  * cloudflare's stable "latest" release download endpoint. GitHub redirects
@@ -84,11 +85,8 @@ function resolveAssetSpec(platform: NodeJS.Platform, arch: string): AssetSpec | 
 async function resolveBinDir(): Promise<string> {
   let base: string;
   try {
-    // Lazy require so this module is importable in non-electron test contexts.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require('electron') as { app?: { getPath?: (n: string) => string } };
-    const userData = electron.app?.getPath?.('userData');
-    base = userData ?? path.join(os.homedir(), '.wayland');
+    // Electron userData, or the platform data dir (DATA_DIR) in the server.
+    base = appDataDir();
   } catch {
     base = path.join(os.homedir(), '.wayland');
   }

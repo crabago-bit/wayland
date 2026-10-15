@@ -9,7 +9,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { app } from 'electron';
+import { appDataDir } from '@process/utils/appPaths';
 import { writeFileSyncAtomic } from './atomicWrite';
 
 const FILE_NAME = 'analytics.json';
@@ -18,11 +18,11 @@ type AnalyticsData = { id: string };
 
 /**
  * Returns a persistent anonymous analytics ID for this installation.
- * Stored in app.getPath('userData')/analytics.json.
+ * Stored in <userData>/analytics.json (DATA_DIR in the standalone server).
  * No personal data is collected - the ID is a random UUID.
  */
 export function getOrCreateAnalyticsId(): string {
-  const filePath = path.join(app.getPath('userData'), FILE_NAME);
+  const filePath = path.join(appDataDir(), FILE_NAME);
   try {
     if (fs.existsSync(filePath)) {
       const data = JSON.parse(fs.readFileSync(filePath, 'utf8')) as AnalyticsData;

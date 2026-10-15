@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { app } from 'electron';
+import { appDataDir, appLogsDir } from '@process/utils/appPaths';
 import * as fs from 'fs';
 import * as path from 'path';
 import { invalidateUsageCache } from './computeUsage';
@@ -20,15 +20,11 @@ export type StorageDirKind = 'workspace' | 'cache' | 'logs';
 export type ClearableDirKind = 'cache' | 'logs';
 
 export function getUserDataDir(): string {
-  return app.getPath('userData');
+  return appDataDir();
 }
 
 export function getLogsDir(): string {
-  try {
-    return app.getPath('logs');
-  } catch {
-    return path.join(getUserDataDir(), 'logs');
-  }
+  return appLogsDir();
 }
 
 /** Resolve all known storage directories. */

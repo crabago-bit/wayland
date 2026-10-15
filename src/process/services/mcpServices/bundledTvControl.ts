@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { app } from 'electron';
+import { appBundlePath, appDataDir, appIsPackaged } from '@process/utils/appPaths';
 import authority from '../../../../scripts/tvcontrol/authority.json';
 
 export const TVCONTROL_VERSION = authority.version;
@@ -55,7 +55,7 @@ export function verifyTvControlTree(root: string, expectedDigest = authority.tre
 
 export function bundledTvControlRoot(): string {
   return path.join(
-    app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'resources'),
+    appIsPackaged() ? process.resourcesPath : path.join(appBundlePath(), 'resources'),
     'bundled-tvcontrol'
   );
 }
@@ -67,7 +67,7 @@ export function resolveBundledTvControlEntry(root = bundledTvControlRoot()): str
 }
 
 /** Bun loads the managed server from a verified, application-owned user directory. */
-export function resolveUserTvControlEntry(source = bundledTvControlRoot(), userData = app.getPath('userData')): string {
+export function resolveUserTvControlEntry(source = bundledTvControlRoot(), userData = appDataDir()): string {
   resolveBundledTvControlEntry(source);
   let current = fs.realpathSync(userData);
   for (const part of ['mcp-runtimes', 'tvcontrol', authority.treeSha256]) {

@@ -29,6 +29,7 @@
  */
 import { resolveFuigoBinary } from '@process/agent/fuigo/runtime';
 import { fuigoHomeDir } from '@process/agent/fuigo/launch';
+import { appDataDir } from '@process/utils/appPaths';
 
 /** Minimal structural view of a conversation the resolver reads. */
 export type TerminalSessionInput = {
@@ -59,12 +60,10 @@ export type TerminalCommandDeps = {
   fuigoHome?: () => string;
 };
 
-/** `<userData>/fuigo` - the one engine home every Fuigo spawn shares. Lazily
- *  required so the pure resolver can be imported outside Electron. */
+/** `<userData>/fuigo` - the one engine home every Fuigo spawn shares (DATA_DIR
+ *  in the standalone server, where Electron's `app` is undefined). */
 function defaultFuigoHome(): string {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports, global-require
-  const { app } = require('electron') as { app: { getPath: (name: string) => string } };
-  return fuigoHomeDir(app.getPath('userData'));
+  return fuigoHomeDir(appDataDir());
 }
 
 export function resolveTerminalCommand(

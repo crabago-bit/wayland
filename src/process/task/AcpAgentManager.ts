@@ -90,8 +90,7 @@ import {
   readDroppedUserHookEvents,
 } from '@process/task/claudeConfig';
 import { materializeFluxHermesHome } from '@process/task/hermesConfig';
-import { app } from 'electron';
-import { getPlatformServices } from '@/common/platform';
+import { appDataDir } from '@process/utils/appPaths';
 import BaseAgentManager from './BaseAgentManager';
 import { IpcAgentEventEmitter } from './IpcAgentEventEmitter';
 import { hasCronCommands } from './CronCommandDetector';
@@ -204,25 +203,8 @@ type BufferedStreamTextMessage = {
 
 type CustomAgentLaunchConfig = Pick<AcpBackendConfig, 'id' | 'name' | 'defaultCliPath' | 'acpArgs' | 'env'>;
 
-/**
- * Wayland's data root for engine homes: Electron's `userData`, or - in the
- * standalone WebUI server, whose `electron` import is the npm package with no
- * `app` - the platform services' data dir (DATA_DIR there), which Electron
- * maps to the same `userData`.
- *
- * An empty or relative root is refused: every home joined under it would
- * resolve against the spawn's cwd, i.e. inside the agent's own workspace.
- */
-function resolveAppDataDir(): string {
-  const dir = app?.getPath ? app.getPath('userData') : getPlatformServices().paths.getDataDir();
-  if (!dir || !path.isAbsolute(dir)) {
-    throw new Error(
-      `Wayland data directory must be an absolute path, got ${JSON.stringify(dir ?? '')}; ` +
-        'set DATA_DIR to an absolute path.'
-    );
-  }
-  return path.resolve(dir);
-}
+/** Wayland's data root for engine homes (see appDataDir: refuses an empty or relative root). */
+const resolveAppDataDir = appDataDir;
 
 /**
  * Authoritative backend-session facts consumed by the recovery state-authority
