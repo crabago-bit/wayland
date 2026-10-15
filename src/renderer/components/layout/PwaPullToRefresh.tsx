@@ -26,10 +26,15 @@ const PwaPullToRefresh: React.FC = () => {
       (document.scrollingElement as HTMLElement) ||
       document.documentElement;
 
+    let startX = 0;
     let startY = 0;
+    let deltaX = 0;
     let deltaY = 0;
     let tracking = false;
-    const threshold = 70; // px
+    // A deliberate pull only: an ordinary downward swipe (scrolling a chat back,
+    // dragging a panel) used to cross 70px and reload the whole app mid-work.
+    const threshold = 140; // px
+    const startZone = 120; // px from the top of the viewport the pull must start in
 
     const getNearestScrollable = (el: EventTarget | null): HTMLElement | null => {
       let node: HTMLElement | null = el instanceof HTMLElement ? el : null;
@@ -66,38 +71,55 @@ const PwaPullToRefresh: React.FC = () => {
     };
 
     const onTouchStart = (e: TouchEvent) => {
+      tracking = false;
       if (e.touches.length !== 1) return;
       if (isTextInput(e.target)) return; // avoid interfering with text selection/editing
+      // Inside any scrollable region (chat list, panels) a downward drag is a scroll.
+      if (getNearestScrollable(e.target)) return;
       if (!isAtPageTop(e.target)) return;
-      startY = e.touches[0].clientY;
+      const touch = e.touches[0];
+      if (touch.clientY > startZone) return;
+      startX = touch.clientX;
+      startY = touch.clientY;
+      deltaX = 0;
       deltaY = 0;
       tracking = true;
     };
 
     const onTouchMove = (e: TouchEvent) => {
       if (!tracking) return;
-      const currentY = e.touches[0].clientY;
-      deltaY = currentY - startY;
-      if (deltaY <= 0) return; // only consider pull down
+      if (e.touches.length !== 1) {
+        tracking = false; // a pinch or second finger is never a pull
+        return;
+      }
+      deltaX = e.touches[0].clientX - startX;
+      deltaY = e.touches[0].clientY - startY;
       // Do not prevent default to preserve natural bounce; we only act on release
     };
 
     const onTouchEnd = () => {
       if (!tracking) return;
       tracking = false;
-      if (deltaY >= threshold) {
+      // Mostly vertical and long enough to be intentional.
+      if (deltaY >= threshold && Math.abs(deltaX) < deltaY / 2) {
         window.location.reload();
       }
+    };
+
+    const onTouchCancel = () => {
+      tracking = false;
     };
 
     container.addEventListener('touchstart', onTouchStart, { passive: true });
     container.addEventListener('touchmove', onTouchMove, { passive: true });
     container.addEventListener('touchend', onTouchEnd, { passive: true });
+    container.addEventListener('touchcancel', onTouchCancel, { passive: true });
 
     return () => {
       container.removeEventListener('touchstart', onTouchStart, false);
       container.removeEventListener('touchmove', onTouchMove, false);
       container.removeEventListener('touchend', onTouchEnd, false);
+      container.removeEventListener('touchcancel', onTouchCancel, false);
     };
   }, [isPwa]);
 
