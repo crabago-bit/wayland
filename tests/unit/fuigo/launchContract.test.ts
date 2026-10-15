@@ -304,6 +304,27 @@ describe('launch helpers', () => {
     expect(FUIGO_LADDERED_PERMISSION_RULES).toMatch(/\[permission\]\nask = \["Bash\(touch:\*\)", "Bash\(mkdir:\*\)"\]/);
   });
 
+  it('revokes the plugin trust store and every remembered per-project grant, keeping transcripts', () => {
+    const home = mkdtempSync(join(tmpdir(), 'fuigo-laddered-grants-'));
+    try {
+      const scope = join(home, 'sessions', '%2Ftmp%2Fws');
+      mkdirSync(scope, { recursive: true });
+      writeFileSync(join(home, 'trusted-plugins.fuigo'), 'trusted\n');
+      writeFileSync(join(scope, 'permission.toml'), 'allowed_bash_commands = ["curl"]\n');
+      writeFileSync(join(scope, 'permission_wayland.toml'), 'allowed_web_fetch_domains = ["x"]\n');
+      writeFileSync(join(scope, 'chat_history.jsonl'), '{}\n');
+      writeFileSync(join(home, 'sessions', 'stray-file'), '');
+      revokeFuigoFolderTrust(home);
+      expect(() => statSync(join(home, 'trusted-plugins.fuigo'))).toThrow();
+      expect(() => statSync(join(scope, 'permission.toml'))).toThrow();
+      expect(() => statSync(join(scope, 'permission_wayland.toml'))).toThrow();
+      expect(statSync(join(scope, 'chat_history.jsonl')).isFile()).toBe(true);
+      expect(statSync(join(home, 'sessions', 'stray-file')).isFile()).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it('sets both process budgets for unattended runs only', () => {
     expect(fuigoBudgetEnv({ unattended: true })).toEqual({
       FUIGO_MAX_MODEL_CALLS: '200',

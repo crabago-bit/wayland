@@ -40,9 +40,43 @@ export function fuigoLadderedHomeDir(userDataDir: string): string {
   return path.join(userDataDir, 'fuigo-laddered');
 }
 
-/** Drop every persisted folder-trust grant in `homeDir` (laddered home only). */
+/** A per-project remembered-grant file: `permission.toml` or a per-client `permission_<client>.toml`. */
+const FUIGO_GRANT_FILE = /^permission(?:_[^/\\]+)?\.toml$/;
+
+/**
+ * Drop every persisted trust and remembered-approval store in `homeDir`
+ * (laddered home only). The stores, as named in the 1.0.19 binary and docs:
+ *
+ *  - `trusted_folders.toml`: `--trust` folder grants (see fuigoLadderedHomeDir);
+ *  - `trusted-plugins.fuigo`: the plugin trust store; a trusted plugin loads
+ *    its hooks and MCP servers;
+ *  - `sessions/<scope>/permission.toml` and `permission_<client>.toml`: the
+ *    per-project "always allow" grants (command prefixes and globs, MCP tools
+ *    and servers, web-fetch domains). A remembered grant runs the matching
+ *    call without asking the client, so the permission gate never sees it.
+ *
+ * Session transcripts under `sessions/` are left alone.
+ */
 export function revokeFuigoFolderTrust(homeDir: string): void {
   fs.rmSync(path.join(homeDir, 'trusted_folders.toml'), { force: true });
+  fs.rmSync(path.join(homeDir, 'trusted-plugins.fuigo'), { force: true });
+  const sessions = path.join(homeDir, 'sessions');
+  let scopes: fs.Dirent[];
+  try {
+    scopes = fs.readdirSync(sessions, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  for (const scope of scopes) {
+    if (!scope.isDirectory()) continue;
+    const dir = path.join(sessions, scope.name);
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (FUIGO_GRANT_FILE.test(entry.name) && !entry.isDirectory()) {
+        fs.rmSync(path.join(dir, entry.name), { force: true });
+      }
+    }
+  }
 }
 
 /**
