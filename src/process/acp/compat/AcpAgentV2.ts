@@ -1138,8 +1138,16 @@ export class AcpAgentV2 {
    */
   private async applyLadderedSessionMeta(): Promise<void> {
     const skillPlugin = await this.buildLadderedSkillPlugin();
+    // Every build is a new dir; one this session built earlier and still holds
+    // is its own to drop (never another session's).
+    const previous = this.skillPluginPath;
     this.skillPluginPath = skillPlugin?.path;
     this.skillPluginRemoved = false;
+    if (previous && previous !== skillPlugin?.path) {
+      await removeLadderedSkillPlugin(previous).catch((error: unknown) =>
+        console.warn('[AcpAgentV2] could not remove the previous laddered skill plugin:', error)
+      );
+    }
     if (this.agentConfig.agentBackend === 'fuigo') {
       // Fuigo: the plugin REPLACES the `<workspace>/.wayland` staging as the
       // only `_meta.pluginDirs` entry (an empty list when it could not be

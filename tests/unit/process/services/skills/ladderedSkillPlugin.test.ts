@@ -11,6 +11,7 @@
  * bounded skills, nothing that runs code or grants permissions.
  */
 
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -36,6 +37,7 @@ import {
   removeLadderedSkillPlugin,
   sanitizeSkillMarkdown,
   sweepLadderedSkillPlugins,
+  LADDERED_PLUGIN_OWNER_FILE,
   withLadderedSkillPrompt,
 } from '@process/services/jarvis/ladderedSkillPlugin';
 import { setupAssistantWorkspace } from '@process/utils/initAgent';
@@ -130,8 +132,10 @@ async function build(extra: Partial<Parameters<typeof buildLadderedSkillPlugin>[
 describe('buildLadderedSkillPlugin', () => {
   it('holds a manifest and exactly the bounded skills - nothing else', async () => {
     const dir = await build();
-    expect(dir).toBe(path.join(pluginRoot, 'conv-1'));
-    expect(fs.readdirSync(dir).toSorted()).toEqual(['.claude-plugin', 'skills']);
+    expect(path.dirname(dir)).toBe(pluginRoot);
+    expect(path.basename(dir)).toMatch(/^conv-1-[0-9a-f-]{36}$/);
+    expect(fs.readdirSync(dir).toSorted()).toEqual(['.claude-plugin', LADDERED_PLUGIN_OWNER_FILE, 'skills']);
+    expect(fs.readFileSync(path.join(dir, LADDERED_PLUGIN_OWNER_FILE), 'utf8')).toBe(`${process.pid}\n`);
     expect(fs.readdirSync(path.join(dir, '.claude-plugin'))).toEqual(['plugin.json']);
     const manifest = JSON.parse(fs.readFileSync(path.join(dir, '.claude-plugin', 'plugin.json'), 'utf8'));
     expect(Object.keys(manifest).toSorted()).toEqual(['description', 'name', 'version']);
@@ -258,21 +262,58 @@ describe('buildLadderedSkillPlugin', () => {
     expect(fs.existsSync(dir)).toBe(false);
   });
 
-  it('a rebuild swaps in a fresh dir at the same path and leaves no half-built or retired dirs', async () => {
+  it('a rebuild under the same key gets its own dir and never touches the earlier one', async () => {
     const first = await build({ sessionKey: 'swap' });
     const second = await build({ sessionKey: 'swap', enabledSkills: ['mermaid'] });
-    expect(second).toBe(first);
+    expect(second).not.toBe(first);
+    // The earlier session's dir is still there, unchanged: no window where its path is missing.
+    expect(fs.readdirSync(path.join(first, 'skills')).toSorted()).toEqual([
+      'crew-core-brand-context',
+      'cron',
+      'office-cli',
+      'pdf',
+    ]);
     expect(fs.readdirSync(path.join(second, 'skills')).toSorted()).toEqual(['cron', 'mermaid', 'office-cli']);
-    expect(fs.readdirSync(pluginRoot).filter((n) => n.startsWith('swap'))).toEqual(['swap']);
+    // No shared `<key>` path and no half-built or retired leftovers.
+    expect(
+      fs
+        .readdirSync(pluginRoot)
+        .filter((n) => n.startsWith('swap'))
+        .toSorted()
+    ).toEqual([path.basename(first), path.basename(second)].toSorted());
   });
 
-  it('concurrent builds under one key both end with a complete plugin', async () => {
-    const results = await Promise.all([build({ sessionKey: 'race' }), build({ sessionKey: 'race' })]);
-    for (const dir of results) {
+  it('two sessions of one conversation cannot delete each other’s dir', async () => {
+    const [a, b] = await Promise.all([build({ sessionKey: 'race' }), build({ sessionKey: 'race' })]);
+    expect(a).not.toBe(b);
+    for (const dir of [a, b]) {
       expect(fs.readdirSync(path.join(dir, 'skills'))).toContain('crew-core-brand-context');
       expect(fs.existsSync(path.join(dir, '.claude-plugin', 'plugin.json'))).toBe(true);
     }
-    expect(fs.readdirSync(pluginRoot).filter((n) => n.startsWith('race') && n.includes('.retired-'))).toEqual([]);
+    await removeLadderedSkillPlugin(a, pluginRoot);
+    expect(fs.existsSync(a)).toBe(false);
+    expect(fs.existsSync(path.join(b, '.claude-plugin', 'plugin.json'))).toBe(true);
+  });
+
+  it('the sweep never removes a dir whose owner process is alive, whatever its age', async () => {
+    const now = Date.now();
+    const owned = (name: string, pid: number) => {
+      const dir = path.join(pluginRoot, name);
+      fs.mkdirSync(path.join(dir, 'skills'), { recursive: true });
+      fs.writeFileSync(path.join(dir, LADDERED_PLUGIN_OWNER_FILE), `${pid}\n`);
+      const t = (now - LADDERED_PLUGIN_STALE_MS * 2) / 1000;
+      fs.utimesSync(dir, t, t);
+      return dir;
+    };
+    // Another live process (our parent) owns one; a process that has exited owns the other.
+    const exited = spawnSync(process.execPath, ['-e', '0']).pid as number;
+    const otherLive = owned('owner-live', process.ppid);
+    const dead = owned('owner-dead', exited);
+    const removed = await sweepLadderedSkillPlugins(pluginRoot, now);
+    expect(removed).toContain('owner-dead');
+    expect(removed).not.toContain('owner-live');
+    expect(fs.existsSync(otherLive)).toBe(true);
+    expect(fs.existsSync(dead)).toBe(false);
   });
 
   it('the sweep removes stale and half-built dirs but keeps live and recent ones', async () => {
@@ -344,7 +385,7 @@ describe('buildLadderedSkillPlugin', () => {
 
   it('a Fuigo plugin holds the same skills, listed under their plain names', async () => {
     const plugin = await buildFull({ backend: 'fuigo', sessionKey: 'conv-fuigo' });
-    expect(plugin.path).toBe(path.join(pluginRoot, 'conv-fuigo'));
+    expect(path.basename(plugin.path)).toMatch(/^conv-fuigo-[0-9a-f-]{36}$/);
     const pdf = plugin.skills.find((s) => s.requested === 'pdf');
     // Fuigo lists a pluginDirs skill by its frontmatter name, with no plugin prefix.
     expect(pdf?.sessionName).toBe('pdf');

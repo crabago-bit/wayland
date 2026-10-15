@@ -55,12 +55,16 @@
  *
  * Inside a skill, dotfiles, `hooks*`, `agents/` and `commands/` are not copied.
  *
- * WHERE IT LIVES. `<dataDir>/laddered-skill-plugins/<key>`, never inside the
- * agent's workspace; the key must be a single safe path segment and every
- * mkdir/chmod/rm is confined to direct children of that root. Rebuilt from
- * scratch for every session (in a sibling dir, then swapped in), left
- * read-only (files 0444 - so a skill's scripts are not directly executable),
- * removed when the session ends, and swept once per process for leftovers.
+ * WHERE IT LIVES. `<dataDir>/laddered-skill-plugins/<key>-<uuid>`, never
+ * inside the agent's workspace; the key must be a single safe path segment and
+ * every mkdir/chmod/rm is confined to direct children of that root. Every
+ * build gets its OWN dir (no shared `<key>` path is ever renamed or replaced),
+ * so a live session's dir never goes missing under it and two sessions of one
+ * conversation cannot delete each other's. Left read-only (files 0444 - so a
+ * skill's scripts are not directly executable), removed by the session that
+ * built it when it ends, and swept once per process for leftovers: each dir
+ * carries its builder's pid (OWNER_FILE) and a dir whose owner is still alive
+ * is never swept, whichever process sweeps.
  */
 
 import { getDataPath } from '@process/utils/utils';
@@ -190,13 +194,15 @@ export function withLadderedSkillPrompt(
   return append ? { ...meta, systemPrompt: { append } } : meta;
 }
 
-/** Name markers of a build in progress and of a build being replaced. */
+/** Name markers of the retired rename-swap scheme (a build in progress / a build being replaced). */
 const BUILDING = '.building-';
 const RETIRED = '.retired-';
 /** A plugin dir untouched this long, with no live session, is swept. */
 export const LADDERED_PLUGIN_STALE_MS = 24 * 60 * 60_000;
 /** A half-built or retired dir this old is swept. */
 export const LADDERED_PLUGIN_HALF_BUILT_MS = 10 * 60_000;
+/** The builder's pid, written first into every plugin dir (a dotfile, so no plugin loader reads it). */
+export const LADDERED_PLUGIN_OWNER_FILE = '.wayland-owner-pid';
 
 /** Plugin dirs this process handed to a live session. */
 const liveDirs = new Set<string>();
@@ -221,8 +227,8 @@ function assertPluginDir(root: string, dir: string): string {
 
 /**
  * Build the plugin dir for one session, or `undefined` when `backend` is not
- * one of LADDERED_SKILL_PLUGIN_BACKENDS. The build is made in a sibling dir and swapped in, so a live session
- * reading the previous build under the same key never sees a gap.
+ * one of LADDERED_SKILL_PLUGIN_BACKENDS. Each call builds a fresh, unique
+ * `<key>-<uuid>` dir and nothing else touches it until its builder removes it.
  */
 export async function buildLadderedSkillPlugin(
   options: BoundedSkillSetOptions & {
@@ -239,8 +245,7 @@ export async function buildLadderedSkillPlugin(
   const key = ladderedSkillPluginKey(options.sessionKey);
   if (!key) throw new Error(`[ladderedSkillPlugin] invalid session key ${JSON.stringify(options.sessionKey)}`);
   const root = path.resolve(options.rootDir ?? ladderedSkillPluginRoot());
-  const finalDir = assertPluginDir(root, path.join(root, key));
-  const buildDir = assertPluginDir(root, path.join(root, `${key}${BUILDING}${randomUUID()}`));
+  const buildDir = assertPluginDir(root, path.join(root, `${key}-${randomUUID()}`));
   await fs.mkdir(root, { recursive: true });
   await sweepOnce(root);
 
@@ -253,6 +258,10 @@ export async function buildLadderedSkillPlugin(
 
   const placed: LadderedSkillEntry[] = [];
   try {
+    await fs.mkdir(buildDir);
+    // Claimed before anything else, so a sweep in another process skips it.
+    await fs.writeFile(path.join(buildDir, LADDERED_PLUGIN_OWNER_FILE), `${process.pid}\n`);
+    liveDirs.add(buildDir);
     await fs.mkdir(path.join(buildDir, '.claude-plugin'), { recursive: true });
     await fs.writeFile(
       path.join(buildDir, '.claude-plugin', 'plugin.json'),
@@ -298,42 +307,12 @@ export async function buildLadderedSkillPlugin(
     }
     await makeReadOnly(buildDir);
   } catch (error) {
+    liveDirs.delete(buildDir);
     await removeTree(buildDir).catch(() => {});
     throw error;
   }
 
-  const pluginPath = await swapIn(root, buildDir, finalDir, key);
-  liveDirs.add(pluginPath);
-  return { path: pluginPath, skills: placed };
-}
-
-/**
- * Move `buildDir` to `finalDir`: the previous build is renamed aside first and
- * removed after. If a concurrent build takes `finalDir` first (or the rename
- * is refused), the complete `buildDir` is used where it is.
- */
-async function swapIn(root: string, buildDir: string, finalDir: string, key: string): Promise<string> {
-  const retired = assertPluginDir(root, path.join(root, `${key}${RETIRED}${randomUUID()}`));
-  let moved = false;
-  try {
-    await fs.rename(finalDir, retired);
-    moved = true;
-  } catch (error) {
-    if (errorCode(error) !== 'ENOENT')
-      console.warn('[ladderedSkillPlugin] could not retire the previous build:', error);
-  }
-  let pluginPath = finalDir;
-  try {
-    await fs.rename(buildDir, finalDir);
-  } catch (error) {
-    if (!['EEXIST', 'ENOTEMPTY', 'EACCES', 'EPERM'].includes(errorCode(error) ?? '')) {
-      await removeTree(buildDir).catch(() => {});
-      throw error;
-    }
-    pluginPath = buildDir; // a concurrent build won the name; this build is complete too
-  }
-  if (moved) await removeTree(retired).catch(() => {});
-  return pluginPath;
+  return { path: buildDir, skills: placed };
 }
 
 /**
@@ -347,10 +326,34 @@ export async function removeLadderedSkillPlugin(dir: string, root: string = ladd
 }
 
 /**
- * Delete plugin dirs no live session of this process uses: half-built and
- * retired dirs older than LADDERED_PLUGIN_HALF_BUILT_MS, and any other dir
- * untouched for LADDERED_PLUGIN_STALE_MS (left behind by a crash or restart).
- * Returns the names removed.
+ * Whether `pid` names a running process. EPERM means it exists under another
+ * user, which counts as alive.
+ */
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return errorCode(error) === 'EPERM';
+  }
+}
+
+/** The live owner pid recorded in a plugin dir, or `undefined` (no file, unparsable, or not running). */
+async function liveOwnerPid(dir: string): Promise<number | undefined> {
+  const text = await fs.readFile(path.join(dir, LADDERED_PLUGIN_OWNER_FILE), 'utf8').catch((): undefined => undefined);
+  const pid = text === undefined ? NaN : Number(text.trim());
+  if (!Number.isInteger(pid) || pid <= 0) return undefined;
+  return isPidAlive(pid) ? pid : undefined;
+}
+
+/**
+ * Delete plugin dirs no live session uses. A dir this process handed out, or
+ * whose recorded owner pid is another RUNNING process, is never touched - so
+ * two server processes sharing a data dir cannot sweep each other's live
+ * builds. Otherwise the age thresholds apply: half-built and retired dirs of
+ * the old rename-swap scheme older than LADDERED_PLUGIN_HALF_BUILT_MS, any
+ * other dir untouched for LADDERED_PLUGIN_STALE_MS (left behind by a crash or
+ * restart). Returns the names removed.
  */
 export async function sweepLadderedSkillPlugins(
   root: string = ladderedSkillPluginRoot(),
@@ -369,6 +372,8 @@ export async function sweepLadderedSkillPlugins(
     if (liveDirs.has(dir)) continue;
     const stat = await fs.lstat(dir).catch((): undefined => undefined);
     if (!stat?.isDirectory()) continue;
+    const owner = await liveOwnerPid(dir);
+    if (owner !== undefined && owner !== process.pid) continue;
     const halfBuilt = name.includes(BUILDING) || name.includes(RETIRED);
     if (now - stat.mtimeMs > (halfBuilt ? LADDERED_PLUGIN_HALF_BUILT_MS : LADDERED_PLUGIN_STALE_MS)) {
       try {
