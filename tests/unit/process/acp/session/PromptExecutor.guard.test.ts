@@ -76,6 +76,31 @@ describe('PromptExecutor - pre-prompt guard', () => {
     expect(host.enterError).not.toHaveBeenCalled();
   });
 
+  it.each(['cancel', 'cancelAll'] as const)(
+    'a %s() while the guard runs stops the turn before the prompt is sent',
+    async (method) => {
+      let release!: () => void;
+      const { host, prompt, client } = createHost(() => new Promise<void>((r) => (release = r)));
+      const executor = new PromptExecutor(host, 600_000);
+      const turn = executor.execute(CONTENT);
+      await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+      executor[method]();
+      expect(client.cancel).toHaveBeenCalledWith('sess-1');
+      release();
+      await turn;
+      expect(prompt).not.toHaveBeenCalled();
+      expect(host.enterError).not.toHaveBeenCalled();
+      expect(host.status).toBe('active');
+      expect(host.callbacks.onSignal).toHaveBeenCalledWith({ type: 'turn_finished' });
+    }
+  );
+
+  it('a guarded turn that was not cancelled still sends its prompt', async () => {
+    const { host, prompt } = createHost(async () => {});
+    await new PromptExecutor(host, 600_000).execute(CONTENT);
+    expect(prompt).toHaveBeenCalledTimes(1);
+  });
+
   it('still fails the turn on a guard rejection', async () => {
     const { host, prompt } = createHost(async () => {
       throw new Error('mode refused');

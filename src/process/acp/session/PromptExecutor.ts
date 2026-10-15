@@ -311,6 +311,17 @@ export class PromptExecutor {
       }
     }
 
+    // A Stop pressed while the guard ran (or while the config re-assert above
+    // ran): cancel() could only flag the turn, since nothing was in flight to
+    // cancel yet. Honour it here, before anything reaches the agent.
+    if (this.turnCancelled || this.turnAbort.signal.aborted) {
+      this.host.messageTranslator.onTurnEnd();
+      this.host.setStatus('active');
+      this.host.callbacks.onSignal({ type: 'turn_finished' });
+      this.flush();
+      return;
+    }
+
     // Retry INSIDE the awaited promise, deliberately: AcpAgentManager awaits
     // this turn, and on a rejection it emits the error banner and synthesizes a
     // `finish` that releases the loading state. Retrying out here (rather than
