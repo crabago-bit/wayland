@@ -117,6 +117,36 @@ function isTransientPromptFailure(acpErr: AcpError): boolean {
  */
 export const DEFAULT_TOOL_CALL_TIMEOUT_MS = 30 * 60_000;
 
+/**
+ * Upper bound on the strict pre-prompt guard (`PromptHost.beforePrompt`). A
+ * live but silent agent would otherwise hold the turn forever before the
+ * prompt is sent. Running out counts as a definite failure: the prompt is not
+ * sent and the session enters error.
+ */
+export const PROMPT_GUARD_TIMEOUT_MS = 30_000;
+
+/** `beforePrompt()`, rejected when it has not settled within `ms`. */
+async function runGuardWithin(guard: () => Promise<void>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new AcpError(
+            'INVALID_STATE',
+            `The pre-prompt safety check did not finish within ${Math.round(ms / 1000)} s; the prompt was not sent.`
+          )
+        ),
+      ms
+    );
+  });
+  try {
+    await Promise.race([guard(), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 type InFlightTool = { title: string; startedAt: number; ceiling: ReturnType<typeof setTimeout> };
 
 type TimeoutCause = { kind: 'idle' } | { kind: 'tool'; key: string };
@@ -272,7 +302,7 @@ export class PromptExecutor {
     // above, a failure here means this prompt must not run at all.
     if (this.host.beforePrompt) {
       try {
-        await this.host.beforePrompt();
+        await runGuardWithin(this.host.beforePrompt, PROMPT_GUARD_TIMEOUT_MS);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         this.host.messageTranslator.onTurnEnd();

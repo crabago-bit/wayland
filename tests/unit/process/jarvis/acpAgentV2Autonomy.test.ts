@@ -13,7 +13,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AcpAgentV2 } from '@process/acp/compat/AcpAgentV2';
+import { AcpAgentV2, LADDERED_MODE_CONFIRM_TIMEOUT_MS } from '@process/acp/compat/AcpAgentV2';
 import type { OldAcpAgentConfig } from '@process/acp/compat/typeBridge';
 import type { AgentConfig, SessionCallbacks } from '@process/acp/types';
 import type { SessionOptions } from '@process/acp/session/AcpSession';
@@ -445,6 +445,45 @@ describe('AcpAgentV2 - JARVIS autonomy on the live path', () => {
     sessionConfirmMode.mockResolvedValue(null);
     await startAgent({ customAgentId: PACK });
     await expect(capturedOptions!.beforePrompt!()).rejects.toThrow(/could not take a mode change/);
+  });
+
+  it('the guard fails closed when the agent never answers the mode change (30 s bound)', async () => {
+    stubStorage({ [`custom:${PACK}`]: 2 });
+    sessionConfirmMode.mockReturnValue(new Promise(() => {}));
+    await startAgent({ customAgentId: PACK });
+    vi.useFakeTimers();
+    try {
+      const guard = expect(capturedOptions!.beforePrompt!()).rejects.toThrow(
+        /did not accept session mode "default" \(no answer within 30 s\)/
+      );
+      await vi.advanceTimersByTimeAsync(LADDERED_MODE_CONFIRM_TIMEOUT_MS);
+      await guard;
+      // Writes stay refused.
+      const write = {
+        sessionId: 's',
+        toolCall: { toolCallId: 'c', title: 'Write a.md', kind: 'edit' as const },
+        options: [{ optionId: 'a', name: 'Allow', kind: 'allow_once' as const }],
+      };
+      expect(capturedOptions!.permissionGate!.check(write).action).toBe('deny');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a mid-turn re-apply the agent never answers stops the session (30 s bound)', async () => {
+    stubStorage({ [`custom:${PACK}`]: 2 });
+    sessionConfirmMode.mockReturnValue(new Promise(() => {}));
+    await startAgent({ customAgentId: PACK });
+    vi.useFakeTimers();
+    try {
+      capturedCallbacks.onModeUpdate({ currentModeId: 'auto', availableModes: [] } as never);
+      await vi.advanceTimersByTimeAsync(LADDERED_MODE_CONFIRM_TIMEOUT_MS - 1);
+      expect(sessionStop).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(sessionStop).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('a mode report while the session is not ready does NOT stop it', async () => {

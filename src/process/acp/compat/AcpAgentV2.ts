@@ -69,6 +69,30 @@ import {
 const LADDERED_FUIGO_REFUSED_COMMAND = /^\s*\/(?:always-approve|plugins|reload-plugins)(?![\w-])/i;
 
 /**
+ * How long a laddered session waits for the agent to accept a mode change
+ * (`session/set_mode`). A live but silent agent would otherwise hang the
+ * pre-prompt guard, or leave writes refused indefinitely after a mid-turn
+ * drift. No answer in time counts as a refusal: the session fails closed.
+ */
+export const LADDERED_MODE_CONFIRM_TIMEOUT_MS = 30_000;
+
+/** `session.confirmMode(target)`, rejected when the agent has not answered within the bound. */
+async function confirmModeWithin(session: AcpSession, target: string): Promise<string | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`no answer within ${LADDERED_MODE_CONFIRM_TIMEOUT_MS / 1000} s`)),
+      LADDERED_MODE_CONFIRM_TIMEOUT_MS
+    );
+  });
+  try {
+    return await Promise.race([session.confirmMode(target), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Temporary: backend-specific CLI login arguments.
  * Will be replaced by `authCommand + args` config in PR #2349.
  */
@@ -506,7 +530,8 @@ export class AcpAgentV2 {
    * that prompt and enter error with the reason.
    *
    * Fails only on a DEFINITE problem: an unverified bridge, or the agent
-   * refusing the mode change. A session that cannot take a mode change right
+   * refusing the mode change - or not answering it within
+   * LADDERED_MODE_CONFIRM_TIMEOUT_MS, which counts as a refusal. A session that cannot take a mode change right
    * now is not a refusal (and cannot happen inside the guard, which runs with
    * the session mid-turn).
    */
@@ -522,7 +547,7 @@ export class AcpAgentV2 {
     const target = this.ladderedMode ?? 'default';
     let applied: string | null;
     try {
-      applied = await this.session.confirmMode(target);
+      applied = await confirmModeWithin(this.session, target);
     } catch (err) {
       this.ladderedModeConfirmed = false;
       const reason = err instanceof Error ? err.message : String(err);
@@ -547,7 +572,8 @@ export class AcpAgentV2 {
    * (active, or mid-turn) the laddered mode is re-applied right away;
    * otherwise (starting, resuming, suspended) nothing is killed - the
    * `beforePrompt` guard confirms it before the next prompt is sent. Only a
-   * definite refusal by the agent stops the session.
+   * definite refusal by the agent (or no answer within
+   * LADDERED_MODE_CONFIRM_TIMEOUT_MS) stops the session.
    */
   private watchLadderedMode(currentModeId: string | null | undefined): void {
     if (!this.autonomy || !currentModeId) return;
@@ -559,8 +585,7 @@ export class AcpAgentV2 {
       `[AcpAgentV2] Autonomy rung ${this.autonomy.rung} (${this.autonomy.agent}): agent reported mode ${currentModeId}; re-applying ${this.ladderedMode ?? 'default'}`
     );
     const target = this.ladderedMode ?? 'default';
-    void session
-      .confirmMode(target)
+    void confirmModeWithin(session, target)
       .then((applied) => {
         if (applied !== null && this.session === session) this.ladderedModeConfirmed = true;
       })
