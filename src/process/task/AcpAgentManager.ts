@@ -998,7 +998,7 @@ ${collectedResponses.join('\n')}`;
         try {
           const sandboxMode = normalizeCodexSandboxMode(data.sandboxMode);
           const codexHome = await materializeFluxCodexHome(
-            app.getPath('userData'),
+            resolveAppDataDir(),
             sandboxMode,
             undefined,
             undefined,
@@ -1027,7 +1027,7 @@ ${collectedResponses.join('\n')}`;
       if (data.backend === 'claude') {
         try {
           mergedEnv.CLAUDE_CONFIG_DIR = await materializeFluxClaudeConfigDir(
-            app.getPath('userData'),
+            resolveAppDataDir(),
             undefined,
             data.effort
           );
@@ -1054,7 +1054,7 @@ ${collectedResponses.join('\n')}`;
           // hermes ignores FLUX_API_KEY for a custom provider, so the connector
           // writes the connected flux key inline into the scoped config.
           mergedEnv.HERMES_HOME = await materializeFluxHermesHome(
-            app.getPath('userData'),
+            resolveAppDataDir(),
             decision.env.FLUX_API_KEY ?? '',
             undefined,
             decision.fluxModelId
@@ -1106,7 +1106,7 @@ ${collectedResponses.join('\n')}`;
       try {
         const sandboxMode = normalizeCodexSandboxMode(data.sandboxMode);
         mergedEnv.CODEX_HOME = await materializeNativeCodexHome(
-          app.getPath('userData'),
+          resolveAppDataDir(),
           sandboxMode,
           undefined,
           undefined,
