@@ -172,6 +172,13 @@ if (win.electronAPI) {
       // Detect auth failure from close code (server sends 1008 for token issues).
       // This acts as a fallback in case the auth-expired message was not received
       // (e.g., socket not yet ready for sending during initial handshake).
+      // A missed-heartbeat close (phone froze the backgrounded tab) is not an
+      // auth failure. Older servers sent it as 1008; reconnect instead of
+      // bouncing the user to the login screen.
+      if (event.code === 1008 && event.reason === 'Heartbeat timeout' && shouldReconnect) {
+        scheduleReconnect();
+        return;
+      }
       if (event.code === 1008 && !shouldReconnect) {
         return; // Already handled by auth-expired message handler
       }
@@ -247,6 +254,22 @@ if (win.electronAPI) {
   });
 
   connect();
+
+  // Coming back to a backgrounded tab/PWA: reconnect at once instead of waiting
+  // out the back-off, so the UI is live again before the user taps anything.
+  const reconnectNow = () => {
+    if (document.visibilityState !== 'visible' || !shouldReconnect) return;
+    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+    if (reconnectTimer !== null) {
+      window.clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    reconnectDelay = 500;
+    connect();
+  };
+  document.addEventListener('visibilitychange', reconnectNow);
+  window.addEventListener('pageshow', reconnectNow);
+  window.addEventListener('online', reconnectNow);
 
   // Expose reconnection control for login flow
   win.__websocketReconnect = () => {

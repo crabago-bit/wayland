@@ -72,6 +72,9 @@ export const WEBSOCKET_CONFIG = {
     POLICY_VIOLATION: 1008,
     // Normal close code
     NORMAL_CLOSURE: 1000,
+    // Missed heartbeats (e.g. a phone froze the backgrounded tab). Not an auth
+    // failure: the client must reconnect, never treat it like 1008 and log out.
+    HEARTBEAT_TIMEOUT: 4000,
   },
 } as const;
 

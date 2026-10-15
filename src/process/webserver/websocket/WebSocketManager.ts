@@ -286,7 +286,7 @@ export class WebSocketManager {
       if (this.isClientTimeout(clientInfo, now)) {
         console.log('[WebSocketManager] Client heartbeat timeout, closing connection');
         try {
-          ws.close(WEBSOCKET_CONFIG.CLOSE_CODES.POLICY_VIOLATION, 'Heartbeat timeout');
+          ws.close(WEBSOCKET_CONFIG.CLOSE_CODES.HEARTBEAT_TIMEOUT, 'Heartbeat timeout');
         } catch {
           ws.terminate();
         }

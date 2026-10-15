@@ -89,6 +89,20 @@ describe('WebSocketManager', () => {
       expect(clients.has(ws)).toBe(false);
     });
 
+    it('closes a missed-heartbeat socket with the reconnect code, never the auth code 1008', async () => {
+      manager.initialize();
+
+      const ws = createMockWs(WebSocket.OPEN);
+      const clients = (manager as any).clients as Map<any, any>;
+      clients.set(ws, { token: 'some-token', lastPing: 0 });
+
+      await (manager as any).checkClients();
+
+      // 1008 makes the browser drop to the login screen; a frozen phone tab must reconnect instead.
+      expect(ws.close).toHaveBeenCalledWith(4000, 'Heartbeat timeout');
+      expect(ws.close).not.toHaveBeenCalledWith(1008, expect.anything());
+    });
+
     it('should catch EPIPE when closing a timed-out socket', async () => {
       manager.initialize();
 
