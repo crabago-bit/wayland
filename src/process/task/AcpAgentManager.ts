@@ -205,6 +205,26 @@ type BufferedStreamTextMessage = {
 type CustomAgentLaunchConfig = Pick<AcpBackendConfig, 'id' | 'name' | 'defaultCliPath' | 'acpArgs' | 'env'>;
 
 /**
+ * Wayland's data root for engine homes: Electron's `userData`, or - in the
+ * standalone WebUI server, whose `electron` import is the npm package with no
+ * `app` - the platform services' data dir (DATA_DIR there), which Electron
+ * maps to the same `userData`.
+ *
+ * An empty or relative root is refused: every home joined under it would
+ * resolve against the spawn's cwd, i.e. inside the agent's own workspace.
+ */
+function resolveAppDataDir(): string {
+  const dir = app?.getPath ? app.getPath('userData') : getPlatformServices().paths.getDataDir();
+  if (!dir || !path.isAbsolute(dir)) {
+    throw new Error(
+      `Wayland data directory must be an absolute path, got ${JSON.stringify(dir ?? '')}; ` +
+        'set DATA_DIR to an absolute path.'
+    );
+  }
+  return path.resolve(dir);
+}
+
+/**
  * Authoritative backend-session facts consumed by the recovery state-authority
  * ledger (plan 01-22). An ACP backend persists `acpSessionId` plus a pinned
  * `acpWrapperVersion` (`<backend>@<version>`) in `conversations.extra` via
@@ -1050,12 +1070,11 @@ ${collectedResponses.join('\n')}`;
       // the model cache carry across chats); Fuigo keys sessions by cwd.
       // A JARVIS-laddered agent gets its own trust-free home instead (see
       // fuigoLadderedHomeDir).
-      // The standalone WebUI server has no Electron `app` (the `electron`
-      // import resolves to the npm package, whose `app` is undefined); its data
-      // root comes from the platform services, which Electron maps to the same
-      // `userData`.
-      const userData = app?.getPath ? app.getPath('userData') : getPlatformServices().paths.getDataDir();
-      mergedEnv.FUIGO_HOME = laddered ? fuigoLadderedHomeDir(userData) : fuigoHomeDir(userData);
+      const userData = resolveAppDataDir();
+      const fuigoHome = path.resolve(laddered ? fuigoLadderedHomeDir(userData) : fuigoHomeDir(userData));
+      // ensureFuigoHome / revokeFuigoFolderTrust below write under this path.
+      if (!path.isAbsolute(fuigoHome)) throw new Error(`FUIGO_HOME must be absolute, got ${fuigoHome}`);
+      mergedEnv.FUIGO_HOME = fuigoHome;
       // The user's own providers become `[model.byok/…]` entries in the managed
       // config; each key (a keyless local server's placeholder included) rides
       // its own env var on this spawn and is never written to disk. With no

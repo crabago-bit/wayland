@@ -611,6 +611,39 @@ describe('AcpAgentManager Fuigo spawn contract', () => {
     }
   });
 
+  it.each([
+    ['empty', ''],
+    ['relative', 'stage-data'],
+    ['dot-relative', './data'],
+  ])('refuses an %s DATA_DIR instead of putting the engine home inside the workspace', async (_label, dataDir) => {
+    const saved = { app: electronState.app, dataDir: process.env.DATA_DIR };
+    electronState.app = undefined;
+    process.env.DATA_DIR = dataDir;
+    ensureFuigoHomeMock.mockClear();
+    try {
+      await expect(resolve({})).rejects.toThrow(/data directory must be an absolute path/);
+      expect(ensureFuigoHomeMock).not.toHaveBeenCalled();
+    } finally {
+      electronState.app = saved.app;
+      if (saved.dataDir === undefined) delete process.env.DATA_DIR;
+      else process.env.DATA_DIR = saved.dataDir;
+    }
+  });
+
+  it('normalizes the engine home to an absolute path', async () => {
+    const saved = { app: electronState.app, dataDir: process.env.DATA_DIR };
+    electronState.app = undefined;
+    process.env.DATA_DIR = '/srv/x/../stage-data/';
+    try {
+      const res = await resolve({});
+      expect(res.customEnv).toMatchObject({ FUIGO_HOME: join('/srv/stage-data', 'fuigo') });
+    } finally {
+      electronState.app = saved.app;
+      if (saved.dataDir === undefined) delete process.env.DATA_DIR;
+      else process.env.DATA_DIR = saved.dataDir;
+    }
+  });
+
   it('forwards the conversation maxTurns to Fuigo as --max-turns', async () => {
     const capped = await resolve({ maxTurns: 40 });
     expect(capped.customArgs).toEqual(['--permission-mode', 'default', '--max-turns', '40', 'agent', 'stdio']);
