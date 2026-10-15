@@ -38,6 +38,7 @@ import {
   sanitizeSkillMarkdown,
   sweepLadderedSkillPlugins,
   LADDERED_PLUGIN_OWNER_FILE,
+  isPluginLikeEntry,
   withLadderedSkillPrompt,
 } from '@process/services/jarvis/ladderedSkillPlugin';
 import { setupAssistantWorkspace } from '@process/utils/initAgent';
@@ -344,7 +345,7 @@ describe('buildLadderedSkillPlugin', () => {
     expect(fs.existsSync(path.join(pluginRoot, 'sweep-z.building-2'))).toBe(true);
   });
 
-  it('never copies dotfiles, hooks*, agents/ or commands/ from inside a skill', async () => {
+  it('never copies dotfiles, hooks.json, hooks/, agents/ or commands/ from inside a skill', async () => {
     skill(path.join(config, 'skills'), 'nested');
     const dir = path.join(config, 'skills', 'nested');
     fs.mkdirSync(path.join(dir, 'hooks'));
@@ -362,6 +363,39 @@ describe('buildLadderedSkillPlugin', () => {
     fs.writeFileSync(path.join(dir, 'docs', 'hooks.json'), '{}');
     const plugin = await build({ enabledSkills: ['nested'] });
     expect(tree(path.join(plugin, 'skills', 'nested'))).toEqual(['SKILL.md', 'docs/', 'docs/ref.md']);
+  });
+
+  it('drops only the exact hook config names, keeps look-alikes, and logs each skip', async () => {
+    skill(path.join(config, 'skills'), 'lookalike');
+    const dir = path.join(config, 'skills', 'lookalike');
+    fs.writeFileSync(path.join(dir, 'hooks-guide.md'), 'guide');
+    fs.writeFileSync(path.join(dir, 'hooks_test.py'), 'pass');
+    fs.mkdirSync(path.join(dir, 'hooks-examples'));
+    fs.writeFileSync(path.join(dir, 'hooks-examples', 'e.md'), 'e');
+    fs.writeFileSync(path.join(dir, 'hooks.json'), '{}');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const plugin = await build({ enabledSkills: ['lookalike'] });
+      expect(tree(path.join(plugin, 'skills', 'lookalike'))).toEqual([
+        'SKILL.md',
+        'hooks-examples/',
+        'hooks-examples/e.md',
+        'hooks-guide.md',
+        'hooks_test.py',
+      ]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(`not copying ${path.join(dir, 'hooks.json')}`));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('isPluginLikeEntry matches the exact component names only', () => {
+    for (const name of ['.mcp.json', '.claude-plugin', 'hooks', 'HOOKS', 'hooks.json', 'agents', 'commands']) {
+      expect(isPluginLikeEntry(name), name).toBe(true);
+    }
+    for (const name of ['hooks-guide.md', 'hooks_test.py', 'hooksy', 'hooks.yaml', 'agent', 'commands.md']) {
+      expect(isPluginLikeEntry(name), name).toBe(false);
+    }
   });
 
   it('withLadderedSkillPrompt appends the name mapping to the system prompt, or leaves meta alone', () => {

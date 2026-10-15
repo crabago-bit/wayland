@@ -53,7 +53,8 @@
  * Inside a skill only regular files and directories are copied; a symlinked
  * file is copied only when it resolves inside the skill.
  *
- * Inside a skill, dotfiles, `hooks*`, `agents/` and `commands/` are not copied.
+ * Inside a skill, dotfiles, `hooks.json`, `hooks/`, `agents/` and `commands/`
+ * are not copied (each skip is logged).
  *
  * WHERE IT LIVES. `<dataDir>/laddered-skill-plugins/<key>-<uuid>`, never
  * inside the agent's workspace; the key must be a single safe path segment and
@@ -508,7 +509,10 @@ async function loadLibraryEntries(): Promise<BoundedSkillSetOptions['_libraryEnt
 async function copySkillTree(src: string, dest: string, realRoot: string, skillName?: string): Promise<void> {
   await fs.mkdir(dest, { recursive: true });
   for (const entry of await fs.readdir(src, { withFileTypes: true })) {
-    if (isPluginLikeEntry(entry.name)) continue;
+    if (isPluginLikeEntry(entry.name)) {
+      console.warn(`[ladderedSkillPlugin] not copying ${path.join(src, entry.name)} (plugin-component name)`);
+      continue;
+    }
     const from = path.join(src, entry.name);
     const to = path.join(dest, entry.name);
     let isDir = entry.isDirectory();
@@ -534,13 +538,17 @@ async function copySkillTree(src: string, dest: string, realRoot: string, skillN
 
 /**
  * Entries never copied from a skill, at any depth: dotfiles and dot-dirs
- * (`.mcp.json`, `.claude-plugin`, `.lsp.json`...), anything named `hooks*`,
- * and `agents/` / `commands/` - the shapes of plugin components, kept out even
- * though Claude only reads them at a plugin's root.
+ * (`.mcp.json`, `.claude-plugin`, `.lsp.json`...), the hook config names
+ * (`hooks.json`, `hooks/`), and `agents/` / `commands/` - the shapes of plugin
+ * components, kept out even though Claude only reads them at a plugin's root.
+ * Only those exact names: a skill's own `hooks-guide.md` or `hooks_test.py`
+ * configures nothing and is copied.
  */
 export function isPluginLikeEntry(name: string): boolean {
   const lower = name.toLowerCase();
-  return lower.startsWith('.') || lower.startsWith('hooks') || lower === 'agents' || lower === 'commands';
+  return (
+    lower.startsWith('.') || lower === 'hooks' || lower === 'hooks.json' || lower === 'agents' || lower === 'commands'
+  );
 }
 
 /**
