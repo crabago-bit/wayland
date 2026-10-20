@@ -83,9 +83,10 @@ const TEST_MODEL: Partial<Record<ProviderId, string>> = {
   // NVIDIA NIM is OpenAI-compatible (bearer auth, /v1/chat/completions). Without
   // a test model, connect falls through to the /v1/models auth check, which
   // NVIDIA answers 200 even for an invalid token - a false-positive connect
-  // (issue #45). `meta/llama-3.1-8b-instruct` is a small, long-standing NIM chat
-  // model, so a real one-token probe distinguishes a good key from a bad one.
-  nvidia: 'meta/llama-3.1-8b-instruct',
+  // (issue #45). A real one-token probe distinguishes a good key from a bad one.
+  // `meta/llama-3.1-8b-instruct` was retired on 2026-08-26 (410 Gone), which made
+  // every valid key fail; `google/gemma-4-31b-it` is served to free NIM accounts.
+  nvidia: 'google/gemma-4-31b-it',
   'flux-router': 'flux-fast',
 };
 
