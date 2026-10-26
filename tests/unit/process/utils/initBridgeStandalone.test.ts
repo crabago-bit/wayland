@@ -163,6 +163,10 @@ vi.mock('@process/bridge/fluxConnectorBridge', () => ({
 vi.mock('@process/bridge/cronBridge', () => ({
   initCronBridge: (...args: unknown[]) => mocks.initCronBridge(...args),
 }));
+vi.mock('@process/bridge/memoryArchiveBridge', () => ({
+  initMemoryArchiveBridge: vi.fn(),
+  initPromotionSweep: vi.fn(),
+}));
 vi.mock('@process/bridge/mcpBridge', () => ({
   initMcpBridge: (...args: unknown[]) => mocks.initMcpBridge(...args),
 }));
