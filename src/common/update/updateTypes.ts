@@ -33,21 +33,6 @@ export interface UpdateCheckResult {
   currentVersion: string;
   updateAvailable: boolean;
   latest?: UpdateReleaseInfo;
-  ijfw?: IjfwUpdateStatus;
-}
-
-export interface IjfwUpdateStatus {
-  installed: boolean;
-  currentVersion?: string;
-  latestVersion?: string | null;
-  updateAvailable: boolean;
-  offline?: boolean;
-  detectedVia: 'directory' | 'symlink' | 'cli' | 'none';
-  cliOnPath?: boolean;
-  mcpServerPath?: string;
-  commandPath?: string;
-  pathHealthy: boolean;
-  error?: string;
 }
 
 export interface UpdateCheckRequest {

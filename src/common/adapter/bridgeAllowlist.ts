@@ -707,24 +707,12 @@ export const REMOTE_DENIED_KEYS: ReadonlySet<string> = new Set([
   //     This is a strictly worse duplicate of the concierge hole, so closing
   //     that one without this one would just move the door.
   'acp.test-custom-agent',
-  // --- Memory mutation (#414 edit/delete of the user's local memory files) ---
-  //     The memory.* namespace is intentionally open to the paired WebUI for
-  //     READS (list/get/projects/tags/stats). These two providers perform a
-  //     real, hard, unrecoverable rewrite/delete of an on-disk memory block, so
-  //     a remote/paired peer must never reach them: update-entry silently
-  //     rewrites a block, delete-entry hard-deletes it (atomic rename/unlink,
-  //     no recycle). Reads stay allowed; only the destructive mutations are
-  //     denied to remote. (Local Electron IPC never passes through this gate.)
-  'memory.update-entry',
-  'memory.delete-entry',
-  'memory.restore-archived-entry',
-  //     #924: set-quick-add is a WRITE that was sitting on the allowed side of
-  //     the read/write line stated above. It creates an on-disk memory entry,
-  //     and it now carries a projectPath selector that steers WHICH indexed
-  //     project receives it. Denying it puts the namespace back in line with
-  //     the READS-only policy this block documents and keeps the new selector
-  //     off the remote surface entirely. Local Electron IPC is unaffected.
-  'memory.set-quick-add',
+  // --- Memory ---
+  //     The memory.* namespace is open to the paired WebUI, writes included. Memory is the
+  //     user's brain MCP server: an add stores a new chunk, an edit stores a new version and
+  //     records a supersession, and an archive only hides an entry from Wayland (recoverable).
+  //     None of it touches this machine's disk, and the same user's agents already write to
+  //     the brain through the brain MCP server.
   // --- Project knowledge draft (reads arbitrary filePaths to feed the model) ---
   'project.generate-knowledge-draft',
   // --- Storage destructive / disk operations ---

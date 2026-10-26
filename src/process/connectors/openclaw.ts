@@ -37,7 +37,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import { FLUX_SURFACE } from '@/common/config/flux';
-import { writeAtomic } from '@process/services/ijfw/atomicFile';
+import { writeAtomic } from '@process/utils/atomicFile';
 
 import { resolveOpenClawConfigPathForWrite } from '@process/agent/openclaw/openclawConfig';
 

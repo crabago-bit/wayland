@@ -7,41 +7,32 @@
 /**
  * Inspector - right-pane detail view for the Memory Archive page.
  *
- * Pure presentational. Receives an extended MemoryEntry (with body +
- * optional dereferences) and emits action callbacks upward.
+ * Pure presentational. Receives a MemoryEntry with its body and emits
+ * Copy / Edit / Archive callbacks upward.
  *
  * Esc-to-close is registered via a keydown listener while mounted.
  */
 
-import React, { useEffect, useCallback } from 'react';
-import { Button, Tag, Tooltip } from '@arco-design/web-react';
-import { Close, Copy, LinkOne, FileCode, Help } from '@icon-park/react';
+import React, { useEffect } from 'react';
+import { Button, Tag } from '@arco-design/web-react';
+import { Close, Copy, Edit, FileCode, Inbox } from '@icon-park/react';
+import { useTranslation } from 'react-i18next';
 import type { MemoryEntry, MemoryType } from '@/common/types/memory';
+import { categoryOf } from '../categories';
 import styles from './Inspector.module.css';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type Dereference = {
-  source: string;
-  line: number;
-  preview: string;
-  lastAt: number;
-};
-
-type ExtendedEntry = MemoryEntry & {
-  body: string;
-  dereferences?: Dereference[];
-};
+type ExtendedEntry = MemoryEntry & { body: string };
 
 export type InspectorProps = {
   entry: ExtendedEntry | null;
-  promotionThreshold: number;
   onClose?: () => void;
-  onPromote?: (id: string) => void;
-  onOpenSource?: (path: string, line: number) => void;
   onCopy?: (text: string) => void;
+  onEdit?: (entry: ExtendedEntry) => void;
+  onArchive?: (entry: ExtendedEntry) => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -58,12 +49,6 @@ const formatRelative = (ts: number): string => {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
-};
-
-const scoreBarClass = (score: number, threshold: number): string => {
-  if (score >= threshold) return styles.green;
-  if (score >= threshold - 10) return styles.orange;
-  return styles.gray;
 };
 
 // ---------------------------------------------------------------------------
@@ -88,17 +73,9 @@ function EmptyState(): React.ReactElement {
 // Inspector (exported)
 // ---------------------------------------------------------------------------
 
-const SCORE_TOOLTIP =
-  'Score = (referenced × 0.15) + (type weight: decision 2×, wiki 3×, other 1×) + (recency decay over 30 days). Auto-promotes when score ≥ threshold.';
+const Inspector: React.FC<InspectorProps> = ({ entry, onClose, onCopy, onEdit, onArchive }) => {
+  const { t } = useTranslation('memory');
 
-const Inspector: React.FC<InspectorProps> = ({
-  entry,
-  promotionThreshold,
-  onClose,
-  onPromote,
-  onOpenSource,
-  onCopy,
-}) => {
   // Esc-to-close
   useEffect(() => {
     const handleKey = (e: KeyboardEvent): void => {
@@ -110,15 +87,6 @@ const Inspector: React.FC<InspectorProps> = ({
     return () => document.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
-  const handleCopySource = useCallback(
-    (path: string, line: number) => {
-      const text = `${path}:L${line}`;
-      onCopy?.(text);
-      // Parent onCopy shows its own toast - do not add a second one here.
-    },
-    [onCopy]
-  );
-
   if (entry === null) {
     return (
       <div className={styles.root}>
@@ -127,14 +95,10 @@ const Inspector: React.FC<InspectorProps> = ({
     );
   }
 
-  const isAlreadyPromoted = entry.type === 'wiki';
-  const scorePercent = Math.min(100, Math.max(0, entry.promotionScore));
-  const barClass = scoreBarClass(entry.promotionScore, promotionThreshold);
-  const projectBasename = entry.projectPath.split('/').pop() ?? entry.project;
-  const hasDerefs = Array.isArray(entry.dereferences) && entry.dereferences.length > 0;
-  const hasTags = Array.isArray(entry.tags) && entry.tags.length > 0;
+  const category = categoryOf(entry.type);
+  const sourceTags = (entry.tags ?? []).filter((tag) => tag !== entry.type);
 
-  const typeBadgeClass = (t: MemoryType): string => {
+  const typeBadgeClass = (tp: MemoryType): string => {
     const map: Record<MemoryType, string> = {
       decision: styles.decision,
       pattern: styles.pattern,
@@ -143,7 +107,7 @@ const Inspector: React.FC<InspectorProps> = ({
       wiki: styles.wiki,
       preference: styles.preference,
     };
-    return map[t] ?? '';
+    return map[tp] ?? '';
   };
 
   return (
@@ -158,21 +122,22 @@ const Inspector: React.FC<InspectorProps> = ({
             type='secondary'
             icon={<Close theme='outline' size='12' />}
             onClick={() => onClose?.()}
-            aria-label='Close inspector'
+            aria-label={t('archive.inspector.close', 'Close inspector')}
             data-testid='inspector-close'
           />
           <h2 className={styles.title} data-testid='inspector-title'>
             {entry.summary}
           </h2>
           <div className={styles.meta}>
-            <span>{formatRelative(entry.storedAt)}</span>
+            <span title={new Date(entry.storedAt).toLocaleString()}>{formatRelative(entry.storedAt)}</span>
             <span>·</span>
-            <span>{projectBasename}</span>
+            <span data-testid='inspector-workspace'>{entry.project}</span>
             <span
               className={[styles.typeBadge, typeBadgeClass(entry.type)].join(' ')}
+              title={t(category.descriptionKey, category.description)}
               data-testid='inspector-type-badge'
             >
-              {entry.type}
+              {category.glyph} {t(category.labelKey, category.label)}
             </span>
           </div>
         </div>
@@ -180,128 +145,58 @@ const Inspector: React.FC<InspectorProps> = ({
         {/* ---- Actions ---- */}
         <div className={styles.actions}>
           <Button
-            type='primary'
-            size='small'
-            disabled={isAlreadyPromoted}
-            onClick={() => {
-              if (!isAlreadyPromoted) onPromote?.(entry.id);
-            }}
-            data-testid='inspector-promote-btn'
-          >
-            {isAlreadyPromoted ? 'Already promoted ✓' : 'Promote to wiki'}
-          </Button>
-          <Button
-            type='text'
-            size='small'
-            icon={<LinkOne theme='outline' size='13' />}
-            onClick={() => onOpenSource?.(entry.sourcePath, entry.sourceLine)}
-            data-testid='inspector-open-btn'
-          >
-            Open file
-          </Button>
-          <Button
             type='text'
             size='small'
             icon={<Copy theme='outline' size='13' />}
             onClick={() => onCopy?.(entry.body)}
             data-testid='inspector-copy-btn'
           >
-            Copy
+            {t('archive.drawer.copy', 'Copy')}
           </Button>
-        </div>
-      </div>
-
-      {/* ---- Promotion score bar ---- */}
-      <div className={styles.scoreWrap} data-testid='inspector-score-wrap'>
-        <div className={styles.scoreLabel}>
-          <span className={styles.scoreText} data-testid='inspector-score-text'>
-            Promotion score {entry.promotionScore}/100 - auto-promotes at {promotionThreshold}
-          </span>
-          <Tooltip content={SCORE_TOOLTIP} position='top'>
-            {/* #751: wrap so Arco gets a real DOM node - @icon-park icons don't
-                forwardRef, and an unwrapped trigger crashes on hover positioning. */}
-            <span style={{ display: 'inline-flex' }}>
-              <Help theme='outline' size='13' style={{ cursor: 'help', opacity: 0.6 }} aria-label='Score formula' />
-            </span>
-          </Tooltip>
-        </div>
-        <div className={styles.scoreBar} data-testid='inspector-score-bar'>
-          <div
-            className={[styles.scoreBarFill, barClass].join(' ')}
-            style={{ width: `${scorePercent}%` }}
-            data-testid='inspector-score-fill'
-          />
+          <Button
+            type='text'
+            size='small'
+            icon={<Edit theme='outline' size='13' />}
+            onClick={() => onEdit?.(entry)}
+            data-testid='inspector-edit-btn'
+          >
+            {t('archive.drawer.edit', 'Edit')}
+          </Button>
+          <Button
+            type='text'
+            size='small'
+            icon={<Inbox theme='outline' size='13' />}
+            onClick={() => onArchive?.(entry)}
+            data-testid='inspector-archive-btn'
+          >
+            {t('archive.drawer.delete', 'Archive')}
+          </Button>
         </div>
       </div>
 
       {/* ---- Scrollable body ---- */}
       <div className={styles.body}>
-        {/* Summary */}
-        <div className={styles.section} data-testid='inspector-section-summary'>
-          <h3 className={styles.sectionLabel}>Summary</h3>
+        <div className={styles.section} data-testid='inspector-section-category'>
+          <h3 className={styles.sectionLabel}>{t('archive.drawer.category', 'Category')}</h3>
           <div className={styles.sectionContent}>
-            <p>{entry.summary}</p>
+            <p>
+              {t(category.labelKey, category.label)} - {t(category.descriptionKey, category.description)}
+            </p>
           </div>
         </div>
 
-        {/* Why */}
-        <div className={styles.section} data-testid='inspector-section-why'>
-          <h3 className={styles.sectionLabel}>Why</h3>
+        <div className={styles.section} data-testid='inspector-section-stored'>
+          <h3 className={styles.sectionLabel}>{t('archive.drawer.stored', 'Stored')}</h3>
           <div className={styles.sectionContent}>
-            {entry.why ? <p>{entry.why}</p> : <span className={styles.sectionAbsent}>No "Why" recorded</span>}
+            <p>{new Date(entry.storedAt).toLocaleString()}</p>
           </div>
         </div>
 
-        {/* How to apply */}
-        <div className={styles.section} data-testid='inspector-section-howto'>
-          <h3 className={styles.sectionLabel}>How to apply</h3>
-          <div className={styles.sectionContent}>
-            {entry.howToApply ? (
-              <p>{entry.howToApply}</p>
-            ) : (
-              <span className={styles.sectionAbsent}>No "How to apply" recorded</span>
-            )}
-          </div>
-        </div>
-
-        {/* Use in the wild */}
-        {hasDerefs && (
-          <div className={styles.section} data-testid='inspector-section-derefs'>
-            <h3 className={styles.sectionLabel}>Use in the wild</h3>
-            <p className={styles.derefHeader}>Used {entry.referencedBy}× this week</p>
-            <div className={styles.derefList}>
-              {entry.dereferences!.map((d, i) => (
-                <div
-                  key={i}
-                  className={styles.derefCard}
-                  role='button'
-                  tabIndex={0}
-                  onClick={() => onOpenSource?.(d.source, d.line)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      onOpenSource?.(d.source, d.line);
-                    }
-                  }}
-                  aria-label={`Open ${d.source} at line ${d.line}`}
-                  data-testid='inspector-deref-card'
-                >
-                  <div className={styles.derefCardMeta}>
-                    {d.source} · line {d.line} · {formatRelative(d.lastAt)}
-                  </div>
-                  <div className={styles.derefCardPreview}>"{d.preview}"</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Tags */}
-        {hasTags && (
+        {sourceTags.length > 0 && (
           <div className={styles.section} data-testid='inspector-section-tags'>
-            <h3 className={styles.sectionLabel}>Tags</h3>
+            <h3 className={styles.sectionLabel}>{t('archive.drawer.source', 'Source')}</h3>
             <div className={styles.tagRow}>
-              {entry.tags.map((tag) => (
+              {sourceTags.map((tag) => (
                 <Tag key={tag} size='small' color='arcoblue'>
                   {tag}
                 </Tag>
@@ -310,25 +205,17 @@ const Inspector: React.FC<InspectorProps> = ({
           </div>
         )}
 
-        {/* Source path */}
-        <div
-          className={styles.sourcePath}
-          role='button'
-          tabIndex={0}
-          onClick={() => handleCopySource(entry.sourcePath, entry.sourceLine)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              handleCopySource(entry.sourcePath, entry.sourceLine);
-            }
-          }}
-          aria-label={`Copy source path ${entry.sourcePath}:L${entry.sourceLine}`}
-          data-testid='inspector-source-path'
-        >
-          <FileCode theme='outline' size='13' aria-hidden />
-          <span className={styles.sourcePathText}>
-            {entry.sourcePath}:L{entry.sourceLine}
-          </span>
+        <div className={styles.section} data-testid='inspector-section-body'>
+          <h3 className={styles.sectionLabel}>{t('archive.drawer.memory', 'Memory')}</h3>
+          <div className={styles.sectionContent} style={{ whiteSpace: 'pre-wrap' }} data-testid='inspector-body'>
+            {entry.body.trim() ? (
+              entry.body
+            ) : (
+              <span className={styles.sectionAbsent}>
+                {t('archive.drawer.noBody', 'This memory has no body text.')}
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </div>

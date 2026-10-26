@@ -51,12 +51,7 @@ import { initUpdateBridge } from './updateBridge';
 import { initWebuiBridge } from './webuiBridge';
 import { initConstitutionBridge } from './constitutionBridge';
 import { initOnboardingBridge } from './onboardingBridge';
-import { initIjfwBridge } from './ijfwBridge';
-import { initIjfwDropBridge } from './ijfwDropBridge';
-import { initMemoryArchiveBridge, initPromotionSweep } from './memoryArchiveBridge';
-import { initWikiBridge } from './wikiBridge';
-import { startWikiAutoSync } from '@process/services/wiki/wikiAutoSync';
-import { initImportBridge } from './importBridge';
+import { initMemoryArchiveBridge } from './memoryArchiveBridge';
 import { initMigrationBridge } from './migrationBridge';
 import { initWorkspaceTrustBridge } from './workspaceTrustBridge';
 import { initSystemSettingsBridge } from './systemSettingsBridge';
@@ -158,13 +153,7 @@ export function initAllBridges(deps: BridgeDependencies): void {
   initTerminalBridge();
   initFluxConnectorBridge();
   initAgentInstallerBridge();
-  initIjfwBridge();
-  initIjfwDropBridge();
   initMemoryArchiveBridge();
-  initPromotionSweep();
-  initWikiBridge();
-  startWikiAutoSync();
-  initImportBridge();
   initMigrationBridge();
   initWorkspaceTrustBridge();
   initAmbientBridge();
@@ -269,7 +258,6 @@ export async function initializeAcpDetector(): Promise<void> {
 
 export {
   initMemoryArchiveBridge,
-  initPromotionSweep,
   initAcpConversationBridge,
   initApplicationBridge,
   initAuthBridge,
@@ -316,10 +304,6 @@ export {
   initWindowControlsBridge,
   initWeixinLoginBridge,
   initWorkspaceSnapshotBridge,
-  initIjfwBridge,
-  initIjfwDropBridge,
-  initWikiBridge,
-  initImportBridge,
   initMigrationBridge,
   initWorkspaceTrustBridge,
   initDoctorBridge,

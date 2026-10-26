@@ -195,32 +195,26 @@ describe('isAllowedForRemote - doctor surface denied (#458)', () => {
 });
 
 /**
- * Memory mutation surface (#414). The memory.* namespace is intentionally open
- * to the paired WebUI for READS, but edit/archive/restore mutate the user's
- * local memory files. A remote (paired-device WebSocket) caller must never
- * reach them. Read-only views stay allowed so the remote Archive panel still
- * functions without granting host-filesystem mutation authority.
- *
- * #924 adds `memory.set-quick-add` to that deny set. It was on the allowed side
- * of the read/write line despite CREATING an on-disk memory entry, and it now
- * carries a `projectPath` selector that steers WHICH indexed project receives
- * the write - so a remote peer could both write the user's memory and choose
- * where it landed.
+ * Memory is the user's brain MCP server (see the Memory block in bridgeAllowlist.ts), so the
+ * paired WebUI may read and write it: nothing under memory.* touches the host's disk.
  */
-describe('isAllowedForRemote - memory mutation denied (#414)', () => {
-  it.each(['memory.update-entry', 'memory.delete-entry', 'memory.restore-archived-entry', 'memory.set-quick-add'])(
-    'denies subscribe-%s for remote callers (blocks remote memory mutation)',
-    (key) => {
-      expect(isAllowedForRemote(`subscribe-${key}`)).toBe(false);
-    }
-  );
-
-  it.each(['memory.list-entries', 'memory.get-entry', 'memory.get-projects', 'memory.get-tags', 'memory.get-stats'])(
-    'still allows the read-only %s for remote callers',
-    (key) => {
-      expect(isAllowedForRemote(`subscribe-${key}`)).toBe(true);
-    }
-  );
+describe('isAllowedForRemote - memory is open to the paired WebUI', () => {
+  it.each([
+    'memory.list-entries',
+    'memory.get-entry',
+    'memory.get-projects',
+    'memory.get-tags',
+    'memory.get-stats',
+    'memory.get-backend',
+    'memory.set-quick-add',
+    'memory.update-entry',
+    'memory.delete-entry',
+    'memory.list-archived-entries',
+    'memory.restore-archived-entry',
+    'memory.ingest-files',
+  ])('allows subscribe-%s for remote callers', (key) => {
+    expect(isAllowedForRemote(`subscribe-${key}`)).toBe(true);
+  });
 });
 
 describe('isAllowedForRemote - MCP archive mutation denied', () => {

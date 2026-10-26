@@ -25,7 +25,6 @@ export const SETTINGS_ROUTE_PATHS = {
   general: 'general',
   notifications: 'notifications',
   storage: 'storage',
-  ijfw: 'ijfw',
   doctor: 'doctor',
   about: 'about',
 } as const;

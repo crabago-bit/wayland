@@ -33,7 +33,7 @@ import * as path from 'node:path';
 
 import { FLUX_SURFACE } from '@/common/config/flux';
 import { getCodexConfigPath } from '@process/task/codexConfig';
-import { writeAtomic } from '@process/services/ijfw/atomicFile';
+import { writeAtomic } from '@process/utils/atomicFile';
 import { parse as parseToml } from 'smol-toml';
 
 import { deleteReceipt, getReceipt, setReceipt } from './manifest';

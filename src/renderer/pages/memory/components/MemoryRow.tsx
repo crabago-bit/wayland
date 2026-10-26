@@ -14,17 +14,9 @@
  */
 
 import React, { useCallback } from 'react';
-import {
-  BookOpen,
-  ChevronRight,
-  Clock,
-  Diamond,
-  RefreshCw,
-  Settings,
-  Triangle,
-  Eye,
-} from 'lucide-react';
+import { BookOpen, ChevronRight, Clock, Diamond, RefreshCw, Settings, Triangle, Circle } from 'lucide-react';
 import type { MemoryEntry, MemoryType } from '@/common/types/memory';
+import { categoryOf } from '../categories';
 import styles from './MemoryRow.module.css';
 
 // ---------------------------------------------------------------------------
@@ -41,36 +33,13 @@ export type MemoryRowProps = {
 // Icon + colour map
 // ---------------------------------------------------------------------------
 
-type IconDef = {
-  icon: React.ReactElement;
-  colorVar: string;
-};
-
-const TYPE_ICONS: Record<MemoryType, IconDef> = {
-  decision: {
-    icon: <Diamond size={18} />,
-    colorVar: 'var(--color-primary-6, var(--color-primary))',
-  },
-  pattern: {
-    icon: <Triangle size={18} />,
-    colorVar: 'var(--color-warning-6, #d97706)',
-  },
-  observation: {
-    icon: <Eye size={18} />,
-    colorVar: 'var(--color-text-3)',
-  },
-  session: {
-    icon: <Clock size={18} />,
-    colorVar: 'var(--color-info-6, #3b82f6)',
-  },
-  wiki: {
-    icon: <BookOpen size={18} />,
-    colorVar: '#a78bfa',
-  },
-  preference: {
-    icon: <Settings size={18} />,
-    colorVar: 'var(--color-text-2)',
-  },
+const TYPE_ICONS: Record<MemoryType, React.ReactElement> = {
+  decision: <Diamond size={18} />,
+  preference: <Settings size={18} />,
+  pattern: <Triangle size={18} />,
+  session: <Clock size={18} />,
+  wiki: <BookOpen size={18} />,
+  observation: <Circle size={18} />,
 };
 
 // ---------------------------------------------------------------------------
@@ -112,10 +81,10 @@ const MemoryRow: React.FC<MemoryRowProps> = ({ entry, selected = false, onClick 
         onClick?.(entry.id);
       }
     },
-    [onClick, entry.id],
+    [onClick, entry.id]
   );
 
-  const typeDef = TYPE_ICONS[entry.type];
+  const category = categoryOf(entry.type);
   const dateLabel = relativeDate(entry.storedAt);
   const project = projectBasename(entry.projectPath);
 
@@ -132,11 +101,12 @@ const MemoryRow: React.FC<MemoryRowProps> = ({ entry, selected = false, onClick 
       {/* Type icon */}
       <div
         className={styles.typeIcon}
-        style={{ color: typeDef.colorVar }}
-        aria-label={entry.type}
+        style={{ color: category.color }}
+        aria-label={category.label}
+        title={`${category.label}: ${category.description}`}
         data-testid={`memory-row-type-icon-${entry.type}`}
       >
-        {typeDef.icon}
+        {TYPE_ICONS[category.type]}
       </div>
 
       {/* Title + snippet */}
@@ -165,7 +135,7 @@ const MemoryRow: React.FC<MemoryRowProps> = ({ entry, selected = false, onClick 
         {entry.referencedBy > 0 && (
           <span className={styles.refPill} data-testid='memory-row-ref-pill'>
             <RefreshCw size={10} />
-            {`Used ${entry.referencedBy}× this week`}
+            {`Recalled ${entry.referencedBy}×`}
           </span>
         )}
       </div>

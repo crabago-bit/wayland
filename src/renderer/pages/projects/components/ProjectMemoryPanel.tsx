@@ -7,7 +7,7 @@
 import { ipcBridge } from '@/common';
 import Markdown from '@/renderer/components/Markdown';
 import { Button, Input, Message } from '@arco-design/web-react';
-import { FolderOpen, Pencil, Plus, Sparkles } from 'lucide-react';
+import { FolderOpen, Pencil, Plus } from 'lucide-react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import KnowledgeEditDrawer from './KnowledgeEditDrawer';
@@ -43,7 +43,6 @@ const ProjectMemoryPanel: React.FC<{
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [ijfwFiles, setIjfwFiles] = useState<Array<{ name: string; content: string }>>([]);
 
   const load = useCallback(async () => {
     if (!hasWorkspace) {
@@ -51,26 +50,14 @@ const ProjectMemoryPanel: React.FC<{
       return;
     }
     try {
-      const [k, ijfw] = await Promise.all([
-        ipcBridge.project.readKnowledge.invoke({ id: projectId }),
-        ipcBridge.project.readIjfwMemory.invoke({ id: projectId }),
-      ]);
+      const k = await ipcBridge.project.readKnowledge.invoke({ id: projectId });
       setDecisions(k.decisions || '');
-      setIjfwFiles(ijfw.available ? ijfw.files : []);
     } catch (err) {
       console.error('[ProjectMemoryPanel] load failed:', err);
     } finally {
       setLoading(false);
     }
   }, [projectId, hasWorkspace]);
-
-  /** Friendly label for IJFW's memory files. */
-  const ijfwLabel = (name: string): string => {
-    const base = name.replace(/\.md$/i, '');
-    if (/journal/i.test(base)) return t('projects.memory.ijfwJournal');
-    if (/handoff/i.test(base)) return t('projects.memory.ijfwHandoff');
-    return base;
-  };
 
   useEffect(() => {
     void load();
@@ -165,41 +152,6 @@ const ProjectMemoryPanel: React.FC<{
       ) : (
         <div className={`px-16px py-14px text-13px text-t-primary ${styles.surface}`}>
           <Markdown>{decisions}</Markdown>
-        </div>
-      )}
-
-      {/* IJFW's own project memory - detected, attributed, read-only. */}
-      {ijfwFiles.length > 0 && (
-        <div className='flex flex-col gap-10px mt-6px'>
-          <div className='flex items-center justify-between gap-8px'>
-            <div className='flex flex-col gap-2px'>
-              <span className='flex items-center gap-7px text-13px font-700 text-t-primary'>
-                <Sparkles size={14} style={{ color: 'rgb(var(--primary-6))' }} />
-                {t('projects.memory.ijfwTitle')}
-              </span>
-              <span className='text-12px text-t-tertiary leading-relaxed'>{t('projects.memory.ijfwSubtitle')}</span>
-            </div>
-            <span
-              className='flex items-center gap-5px text-11px font-600 px-9px py-3px rd-full flex-shrink-0'
-              style={{ color: 'rgb(var(--primary-6))', background: 'rgb(var(--primary-6) / 0.12)' }}
-            >
-              {t('projects.memory.ijfwBadge')}
-            </span>
-          </div>
-          {ijfwFiles.map((f) => (
-            <div key={f.name} className={`flex flex-col ${styles.surface}`}>
-              <div
-                className='flex items-center justify-between px-14px py-9px'
-                style={{ borderBottom: '1px solid var(--color-border-2)' }}
-              >
-                <span className='text-12px font-600 text-t-secondary'>{ijfwLabel(f.name)}</span>
-                <span className='text-11px text-t-tertiary'>{t('projects.memory.ijfwReadonly')}</span>
-              </div>
-              <div className='px-14px py-12px text-12.5px text-t-secondary overflow-auto max-h-320px'>
-                <Markdown>{f.content}</Markdown>
-              </div>
-            </div>
-          ))}
         </div>
       )}
 

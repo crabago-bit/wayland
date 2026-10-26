@@ -8,7 +8,7 @@
  * FullPanelShell - v0.6.4 Mail-style Memory Archive chrome.
  *
  * Layout (CSS Grid, 4 rows):
- *   1. topbar    - 56px: breadcrumb + TopbarChips + StreakPill + Import + QuickAdd + settings
+ *   1. topbar    - 56px: breadcrumb + TopbarChips + StreakPill + Archived + Add
  *   2. filterbar - 48px: search input + ProjectDropdown + TimeDropdown + TypeDropdown + result count
  *   3. main      - 1fr: horizontal flex { MemoryList (1fr) | RightDrawer (480px push-content) }
  *   4. statusbar - 28px: MemoryStatusBar
@@ -27,59 +27,34 @@
  * List column margin-right transitions in sync with drawer opening.
  */
 
-import React, { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Input, Message, Modal } from '@arco-design/web-react';
 import type { RefInputType } from '@arco-design/web-react/es/Input/interface';
-import {
-  Archive,
-  ArchiveRestore,
-  Search,
-  Import as ImportIcon,
-  Settings2,
-  Plus,
-  ChevronDown,
-  ChevronRight,
-} from 'lucide-react';
-import { ipcBridge } from '@/common';
+import { Archive, ArchiveRestore, Search, Plus } from 'lucide-react';
 import { formatModifierShortcut } from '@/renderer/utils/platform';
-import { memory as memoryBridge, ijfw as ijfwBridge } from '@/common/adapter/ipcBridge';
-import type { IjfwStatusPayload, IjfwLifecycleStatus } from '@/common/adapter/ipcBridge';
-import IjfwSetupStatus from '@/renderer/pages/settings/components/IjfwSetupStatus';
+import { memory as memoryBridge } from '@/common/adapter/ipcBridge';
 import { ErrorBoundary } from '@/renderer/components/ErrorBoundary';
-import type { LastDream, ListFilter, MemoryEntry, MemoryType } from '@/common/types/memory';
+import type { ListFilter, MemoryEntry, MemoryType } from '@/common/types/memory';
 import { useTranslation } from 'react-i18next';
+import { useInRouterContext } from 'react-router-dom';
 import MemoryList from '../components/MemoryList';
 import RightDrawer from '../components/RightDrawer';
 import TopbarChips from '../components/TopbarChips';
+import UrlTypeSync from '../components/UrlTypeSync';
 import StreakPill from '../components/StreakPill';
 import ProjectDropdown from '../components/ProjectDropdown';
 import TimeDropdown from '../components/TimeDropdown';
 import TypeDropdown from '../components/TypeDropdown';
 import EmptyStateHero from '../components/EmptyStateHero';
 import MemoryStatusBar from '../components/MemoryStatusBar';
-import ImportDrawer from '../components/ImportDrawer';
 import ComposerModal from '../components/ComposerModal';
 import EntryEditorModal from '../components/EntryEditorModal';
 import ArchivedMemoryModal from '../components/ArchivedMemoryModal';
 import { useMemoryIndex } from '../hooks/useMemoryIndex';
 import { useSelectedEntry } from '../hooks/useSelectedEntry';
 import type { TimeWindow } from '../components/TimeDropdown';
+import { GLOBAL_WORKSPACE } from '../categories';
 import styles from './FullPanelShell.module.css';
-
-// ---------------------------------------------------------------------------
-// Lazy-load PromotionThresholdModal
-// ---------------------------------------------------------------------------
-
-type PromotionThresholdModalModule = { default: React.ComponentType<{ onClose: () => void }> };
-
-const PromotionThresholdModalLazy = lazy(
-  () =>
-    import('../components/PromotionThresholdModal').catch(
-      (): PromotionThresholdModalModule => ({
-        default: () => null,
-      })
-    ) as Promise<PromotionThresholdModalModule>
-);
 
 // ---------------------------------------------------------------------------
 // Helpers - map TimeWindow → ListFilter.timeWindow
@@ -108,53 +83,27 @@ const DEFAULT_FILTER: ListFilter = {
   limit: 50,
 };
 
-const DEFAULT_THRESHOLD = 90;
-
-/** Persisted expand/collapse state for the #414 setup-status health strip. */
-const HEALTH_OPEN_KEY = 'wayland.memory.setupStatus.open';
-
-/** Coarse health tone for the strip dot, derived from the install lifecycle. */
-function statusTone(status: IjfwLifecycleStatus | null): 'ok' | 'warn' | 'checking' {
-  if (status === 'installed_current' || status === 'installed_pending_activation') return 'ok';
-  if (status === 'not_installed' || status === 'install_failed') return 'warn';
-  return 'checking'; // installing / upgrading / unknown (null)
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-/** What each topbar chip counts when the brain MCP server is the store. */
-const BRAIN_CHIP_DESCRIPTIONS = {
-  memories: 'Everything stored in your brain, across all workspaces.',
-  decisions: 'Semantic tier: knowledge the brain has distilled and consolidated from your notes.',
-  wiki: 'Long-term knowledge: the semantic and procedural tiers (distilled facts and rules). Overlaps Decisions.',
-} as const;
-
-const FullPanelShell: React.FC<{ backend?: 'brain' | 'ijfw' }> = ({ backend }) => {
+const FullPanelShell: React.FC = () => {
   const { t } = useTranslation('memory');
-  // Root-namespace t for the one string reused from #591 (memory.settings.*),
-  // so the strip adds no new i18n keys.
-  const { t: tRoot } = useTranslation();
 
+  /** What each topbar chip counts. */
+  const chipDescriptions = {
+    memories: t('archive.chip.memoriesDescription', 'Everything stored in your brain, across all workspaces.'),
+    decisions: t('archive.chip.decisionsDescription', 'Deploy choices, governance, hires, routines and plans.'),
+    wiki: t('archive.chip.wikiDescription', 'Notes from Obsidian, files, URLs and docs.'),
+  };
+
+  const inRouter = useInRouterContext();
   const [filter, setFilter] = useState<ListFilter>(DEFAULT_FILTER);
   const [timeWindow, setTimeWindow] = useState<TimeWindow>('all');
 
   const { stats, entries, projects, total, isLoading, reload } = useMemoryIndex(filter);
   const { selectedId, selected, selectEntry, clearSelection } = useSelectedEntry();
 
-  // cliCount from IjfwStatusPayload (no-deferment #3)
-  const [cliCount, setCliCount] = useState(0);
-  // Install lifecycle status + collapse state for the #414 setup-status strip.
-  const [ijfwStatus, setIjfwStatus] = useState<IjfwLifecycleStatus | null>(null);
-  const [healthOpen, setHealthOpen] = useState<boolean>(() => {
-    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(HEALTH_OPEN_KEY) : null;
-    return saved === '1'; // default collapsed; the dot still conveys health
-  });
-  const [lastDream, setLastDream] = useState<LastDream | undefined>(undefined);
-  const [promotionThreshold, setPromotionThreshold] = useState(DEFAULT_THRESHOLD);
-  const [showThresholdModal, setShowThresholdModal] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<(MemoryEntry & { body: string }) | null>(null);
   const [archivedOpen, setArchivedOpen] = useState(false);
@@ -162,56 +111,6 @@ const FullPanelShell: React.FC<{ backend?: 'brain' | 'ijfw' }> = ({ backend }) =
 
   const searchRef = useRef<RefInputType>(null);
   const shellRef = useRef<HTMLDivElement>(null);
-
-  // Fetch cliCount from ijfw status
-  useEffect(() => {
-    let cancelled = false;
-    const fetchStatus = async (): Promise<void> => {
-      try {
-        const status: IjfwStatusPayload = await ijfwBridge.getStatus.invoke();
-        if (!cancelled) {
-          setCliCount(status.cliCount ?? 0);
-          setIjfwStatus(status.status);
-        }
-      } catch {
-        // Non-fatal
-      }
-    };
-    void fetchStatus();
-    const unsub = ijfwBridge.onStatusChanged.on((payload: IjfwStatusPayload) => {
-      if (!cancelled) {
-        setCliCount(payload.cliCount ?? 0);
-        setIjfwStatus(payload.status);
-      }
-    });
-    return () => {
-      cancelled = true;
-      unsub();
-    };
-  }, []);
-
-  // Fetch promotion candidates + lastDream (no-deferment #4)
-  useEffect(() => {
-    let cancelled = false;
-    const fetchCandidates = async (): Promise<void> => {
-      try {
-        const result = await memoryBridge.getPromotionCandidates.invoke();
-        if (cancelled) return;
-        setPromotionThreshold(result.threshold);
-        if (result.lastDream) setLastDream(result.lastDream);
-      } catch {
-        // Non-fatal
-      }
-    };
-    void fetchCandidates();
-    const unsub = memoryBridge.onIndexChanged.on(() => {
-      if (!cancelled) void fetchCandidates();
-    });
-    return () => {
-      cancelled = true;
-      unsub();
-    };
-  }, []);
 
   // Keyboard: ⌘K / "/" focus search; ⌘N open quick-add
   useEffect(() => {
@@ -283,19 +182,6 @@ const FullPanelShell: React.FC<{ backend?: 'brain' | 'ijfw' }> = ({ backend }) =
     setFilter((prev) => ({ ...prev, search: val, offset: 0 }));
   }, []);
 
-  // Setup-status strip expand/collapse (#414), persisted.
-  const toggleHealth = useCallback(() => {
-    setHealthOpen((v) => {
-      const next = !v;
-      try {
-        localStorage.setItem(HEALTH_OPEN_KEY, next ? '1' : '0');
-      } catch {
-        // Non-fatal (private mode / storage disabled)
-      }
-      return next;
-    });
-  }, []);
-
   // Row select: click same row → deselect
   const handleSelectRow = useCallback(
     (id: string) => {
@@ -306,21 +192,6 @@ const FullPanelShell: React.FC<{ backend?: 'brain' | 'ijfw' }> = ({ backend }) =
       }
     },
     [selectedId, clearSelection, selectEntry]
-  );
-
-  // Promote entry
-  const handlePromote = useCallback(
-    async (id: string) => {
-      const result = await memoryBridge.promote.invoke({ id });
-      if (!result.ok) {
-        const errMsg = 'error' in result ? result.error : 'Promotion failed';
-        Message.error(errMsg);
-      } else {
-        Message.success(t('archive.toast.promoted', 'Promoted to wiki'));
-        reload();
-      }
-    },
-    [reload, t]
   );
 
   // Edit an entry (#414): the selected entry already carries its full body.
@@ -338,15 +209,15 @@ const FullPanelShell: React.FC<{ backend?: 'brain' | 'ijfw' }> = ({ backend }) =
     [reload, selectEntry]
   );
 
-  // Archive an entry (#414). The service persists the original block before
-  // removing it from the active file, and the recovery modal restores it.
+  // Archive an entry. The brain is append-only: archiving only hides the memory
+  // from Wayland (restorable from Archived); the brain keeps the original.
   const handleArchive = useCallback(
     (entry: MemoryEntry & { body: string }) => {
       Modal.confirm({
         title: t('archive.delete.confirmTitle', 'Archive this memory?'),
         content: t(
           'archive.delete.confirmContent',
-          'This removes the memory from active use but keeps a recovery copy you can restore anytime.'
+          'This hides the memory from Wayland. Your brain keeps the original, and you can restore it anytime from Archived.'
         ),
         okText: t('archive.delete.confirmOk', 'Archive'),
         cancelText: t('archive.delete.confirmCancel', 'Cancel'),
@@ -358,35 +229,12 @@ const FullPanelShell: React.FC<{ backend?: 'brain' | 'ijfw' }> = ({ backend }) =
             reload();
             setArchivedOpen(true);
           } else {
-            Message.error(t('archive.delete.toastError', 'Could not archive memory'));
+            Message.error(result.error || t('archive.delete.toastError', 'Could not archive memory'));
           }
         },
       });
     },
     [t, clearSelection, reload]
-  );
-
-  // Open source file.
-  //
-  // The IPC bridge is RESOLVE-ONLY: a refusal (an unconfined path, or a type the
-  // open-target gate declines) comes back as a RESOLVED `{ ok: false }`, never as
-  // a rejection. A `.catch()`-only handler therefore did nothing at all on a
-  // refusal - no toast, and this clipboard fallback never ran. Branch on the
-  // resolved result, the way the workspace context menu already does.
-  const handleOpenSource = useCallback(
-    async (path: string, _line: number) => {
-      const copyPathInstead = (): void => {
-        void navigator.clipboard.writeText(path);
-        Message.success(t('archive.toast.pathCopied', 'Path copied'));
-      };
-      try {
-        const res = await ipcBridge.shell.openFile.invoke(path);
-        if (!res?.ok) copyPathInstead();
-      } catch {
-        copyPathInstead();
-      }
-    },
-    [t]
   );
 
   const handleCopy = useCallback(
@@ -416,19 +264,11 @@ const FullPanelShell: React.FC<{ backend?: 'brain' | 'ijfw' }> = ({ backend }) =
   // Result count for filter bar
   const resultCountLabel = isLoading ? '' : `${total.toLocaleString()} ${t('archive.filter.results', 'results')}`;
 
-  // #924: the Memory page is a standalone route with no conversation context,
-  // so a project-scoped save cannot be inferred - it is chosen. Feed the
-  // composer the indexed projects and pre-select the page's project filter.
-  // #924 F1: `projects` carries the GLOBAL store as an ordinary row (#137) so the
-  // list below can browse it, and it sorts to the front whenever a global save,
-  // a drop ingest or an importer just ran. As a composer destination it is a
-  // privacy hole - `loadGlobalMemoryBlock` injects that store into every chat in
-  // every project - so it is dropped from the picker and from the seed. A
-  // deliberate global save still goes through the composer's `global` scope pill.
-  const destinationProjects = projects.filter((p) => p.isGlobalStore !== true);
-  const composerProjects = destinationProjects.map((p) => ({ path: p.path, basename: p.basename }));
-  const composerDefaultProjectPath =
-    filter.project !== 'all' ? destinationProjects.find((p) => p.basename === filter.project)?.path : undefined;
+  // Workspaces the composer can save to, and the one it starts on: the page's
+  // workspace filter when set, else the shared `general` workspace.
+  const composerWorkspaces = projects.map((p) => p.basename);
+  const filterWorkspace = filter.project && filter.project !== 'all' ? filter.project.replace(/^brain:\/\//, '') : null;
+  const composerDefaultWorkspace = filterWorkspace ?? GLOBAL_WORKSPACE;
 
   const projectSelected = filter.project !== 'all' ? filter.project : null;
   const typeCounts = stats?.typeCounts ?? {
@@ -482,7 +322,7 @@ const FullPanelShell: React.FC<{ backend?: 'brain' | 'ijfw' }> = ({ backend }) =
           );
           reload();
         } else {
-          Message.warning(t('archive.dragDrop.toastNoFiles', 'No files were ingested'));
+          Message.warning(result.errors?.[0] || t('archive.dragDrop.toastNoFiles', 'No files were ingested'));
         }
       } catch (err) {
         Message.error(t('archive.dragDrop.toastError', 'Drop ingest failed'));
@@ -506,10 +346,13 @@ const FullPanelShell: React.FC<{ backend?: 'brain' | 'ijfw' }> = ({ backend }) =
         void handleDrop(e);
       }}
     >
+      {inRouter && <UrlTypeSync onType={handleChipFilter} />}
       {/* ---- Drag-drop overlay ---- */}
       {dragOver && (
         <div className={styles.dragOverlay} aria-hidden>
-          <span className={styles.dragOverlayLabel}>📥 Drop to ingest</span>
+          <span className={styles.dragOverlayLabel}>
+            {t('archive.dragDrop.overlay', 'Drop .md, .txt or .json notes to save them to your brain')}
+          </span>
         </div>
       )}
       {/* ---- Topbar (56px) ---- */}
@@ -525,7 +368,7 @@ const FullPanelShell: React.FC<{ backend?: 'brain' | 'ijfw' }> = ({ backend }) =
               ·
             </span>
             <span className={styles.breadcrumbProject}>
-              {projects[0]?.basename ?? t('archive.topbar.allProjects', 'All projects')}
+              {filterWorkspace ?? t('archive.topbar.allWorkspaces', 'All workspaces')}
             </span>
           </span>
 
@@ -534,8 +377,7 @@ const FullPanelShell: React.FC<{ backend?: 'brain' | 'ijfw' }> = ({ backend }) =
             typeCounts={typeCounts}
             activeType={activeChipType}
             onFilterChange={handleChipFilter}
-            total={backend === 'brain' ? stats?.total : undefined}
-            descriptions={backend === 'brain' ? BRAIN_CHIP_DESCRIPTIONS : undefined}
+            descriptions={chipDescriptions}
           />
 
           {/* Streak pill (no-deferment #2) */}
@@ -552,15 +394,6 @@ const FullPanelShell: React.FC<{ backend?: 'brain' | 'ijfw' }> = ({ backend }) =
           >
             {t('archive.topbar.archived', 'Archived')}
           </Button>
-          {/* Import button */}
-          <Button
-            type='text'
-            size='small'
-            icon={<ImportIcon size={15} aria-hidden />}
-            onClick={() => setImportOpen(true)}
-            data-testid='memory-btn-import'
-            className={styles.iconBtn}
-          />
           {/* Quick-add → opens ComposerModal */}
           <Button
             type='primary'
@@ -572,57 +405,16 @@ const FullPanelShell: React.FC<{ backend?: 'brain' | 'ijfw' }> = ({ backend }) =
           >
             {t('archive.topbar.add', 'Add')}
           </Button>
-          {/* Settings cog */}
-          <Button
-            type='text'
-            size='small'
-            icon={<Settings2 size={15} aria-hidden />}
-            onClick={() => setShowThresholdModal(true)}
-            data-testid='memory-btn-settings'
-            className={styles.iconBtn}
-          />
         </div>
       </header>
 
-      {/* ---- Scope label ----
-           Unconditional and state-neutral on purpose. The counts above are the
-           user's OWN notes; the engine's long-term memory is a separate store
-           this page does not read. Naming that here is what stops "134 Memories"
-           being read as a claim about what the assistant recalls. */}
+      {/* ---- Scope label ---- */}
       <p className={styles.scopeLabel} data-testid='memory-scope-label'>
         {t(
           'archive.scopeLabel',
-          "These are your own notes. Wayland Core's long-term memory is separate and is managed in Settings."
+          'Everything here lives in your brain MCP server, so your agents and this page share the same memories.'
         )}
       </p>
-
-      {/* ---- Setup-status health strip (#414) ---- */}
-      <section
-        className={styles.healthStrip}
-        data-testid='memory-setup-status-strip'
-        data-open={healthOpen ? 'true' : 'false'}
-      >
-        <button
-          type='button'
-          className={styles.healthHeader}
-          onClick={toggleHealth}
-          aria-expanded={healthOpen}
-          data-testid='memory-setup-status-toggle'
-        >
-          <span className={styles.healthDot} data-tone={statusTone(ijfwStatus)} aria-hidden />
-          <span className={styles.healthTitle}>
-            {tRoot('memory.settings.setup_status_title', { defaultValue: 'Setup status' })}
-          </span>
-          <span className={styles.healthChevron} aria-hidden>
-            {healthOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          </span>
-        </button>
-        {healthOpen && (
-          <div className={styles.healthBody} data-testid='memory-setup-status-body'>
-            <IjfwSetupStatus status={ijfwStatus} cliCount={cliCount} hideTitle />
-          </div>
-        )}
-      </section>
 
       {/* ---- Filter bar (48px) ---- */}
       <div className={styles.filterBar} data-testid='memory-filter-bar'>
@@ -656,7 +448,7 @@ const FullPanelShell: React.FC<{ backend?: 'brain' | 'ijfw' }> = ({ backend }) =
       {/* ---- Main area (1fr) ---- */}
       <div className={styles.main} data-testid='memory-body'>
         {showEmptyHero ? (
-          <EmptyStateHero onImportComplete={reload} onSearchChange={handleSearchChange} />
+          <EmptyStateHero onSearchChange={handleSearchChange} onAdd={() => setComposerOpen(true)} />
         ) : (
           <>
             {/* List column - shrinks when drawer opens (push-content) */}
@@ -687,10 +479,7 @@ const FullPanelShell: React.FC<{ backend?: 'brain' | 'ijfw' }> = ({ backend }) =
             <ErrorBoundary resetKeys={[selectedId]}>
               <RightDrawer
                 entry={selected}
-                promotionThreshold={promotionThreshold}
                 onClose={clearSelection}
-                onPromote={handlePromote}
-                onOpenSource={handleOpenSource}
                 onCopy={handleCopy}
                 onEdit={handleEdit}
                 onArchive={handleArchive}
@@ -701,17 +490,14 @@ const FullPanelShell: React.FC<{ backend?: 'brain' | 'ijfw' }> = ({ backend }) =
       </div>
 
       {/* ---- Status bar (28px) ---- */}
-      <MemoryStatusBar brainLive={!isLoading && stats !== null} cliCount={cliCount} lastDream={lastDream} />
-
-      {/* ---- Import drawer ---- */}
-      <ImportDrawer open={importOpen} onClose={() => setImportOpen(false)} />
+      <MemoryStatusBar brainLive={!isLoading && stats !== null} total={stats?.total ?? total} />
 
       {/* ---- Composer modal ---- */}
       <ComposerModal
         open={composerOpen}
         onClose={() => setComposerOpen(false)}
-        projects={composerProjects}
-        defaultProjectPath={composerDefaultProjectPath}
+        workspaces={composerWorkspaces}
+        defaultWorkspace={composerDefaultWorkspace}
       />
 
       {/* ---- Entry editor modal (#414) ---- */}
@@ -723,13 +509,6 @@ const FullPanelShell: React.FC<{ backend?: 'brain' | 'ijfw' }> = ({ backend }) =
       />
 
       <ArchivedMemoryModal open={archivedOpen} onClose={() => setArchivedOpen(false)} onRestored={reload} />
-
-      {/* ---- Threshold modal ---- */}
-      {showThresholdModal && (
-        <Suspense fallback={null}>
-          <PromotionThresholdModalLazy onClose={() => setShowThresholdModal(false)} />
-        </Suspense>
-      )}
     </div>
   );
 };

@@ -34,23 +34,13 @@ function MockLucideIcon(): React.ReactElement {
 }
 
 // --- Mocks -------------------------------------------------------------------
-vi.mock('@/common', () => ({
-  ipcBridge: { shell: { openFile: { invoke: vi.fn() } } },
-}));
-
 vi.mock('@/common/adapter/ipcBridge', () => {
   const emitter = { on: vi.fn(() => vi.fn()) };
   return {
     memory: {
-      promote: { invoke: vi.fn() },
       deleteEntry: { invoke: vi.fn() },
       ingestFiles: { invoke: vi.fn() },
-      getPromotionCandidates: { invoke: vi.fn().mockResolvedValue({ threshold: 90 }) },
       onIndexChanged: emitter,
-    },
-    ijfw: {
-      getStatus: { invoke: vi.fn().mockResolvedValue({ status: 'installed_current', cliCount: 0 }) },
-      onStatusChanged: emitter,
     },
   };
 });
@@ -76,11 +66,7 @@ vi.mock('lucide-react', () => {
     Archive: MockLucideIcon,
     ArchiveRestore: MockLucideIcon,
     Search: MockLucideIcon,
-    Import: MockLucideIcon,
-    Settings2: MockLucideIcon,
     Plus: MockLucideIcon,
-    ChevronDown: MockLucideIcon,
-    ChevronRight: MockLucideIcon,
   };
 });
 
@@ -125,11 +111,9 @@ vi.mock('@renderer/pages/memory/components/TimeDropdown', () => ({ default: () =
 vi.mock('@renderer/pages/memory/components/TypeDropdown', () => ({ default: () => <div /> }));
 vi.mock('@renderer/pages/memory/components/EmptyStateHero', () => ({ default: () => <div /> }));
 vi.mock('@renderer/pages/memory/components/MemoryStatusBar', () => ({ default: () => <div /> }));
-vi.mock('@renderer/pages/memory/components/ImportDrawer', () => ({ default: () => <div /> }));
 vi.mock('@renderer/pages/memory/components/ComposerModal', () => ({ default: () => <div /> }));
 vi.mock('@renderer/pages/memory/components/EntryEditorModal', () => ({ default: () => <div /> }));
 vi.mock('@renderer/pages/memory/components/ArchivedMemoryModal', () => ({ default: () => null }));
-vi.mock('@/renderer/pages/settings/components/IjfwSetupStatus', () => ({ default: () => <div /> }));
 
 import FullPanelShell from '@renderer/pages/memory/state-branches/FullPanelShell';
 

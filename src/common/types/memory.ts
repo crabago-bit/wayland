@@ -118,75 +118,8 @@ export type TagCount = {
   count: number;
 };
 
-export type PromotionCandidate = {
-  id: string;
-  score: number;
-  /** Human-readable summary for display (added W3). */
-  summary?: string;
-  /** Project identifier (added W3). */
-  project?: string;
-};
-
-export type LastDream = {
-  factsExtracted: number;
-  promoted: number;
-  agoMs: number;
-};
-
-export type PromotionCandidates = {
-  candidates: PromotionCandidate[];
-  threshold: number;
-  lastRun: number;
-  nextRun: number;
-  /** ISO timestamp of the last sweep run (W3 alias for lastRun). */
-  lastRunAt?: number;
-  /** ISO timestamp of the next scheduled sweep (W3 alias for nextRun). */
-  nextRunAt?: number;
-  /** Whether auto-promotion on schedule is enabled (added W3). */
-  autoPromoteEnabled?: boolean;
-  /** Summary of the most recent promotion sweep run. */
-  lastDream?: LastDream;
-};
-
 /**
  * Discriminated union result for memory.get-stats IPC call.
  * Using a wrapper so the renderer can safely distinguish success from failure.
  */
 export type GetStatsResult = { ok: true; stats: MemoryStats } | { ok: false; error: string };
-
-// ==================== Wiki types (v0.6.4) ====================
-
-export type WikiTopicTag = 'Architecture' | 'Design' | 'Decisions' | 'Process' | 'Patterns' | 'Brand';
-
-export type WikiFreshness = 'fresh' | 'stale' | 'never_reviewed';
-
-export type WikiConcept = {
-  id: string;
-  name: string;
-  slug: string;
-  topicTag: WikiTopicTag;
-  tldr: string;
-  body: string;
-  aliases: string[];
-  sourceMemoryIds: string[];
-  linkedFromConcepts: string[];
-  relatedConcepts: string[];
-  tags: string[];
-  lastSynthesizedAt: number;
-  lastReviewedAt?: number;
-  freshness: WikiFreshness;
-};
-
-export type WikiState = {
-  version: 1;
-  concepts: WikiConcept[];
-  backlinkGraph: Record<string, string[]>;
-  orphanCandidates: {
-    memoryIds: string[];
-    citationCount: number;
-    suggestedName: string;
-  }[];
-  lastUpdatedAt: number;
-  /** Epoch ms of the last auto-synthesis sweep. Undefined before first sweep. */
-  lastSyncAt?: number;
-};

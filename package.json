@@ -96,7 +96,6 @@
     "build:server": "node scripts/build-server.mjs",
     "build:webui": "node scripts/build-webui.mjs",
     "verify:webui": "node scripts/verify-webui.mjs",
-    "smoke:ijfw": "node scripts/ijfw-memory-smoke.mjs",
     "test:mcp:e2e": "FUIGO_ACP_E2E=1 vitest run tests/integration/fuigoAcpEndToEnd.test.ts",
     "check:counts": "node scripts/check-public-counts.mjs"
   },

@@ -2,27 +2,29 @@
  * @license
  * Copyright 2026 Ferrox Labs
  * SPDX-License-Identifier: Apache-2.0
- *
- * Memory Archive IPC bridge - wires the ijfwArchiveService to the renderer
- * via the shared ipcBridge.memory namespace.
- *
- * All args are validated; errors return { ok: false, error } - never throw
- * across IPC.
+ */
+
+/**
+ * The Memory page's data bridge. Memory is the user's brain MCP server: every provider here
+ * is a thin, validated pass-through to {@link BrainMemoryService}. With no `brain` server
+ * configured there is no store, so reads come back empty and writes say why.
  */
 
 import log from 'electron-log';
 import { z } from 'zod';
 import { ipcBridge } from '@/common';
-import { getIjfwArchiveService } from '@process/services/memory/ijfwArchiveService';
-import { BrainMemoryService, type MemoryBackend } from '@process/services/memory/brainMemoryService';
-import { BrainMcpClient, readBrainEndpoint } from '@process/services/memory/brainMcpClient';
-import { promoteEntry, undoPromotion } from '@process/services/memory/wikiWriter';
-import { startPromotionSweep } from '@process/services/memory/promotionSweep';
-import { readSourceContext } from '@process/services/memory/sourceReader';
-import type { ListFilter } from '@/common/types/memory';
-import type { SweepHandle } from '@process/services/memory/promotionSweep';
+import type {
+  ArchivedMemoryEntry,
+  GetStatsResult,
+  ListFilter,
+  MemoryEntry,
+  ProjectSummary,
+  TagCount,
+} from '@/common/types/memory';
+import type { BrainMemoryService } from '@process/services/memory/brainMemoryService';
+import { getBrainMemory } from '@process/services/memory/memoryBackend';
 
-// ===== Arg schemas =====
+const NO_BRAIN = 'No brain MCP server is configured. Add one named "brain" to use Memory.';
 
 const listFilterSchema = z.object({
   project: z.string().optional(),
@@ -36,26 +38,15 @@ const listFilterSchema = z.object({
 });
 
 const idSchema = z.object({ id: z.string().min(1).max(64) });
-
 const tagsQuerySchema = z.object({ project: z.string().optional() });
 
-const promoteSchema = z.object({ id: z.string().min(1).max(64) });
-
 const quickAddSchema = z.object({
-  content: z.string().min(1).max(10_000),
+  content: z.string().min(1).max(100_000),
   scope: z.enum(['project', 'global']),
   type: z.string().optional(),
-  // #924: the project the caller is actually in. The service accepts it only
-  // when it matches an indexed project root, so this is a selector, not a
-  // free-form write path.
+  /** `brain://<workspace>` for a project-scoped save. */
   projectPath: z.string().max(4_096).optional(),
 });
-
-const thresholdSchema = z.object({ threshold: z.number().int().min(0).max(100) });
-
-const autoPromoteSchema = z.object({ enabled: z.boolean() });
-
-const undoSchema = z.object({ id: z.string().min(1).max(64) });
 
 const updateEntrySchema = z.object({
   id: z.string().min(1).max(64),
@@ -65,214 +56,120 @@ const updateEntrySchema = z.object({
   body: z.string().max(100_000).optional(),
 });
 
-const deleteEntrySchema = z.object({ id: z.string().min(1).max(64) });
-const restoreArchivedEntrySchema = z.object({ archiveId: z.string().uuid() });
+const archiveIdSchema = z.object({ archiveId: z.string().uuid() });
 
-const readSourceContextSchema = z.object({
-  path: z.string().min(1),
-  line: z.number().int().min(0),
-  contextLines: z.number().int().min(1).max(500).optional(),
+const ingestFilesSchema = z.object({
+  files: z
+    .array(z.object({ name: z.string().min(1).max(255), content: z.string().max(2_000_000) }))
+    .min(1)
+    .max(50),
 });
 
-// ===== Module-level sweep handle =====
-
-let sweepHandle: SweepHandle | null = null;
-
-// ===== Backend selection =====
-
-let backendPromise: Promise<{ backend: MemoryBackend; kind: 'brain' | 'ijfw' }> | null = null;
-
-/**
- * The brain MCP server is the source of Memory whenever the user has it configured and
- * enabled; the local `.ijfw` index is only the fallback for a machine with no brain.
- * `WAYLAND_MEMORY_BACKEND=ijfw` forces the old behaviour.
- */
-function resolveMemoryBackend(): Promise<{ backend: MemoryBackend; kind: 'brain' | 'ijfw' }> {
-  backendPromise ??= (async () => {
-    if (process.env.WAYLAND_MEMORY_BACKEND !== 'ijfw') {
-      try {
-        const endpoint = await readBrainEndpoint();
-        if (endpoint) {
-          log.info('[memory-archive] using the brain MCP server', { url: endpoint.url });
-          console.log(`[memory-archive] backend=brain url=${endpoint.url}`);
-          return { backend: new BrainMemoryService(new BrainMcpClient(endpoint)), kind: 'brain' as const };
-        }
-      } catch (err) {
-        log.warn('[memory-archive] brain endpoint lookup failed, falling back to IJFW', { err });
-      }
-    }
-    console.log('[memory-archive] backend=ijfw (no enabled brain MCP server found)');
-    return { backend: getIjfwArchiveService() as unknown as MemoryBackend, kind: 'ijfw' as const };
-  })();
-  return backendPromise;
-}
-
-/** Exposed for bridge/index.ts to call after initMemoryArchiveBridge(). */
-export function initPromotionSweep(): void {
-  if (sweepHandle) return;
-  void resolveMemoryBackend().then(({ kind }) => {
-    // The brain promotes memories between tiers itself; the sweep is for local files.
-    if (kind !== 'ijfw' || sweepHandle) return;
-    sweepHandle = startPromotionSweep({ archive: getIjfwArchiveService() });
-  });
-}
-
-// ===== Bridge init =====
+const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 export function initMemoryArchiveBridge(): void {
-  const backend = async () => (await resolveMemoryBackend()).backend;
-
-  // Kick off the initial index in the background - don't block bridge init.
-  void backend()
-    .then((svc) => svc.init())
-    .catch((err) => {
-      log.warn('[memory-archive] background init failed', { err });
-    });
-
-  ipcBridge.memory.getBackend.provider(async () => (await resolveMemoryBackend()).kind);
-
-  // ===== Queries =====
-
-  ipcBridge.memory.getStats.provider(async () => {
+  /** Run `fn` against the brain, or fall back when there is none or the call fails. */
+  const withBrain = async <T>(
+    what: string,
+    fn: (brain: BrainMemoryService) => Promise<T>,
+    whenNone: () => T,
+    onError: (err: unknown) => T
+  ): Promise<T> => {
+    const brain = await getBrainMemory();
+    if (!brain) return whenNone();
     try {
-      const stats = await (await backend()).getStats();
-      return { ok: true as const, stats };
+      return await fn(brain);
     } catch (err) {
-      log.error('[memory-archive] getStats failed', { err });
-      return { ok: false as const, error: (err as Error).message };
+      log.error(`[memory] ${what} failed`, { err });
+      return onError(err);
     }
-  });
+  };
+
+  // Warm the index in the background so the first page view is not the one that pays for it.
+  void getBrainMemory()
+    .then((brain) => {
+      if (!brain) {
+        console.log('[memory] no brain MCP server configured');
+        return undefined;
+      }
+      console.log('[memory] backend=brain');
+      brain.onIndexChange((stats) => ipcBridge.memory.onIndexChanged.emit(stats));
+      return brain.init();
+    })
+    .catch((err) => log.warn('[memory] background init failed', { err }));
+
+  ipcBridge.memory.getBackend.provider(async () => ((await getBrainMemory()) ? 'brain' : 'none'));
+
+  ipcBridge.memory.getStats.provider(async () =>
+    withBrain<GetStatsResult>(
+      'getStats',
+      async (b) => ({ ok: true as const, stats: await b.getStats() }),
+      () => ({ ok: false as const, error: NO_BRAIN }),
+      (err) => ({ ok: false as const, error: message(err) })
+    )
+  );
 
   ipcBridge.memory.listEntries.provider(async (rawFilter: unknown) => {
     const parsed = listFilterSchema.safeParse(rawFilter ?? {});
-    if (!parsed.success) {
-      return { entries: [], total: 0 };
-    }
-    try {
-      return await (await backend()).listEntries(parsed.data as ListFilter);
-    } catch (err) {
-      log.error('[memory-archive] listEntries failed', { err });
-      return { entries: [], total: 0 };
-    }
+    if (!parsed.success) return { entries: [], total: 0 };
+    return withBrain<{ entries: MemoryEntry[]; total: number }>(
+      'listEntries',
+      (b) => b.listEntries(parsed.data as ListFilter),
+      () => ({ entries: [], total: 0 }),
+      () => ({ entries: [], total: 0 })
+    );
   });
 
   ipcBridge.memory.getEntry.provider(async (args: unknown) => {
     const parsed = idSchema.safeParse(args);
     if (!parsed.success) return null;
-    try {
-      return await (await backend()).getEntry(parsed.data.id);
-    } catch (err) {
-      log.error('[memory-archive] getEntry failed', { err });
-      return null;
-    }
+    return withBrain<(MemoryEntry & { body: string }) | null>(
+      'getEntry',
+      (b) => b.getEntry(parsed.data.id),
+      () => null,
+      () => null
+    );
   });
 
-  ipcBridge.memory.getProjects.provider(async () => {
-    try {
-      return await (await backend()).getProjects();
-    } catch (err) {
-      log.error('[memory-archive] getProjects failed', { err });
-      return [];
-    }
-  });
+  ipcBridge.memory.getProjects.provider(async () =>
+    withBrain<ProjectSummary[]>(
+      'getProjects',
+      (b) => b.getProjects(),
+      () => [],
+      () => []
+    )
+  );
 
   ipcBridge.memory.getTags.provider(async (args: unknown) => {
     const parsed = tagsQuerySchema.safeParse(args ?? {});
-    if (!parsed.success) return [];
-    try {
-      return await (await backend()).getTags(parsed.data.project);
-    } catch (err) {
-      log.error('[memory-archive] getTags failed', { err });
-      return [];
-    }
-  });
-
-  ipcBridge.memory.getPromotionCandidates.provider(async () => {
-    try {
-      if (sweepHandle) {
-        const state = sweepHandle.getCandidates();
-        return {
-          candidates: state.candidates,
-          threshold: state.threshold,
-          lastRun: state.lastRunAt,
-          nextRun: state.nextRunAt,
-          lastRunAt: state.lastRunAt,
-          nextRunAt: state.nextRunAt,
-          autoPromoteEnabled: state.autoPromoteEnabled,
-          lastDream: state.lastDream,
-        };
-      }
-      // Fallback before sweep starts.
-      return await (await backend()).getPromotionCandidates();
-    } catch (err) {
-      log.error('[memory-archive] getPromotionCandidates failed', { err });
-      return { candidates: [], threshold: 90, lastRun: 0, nextRun: 0 };
-    }
-  });
-
-  // ===== Mutations =====
-
-  ipcBridge.memory.promote.provider(async (args) => {
-    const parsed = promoteSchema.safeParse(args);
-    if (!parsed.success) return { ok: false, error: 'invalid id' };
-    try {
-      const entry = await (await backend()).getEntry(parsed.data.id);
-      if (!entry) return { ok: false, error: 'entry not found' };
-      return await promoteEntry(entry);
-    } catch (err) {
-      log.error('[memory-archive] promote failed', { err });
-      return { ok: false, error: (err as Error).message };
-    }
+    const project = parsed.success ? parsed.data.project : undefined;
+    return withBrain<TagCount[]>(
+      'getTags',
+      (b) => b.getTags(project),
+      () => [],
+      () => []
+    );
   });
 
   ipcBridge.memory.setQuickAdd.provider(async (args) => {
     const parsed = quickAddSchema.safeParse(args);
     if (!parsed.success) return { ok: false, error: parsed.error.message };
-    try {
-      await (
-        await backend()
-      ).quickAdd(parsed.data.content, parsed.data.scope, parsed.data.type, parsed.data.projectPath);
-      return { ok: true };
-    } catch (err) {
-      log.error('[memory-archive] setQuickAdd failed', { err });
-      return { ok: false, error: (err as Error).message };
-    }
-  });
-
-  ipcBridge.memory.setPromotionThreshold.provider(async (args) => {
-    const parsed = thresholdSchema.safeParse(args);
-    if (!parsed.success) return;
-    if (sweepHandle) {
-      sweepHandle.setThreshold(parsed.data.threshold);
-    }
-    log.info('[memory-archive] setPromotionThreshold', { threshold: parsed.data.threshold });
-  });
-
-  ipcBridge.memory.setAutoPromoteEnabled.provider(async (args) => {
-    const parsed = autoPromoteSchema.safeParse(args);
-    if (!parsed.success) return;
-    if (sweepHandle) {
-      sweepHandle.setAutoPromoteEnabled(parsed.data.enabled);
-    }
-    log.info('[memory-archive] setAutoPromoteEnabled', { enabled: parsed.data.enabled });
-  });
-
-  ipcBridge.memory.undoPromotion.provider(async (args) => {
-    const parsed = undoSchema.safeParse(args);
-    if (!parsed.success) return { ok: false, error: 'invalid id' };
-    try {
-      return await undoPromotion(parsed.data.id);
-    } catch (err) {
-      log.error('[memory-archive] undoPromotion failed', { err });
-      return { ok: false, error: (err as Error).message };
-    }
+    const { content, scope, type, projectPath } = parsed.data;
+    return withBrain<{ ok: boolean; error?: string }>(
+      'setQuickAdd',
+      async (b) => {
+        await b.quickAdd(content, scope, type, projectPath);
+        return { ok: true };
+      },
+      () => ({ ok: false, error: NO_BRAIN }),
+      (err) => ({ ok: false, error: message(err) })
+    );
   });
 
   ipcBridge.memory.updateEntry.provider(async (args) => {
     const parsed = updateEntrySchema.safeParse(args);
     if (!parsed.success) return { ok: false, error: 'invalid args' };
     const { id, ...patch } = parsed.data;
-    // Require at least one field to change.
     if (
       patch.summary === undefined &&
       patch.type === undefined &&
@@ -281,67 +178,53 @@ export function initMemoryArchiveBridge(): void {
     ) {
       return { ok: false, error: 'no_changes' };
     }
-    try {
-      return await (await backend()).editEntry(id, patch);
-    } catch (err) {
-      log.error('[memory-archive] updateEntry failed', { err });
-      return { ok: false, error: (err as Error).message };
-    }
+    return withBrain<{ ok: boolean; error?: string; newId?: string }>(
+      'updateEntry',
+      (b) => b.editEntry(id, patch),
+      () => ({ ok: false, error: NO_BRAIN }),
+      (err) => ({ ok: false, error: message(err) })
+    );
   });
 
   ipcBridge.memory.deleteEntry.provider(async (args) => {
-    const parsed = deleteEntrySchema.safeParse(args);
+    const parsed = idSchema.safeParse(args);
     if (!parsed.success) return { ok: false, error: 'invalid id' };
-    try {
-      return await (await backend()).deleteEntry(parsed.data.id);
-    } catch (err) {
-      log.error('[memory-archive] deleteEntry failed', { err });
-      return { ok: false, error: (err as Error).message };
-    }
+    return withBrain<{ ok: boolean; error?: string; archiveId?: string }>(
+      'deleteEntry',
+      (b) => b.deleteEntry(parsed.data.id),
+      () => ({ ok: false, error: NO_BRAIN }),
+      (err) => ({ ok: false, error: message(err) })
+    );
   });
 
-  ipcBridge.memory.listArchivedEntries.provider(async () => {
-    try {
-      return await (await backend()).listArchivedEntries();
-    } catch (err) {
-      log.error('[memory-archive] listArchivedEntries failed', { err });
-      return [];
-    }
-  });
+  ipcBridge.memory.listArchivedEntries.provider(async () =>
+    withBrain<ArchivedMemoryEntry[]>(
+      'listArchivedEntries',
+      (b) => b.listArchivedEntries(),
+      () => [],
+      () => []
+    )
+  );
 
   ipcBridge.memory.restoreArchivedEntry.provider(async (args) => {
-    const parsed = restoreArchivedEntrySchema.safeParse(args);
-    if (!parsed.success) return { ok: false, error: 'invalid id' };
-    try {
-      return await (await backend()).restoreArchivedEntry(parsed.data.archiveId);
-    } catch (err) {
-      log.error('[memory-archive] restoreArchivedEntry failed', { err });
-      return { ok: false, error: (err as Error).message };
-    }
+    const parsed = archiveIdSchema.safeParse(args);
+    if (!parsed.success) return { ok: false, error: 'invalid archive id' };
+    return withBrain<{ ok: boolean; error?: string }>(
+      'restoreArchivedEntry',
+      (b) => b.restoreArchivedEntry(parsed.data.archiveId),
+      () => ({ ok: false, error: NO_BRAIN }),
+      (err) => ({ ok: false, error: message(err) })
+    );
   });
 
-  ipcBridge.memory.forceSweep.provider(async () => {
-    if (sweepHandle) {
-      await sweepHandle.forceRun();
-    }
+  ipcBridge.memory.ingestFiles.provider(async (args) => {
+    const parsed = ingestFilesSchema.safeParse(args);
+    if (!parsed.success) return { ok: false, ingested: 0, errors: ['invalid args'] };
+    return withBrain<{ ok: boolean; ingested: number; errors: string[] }>(
+      'ingestFiles',
+      (b) => b.ingestFiles(parsed.data.files.map((f) => ({ name: String(f.name), content: String(f.content) }))),
+      () => ({ ok: false, ingested: 0, errors: [NO_BRAIN] }),
+      (err) => ({ ok: false, ingested: 0, errors: [message(err)] })
+    );
   });
-
-  ipcBridge.memory.readSourceContext.provider(async (args: unknown) => {
-    const parsed = readSourceContextSchema.safeParse(args);
-    if (!parsed.success) return { ok: false as const, error: 'invalid args' };
-    try {
-      return await readSourceContext(parsed.data as { path: string; line: number; contextLines?: number });
-    } catch (err) {
-      log.error('[memory-archive] readSourceContext failed', { err });
-      return { ok: false as const, error: (err as Error).message };
-    }
-  });
-
-  // ===== Emitters =====
-
-  void backend().then((svc) =>
-    svc.onIndexChange((stats) => {
-      ipcBridge.memory.onIndexChanged.emit(stats);
-    })
-  );
 }

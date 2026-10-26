@@ -148,18 +148,17 @@ export class ConversationServiceImpl implements IConversationService {
   }
 
   /**
-   * Resolve the project's `.wayland/` knowledge AND the user's global Wayland
-   * Memory store and append both to this conversation's system-rules channel, in
-   * place on `params.extra`.
+   * Resolve the project's `.wayland/` knowledge AND the user's curated memories from
+   * the brain MCP server and append both to this conversation's system-rules channel,
+   * in place on `params.extra`.
    *
    * Project knowledge is per-project: a no-op when the chat is not in a project,
    * the project has no workspace, or the docs are still empty boilerplate.
    *
-   * Global memory (`~/.ijfw/memory/*.md`) rides the SAME seam but is injected
-   * into EVERY chat, project or not (GitHub #256): drop-folder ingestion writes
-   * dropped files to the global store, and without this the chat agent never saw
-   * that memory and answered "not found". Both blocks are clearly attributed and
-   * read from disjoint dirs, so they never double-inject the same content.
+   * Brain memory rides the SAME seam but is injected into EVERY chat, project or not:
+   * the standing rules, decisions, patterns and notes the user saved in the global
+   * workspace. Both blocks are clearly attributed and come from different stores, so they
+   * never double-inject the same content.
    *
    * Failures are logged and swallowed so chat creation is never blocked by IO.
    */

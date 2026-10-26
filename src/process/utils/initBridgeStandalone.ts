@@ -40,7 +40,7 @@ import { initShellBridgeStandalone } from '@process/bridge/shellBridgeStandalone
 import { initCronBridge } from '@process/bridge/cronBridge';
 import { initFsBridge } from '@process/bridge/fsBridge';
 import { initMcpBridge } from '@process/bridge/mcpBridge';
-import { initMemoryArchiveBridge, initPromotionSweep } from '@process/bridge/memoryArchiveBridge';
+import { initMemoryArchiveBridge } from '@process/bridge/memoryArchiveBridge';
 import { initNotificationBridge } from '@process/bridge/notificationBridge';
 import { initSystemSettingsBridge } from '@process/bridge/systemSettingsBridge';
 // LOCAL PATCH (not upstream): the Flux connector bridge was Electron-only, so the
@@ -144,11 +144,8 @@ export async function initBridgeStandalone(): Promise<void> {
   initSpeechToTextBridge();
   initHubBridge();
   initProjectBridge();
-  // The Memory page's data bridge. The web server never registered it, so the page had no
-  // provider to ask and sat on its setup screen; with the brain MCP server as the store it
-  // needs nothing from the IJFW installer.
+  // The Memory page's data bridge (the brain MCP server is the store).
   initMemoryArchiveBridge();
-  initPromotionSweep();
 
   // Team session service: pass the three required deps; ritualScheduler is
   // optional (Standing-Company rituals are a no-op without it, which is fine

@@ -69,18 +69,6 @@ vi.mock('electron-log', () => ({
   },
 }));
 
-vi.mock('@/process/services/ijfwSystemService', () => ({
-  ijfwSystemService: {
-    detectLocalInstall: vi.fn(async () => ({
-      installed: true,
-      version: '1.5.6',
-      mcpServerPath: '/Users/test/.ijfw/mcp-server',
-      detectedVia: 'directory',
-      pathProbe: { homebrew: false, usrLocal: false, standardPath: false },
-    })),
-    getLatestPublished: vi.fn(async () => '1.6.0'),
-  },
-}));
 
 const makeGitHubReleaseResponse = () => [
   {
@@ -146,14 +134,6 @@ describe('updateBridge GitHub asset URLs', () => {
       const result = await handler({ repo: 'FerroxLabs/wayland' });
 
       expect(result.success).toBe(true);
-      expect(result.data?.ijfw).toMatchObject({
-        installed: true,
-        currentVersion: '1.5.6',
-        latestVersion: '1.6.0',
-        updateAvailable: true,
-        // #179: a directory install is healthy (cliOnPath need not be separately set).
-        pathHealthy: true,
-      });
       const assets = result.data?.latest?.assets ?? [];
       expect(assets.length).toBe(3);
 

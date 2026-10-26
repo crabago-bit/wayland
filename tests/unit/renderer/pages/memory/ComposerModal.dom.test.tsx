@@ -9,15 +9,10 @@
 /**
  * DOM tests for ComposerModal.
  *
- * Covers:
- *   - Renders when open=true, returns null when open=false.
- *   - ESC triggers onClose via Arco Modal's onCancel.
- *   - Submit fires onSubmit with correct shape (content, scope, tags).
- *   - Validation rejects empty content.
- *   - Validation rejects content > 8000 chars.
- *   - Scope toggle switches between project / global.
- *   - Cancel button fires onClose without submitting.
- *   - Falls back to ipcBridge when no onSubmit prop is provided.
+ * Covers: open/closed rendering, Escape/Cancel, the 40-character minimum and
+ * 8000 limit, the six categories, the brain workspace picker (seeded from the
+ * page's workspace filter, else `general`), the setQuickAdd payload, and the
+ * backend's refusal message surfaced in a toast.
  */
 
 import React from 'react';
@@ -29,8 +24,10 @@ import type { Mock } from 'vitest';
 // Mocks
 // ---------------------------------------------------------------------------
 
-const { mockSetQuickAdd } = vi.hoisted(() => ({
+const { mockSetQuickAdd, messageError, messageSuccess } = vi.hoisted(() => ({
   mockSetQuickAdd: vi.fn(),
+  messageError: vi.fn(),
+  messageSuccess: vi.fn(),
 }));
 
 vi.mock('@/common/adapter/ipcBridge', () => ({
@@ -138,8 +135,8 @@ vi.mock('@arco-design/web-react', () => {
   );
 
   const MessageStub = {
-    success: vi.fn(),
-    error: vi.fn(),
+    success: messageSuccess,
+    error: messageError,
   };
 
   return {
@@ -166,181 +163,149 @@ import { ComposerModal } from '@renderer/pages/memory/components/ComposerModal';
 // ---------------------------------------------------------------------------
 
 function setup(props: Partial<React.ComponentProps<typeof ComposerModal>> = {}) {
-  const onClose = props.onClose ?? vi.fn();
-  const onSubmit = props.onSubmit;
-  return {
-    onClose: onClose as Mock,
-    onSubmit: onSubmit as Mock | undefined,
-    ...render(<ComposerModal open={props.open ?? true} onClose={onClose} onSubmit={onSubmit} />),
-  };
+  const onClose = (props.onClose ?? vi.fn()) as Mock;
+  const utils = render(
+    <ComposerModal
+      open={props.open ?? true}
+      onClose={onClose}
+      workspaces={props.workspaces}
+      defaultWorkspace={props.defaultWorkspace}
+    />
+  );
+  return { onClose, ...utils };
 }
+
+const LONG = 'Deploy Memory from the brain MCP server so agents share one store.';
+
+const type = (value: string): void => {
+  fireEvent.change(screen.getByTestId('composer-textarea'), { target: { value } });
+};
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+beforeEach(() => {
+  mockSetQuickAdd.mockResolvedValue({ ok: true });
+});
 
 describe('ComposerModal', () => {
-  describe('visibility', () => {
-    it('renders when open=true', () => {
-      setup({ open: true });
-      expect(screen.getByTestId('composer-modal')).toBeTruthy();
-    });
-
-    it('returns null when open=false', () => {
-      setup({ open: false });
-      expect(screen.queryByTestId('composer-modal')).toBeNull();
-    });
+  it('renders when open and nothing when closed', () => {
+    const { unmount } = setup();
+    expect(screen.getByTestId('composer-modal')).toBeTruthy();
+    unmount();
+    setup({ open: false });
+    expect(screen.queryByTestId('composer-modal')).toBeNull();
   });
 
-  describe('close behaviour', () => {
-    it('ESC keydown on modal triggers onClose', () => {
-      const { onClose } = setup();
-      const dialog = screen.getByRole('dialog');
-      fireEvent.keyDown(dialog, { key: 'Escape' });
-      expect(onClose).toHaveBeenCalledTimes(1);
-    });
-
-    it('cancel button calls onClose without submitting', async () => {
-      const onSubmit = vi.fn();
-      const { onClose } = setup({ onSubmit });
-      const ta = screen.getByTestId('composer-textarea') as HTMLTextAreaElement;
-      fireEvent.change(ta, { target: { value: 'some content' } });
-      fireEvent.click(screen.getByTestId('composer-cancel-btn'));
-      expect(onClose).toHaveBeenCalledTimes(1);
-      expect(onSubmit).not.toHaveBeenCalled();
-    });
+  it('Escape and Cancel call onClose without saving', () => {
+    const { onClose } = setup();
+    fireEvent.keyDown(screen.getByTestId('composer-modal'), { key: 'Escape' });
+    fireEvent.click(screen.getByTestId('composer-cancel-btn'));
+    expect(onClose).toHaveBeenCalledTimes(2);
+    expect(mockSetQuickAdd).not.toHaveBeenCalled();
   });
 
-  describe('validation', () => {
-    it('rejects empty content - submit button is disabled', () => {
-      const onSubmit = vi.fn();
-      setup({ onSubmit });
-      const btn = screen.getByTestId('composer-submit-btn') as HTMLButtonElement;
-      // Button is disabled when content is empty - click cannot fire onSubmit.
-      expect(btn.disabled).toBe(true);
-      expect(onSubmit).not.toHaveBeenCalled();
-    });
-
-    it('submit button is disabled when content is empty', () => {
-      setup({ onSubmit: vi.fn() });
-      const btn = screen.getByTestId('composer-submit-btn') as HTMLButtonElement;
-      expect(btn.disabled).toBe(true);
-    });
-
-    it('rejects content over 8000 chars - submit button is disabled', () => {
-      const onSubmit = vi.fn();
-      setup({ onSubmit });
-      const ta = screen.getByTestId('composer-textarea') as HTMLTextAreaElement;
-      fireEvent.change(ta, { target: { value: 'a'.repeat(8001) } });
-      const btn = screen.getByTestId('composer-submit-btn') as HTMLButtonElement;
-      // charOverLimit=true → button disabled, onSubmit never fires.
-      expect(btn.disabled).toBe(true);
-      expect(onSubmit).not.toHaveBeenCalled();
-    });
+  it('shows the 40-character minimum and keeps Remember disabled below it', () => {
+    setup();
+    expect(screen.getByTestId('composer-min-hint').textContent).toBe('At least {{min}} characters');
+    type('too short to keep');
+    expect((screen.getByTestId('composer-submit-btn') as HTMLButtonElement).disabled).toBe(true);
+    type(LONG);
+    expect((screen.getByTestId('composer-submit-btn') as HTMLButtonElement).disabled).toBe(false);
   });
 
-  describe('submit', () => {
-    it('calls onSubmit with correct shape on button click', async () => {
-      const onSubmit = vi.fn().mockResolvedValue(undefined);
-      setup({ onSubmit });
-      const ta = screen.getByTestId('composer-textarea') as HTMLTextAreaElement;
-      fireEvent.change(ta, { target: { value: 'Always use Arco components' } });
-      fireEvent.click(screen.getByTestId('composer-submit-btn'));
-      await waitFor(() => {
-        expect(onSubmit).toHaveBeenCalledWith({
-          content: 'Always use Arco components',
-          scope: 'project',
-          tags: [],
-        });
-      });
-    });
-
-    it('calls onSubmit via Cmd+Enter', async () => {
-      const onSubmit = vi.fn().mockResolvedValue(undefined);
-      setup({ onSubmit });
-      const ta = screen.getByTestId('composer-textarea') as HTMLTextAreaElement;
-      fireEvent.change(ta, { target: { value: 'Cmd enter submit' } });
-      fireEvent.keyDown(ta, { key: 'Enter', metaKey: true });
-      await waitFor(() => {
-        expect(onSubmit).toHaveBeenCalledWith({
-          content: 'Cmd enter submit',
-          scope: 'project',
-          tags: [],
-        });
-      });
-    });
-
-    it('calls onClose after successful submit', async () => {
-      const onSubmit = vi.fn().mockResolvedValue(undefined);
-      const { onClose } = setup({ onSubmit });
-      const ta = screen.getByTestId('composer-textarea') as HTMLTextAreaElement;
-      fireEvent.change(ta, { target: { value: 'Memory content' } });
-      fireEvent.click(screen.getByTestId('composer-submit-btn'));
-      await waitFor(() => {
-        expect(onClose).toHaveBeenCalledTimes(1);
-      });
-    });
-
-    it('shows inline error on submit failure', async () => {
-      const onSubmit = vi.fn().mockRejectedValue(new Error('Save failed'));
-      setup({ onSubmit });
-      const ta = screen.getByTestId('composer-textarea') as HTMLTextAreaElement;
-      fireEvent.change(ta, { target: { value: 'bad memory' } });
-      fireEvent.click(screen.getByTestId('composer-submit-btn'));
-      await waitFor(() => {
-        const errorEl = screen.getByTestId('composer-error');
-        expect(errorEl.textContent).toContain('Save failed');
-      });
-    });
-
-    it('falls back to ipcBridge when onSubmit is omitted', async () => {
-      mockSetQuickAdd.mockResolvedValue({ ok: true });
-      const onClose = vi.fn();
-      render(<ComposerModal open onClose={onClose} />);
-      const ta = screen.getByTestId('composer-textarea') as HTMLTextAreaElement;
-      fireEvent.change(ta, { target: { value: 'IPC fallback test' } });
-      fireEvent.click(screen.getByTestId('composer-submit-btn'));
-      await waitFor(() => {
-        expect(mockSetQuickAdd).toHaveBeenCalledWith({
-          content: 'IPC fallback test',
-          scope: 'project',
-        });
-        expect(onClose).toHaveBeenCalledTimes(1);
-      });
-    });
+  it('rejects content over 8000 characters', () => {
+    setup();
+    type('x'.repeat(8001));
+    expect((screen.getByTestId('composer-submit-btn') as HTMLButtonElement).disabled).toBe(true);
   });
 
-  describe('scope toggle', () => {
-    it('defaults to project scope', () => {
-      setup();
-      const projectBtn = screen.getByTestId('composer-scope-project');
-      expect(projectBtn.getAttribute('aria-pressed')).toBe('true');
-    });
+  it('offers the six categories with their meanings', () => {
+    setup();
+    for (const t of ['decision', 'preference', 'pattern', 'session', 'wiki', 'observation']) {
+      expect(screen.getByTestId(`composer-category-${t}`)).toBeTruthy();
+    }
+    expect(screen.getByTestId('composer-category-observation').getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(screen.getByTestId('composer-category-pattern'));
+    expect(screen.getByTestId('composer-category-pattern').getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByTestId('composer-category-description').textContent).toBe(
+      'Patterns, bug fixes, incidents, lessons and topology.'
+    );
+  });
 
-    it('switches scope to global on click', async () => {
-      const onSubmit = vi.fn().mockResolvedValue(undefined);
-      setup({ onSubmit });
-      fireEvent.click(screen.getByTestId('composer-scope-global'));
-      const ta = screen.getByTestId('composer-textarea') as HTMLTextAreaElement;
-      fireEvent.change(ta, { target: { value: 'global scope check' } });
-      fireEvent.click(screen.getByTestId('composer-submit-btn'));
-      await waitFor(() => {
-        expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ scope: 'global' }));
-      });
-    });
+  it('defaults to the general workspace and saves there as global', async () => {
+    const { onClose } = setup({ workspaces: ['wayland', 'general'] });
+    const picker = screen.getByTestId('composer-workspace-picker') as HTMLSelectElement;
+    expect(picker.value).toBe('general');
+    expect(Array.from(picker.options).map((o) => o.value)).toEqual(['general', 'wayland']);
+    type(LONG);
+    fireEvent.click(screen.getByTestId('composer-submit-btn'));
+    await waitFor(() =>
+      expect(mockSetQuickAdd).toHaveBeenCalledWith({
+        content: LONG,
+        scope: 'global',
+        type: 'observation',
+        projectPath: 'brain://general',
+      })
+    );
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(messageSuccess).toHaveBeenCalled();
+  });
 
-    it('project pill is aria-pressed=true after selecting project again', async () => {
-      setup();
-      fireEvent.click(screen.getByTestId('composer-scope-global'));
-      expect(screen.getByTestId('composer-scope-global').getAttribute('aria-pressed')).toBe('true');
-      fireEvent.click(screen.getByTestId('composer-scope-project'));
-      expect(screen.getByTestId('composer-scope-project').getAttribute('aria-pressed')).toBe('true');
-      expect(screen.getByTestId('composer-scope-global').getAttribute('aria-pressed')).toBe('false');
+  it('seeds the workspace from the page filter and saves the chosen category there', async () => {
+    setup({ workspaces: ['general', 'wayland'], defaultWorkspace: 'wayland' });
+    expect((screen.getByTestId('composer-workspace-picker') as HTMLSelectElement).value).toBe('wayland');
+    fireEvent.click(screen.getByTestId('composer-category-decision'));
+    type(LONG);
+    fireEvent.click(screen.getByTestId('composer-submit-btn'));
+    await waitFor(() =>
+      expect(mockSetQuickAdd).toHaveBeenCalledWith({
+        content: LONG,
+        scope: 'project',
+        type: 'decision',
+        projectPath: 'brain://wayland',
+      })
+    );
+  });
+
+  it('saves to a workspace picked by hand', async () => {
+    setup({ workspaces: ['general', 'wayland', 'warrior'] });
+    fireEvent.change(screen.getByTestId('composer-workspace-picker'), { target: { value: 'warrior' } });
+    type(LONG);
+    fireEvent.click(screen.getByTestId('composer-submit-btn'));
+    await waitFor(() =>
+      expect(mockSetQuickAdd).toHaveBeenCalledWith(expect.objectContaining({ projectPath: 'brain://warrior' }))
+    );
+  });
+
+  it('Cmd+Enter submits', async () => {
+    setup();
+    type(LONG);
+    await act(async () => {
+      fireEvent.keyDown(screen.getByTestId('composer-textarea'), { key: 'Enter', metaKey: true });
     });
+    await waitFor(() => expect(mockSetQuickAdd).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows the backend error message in a toast and stays open', async () => {
+    mockSetQuickAdd.mockResolvedValue({ ok: false, error: 'brain MCP server is not reachable' });
+    const { onClose } = setup();
+    type(LONG);
+    fireEvent.click(screen.getByTestId('composer-submit-btn'));
+    await waitFor(() => expect(messageError).toHaveBeenCalledWith('brain MCP server is not reachable'));
+    expect(screen.getByTestId('composer-error').textContent).toBe('brain MCP server is not reachable');
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('shows a thrown error message in a toast', async () => {
+    mockSetQuickAdd.mockRejectedValue(new Error('A brain memory needs at least 40 characters of substance'));
+    setup();
+    type(LONG);
+    fireEvent.click(screen.getByTestId('composer-submit-btn'));
+    await waitFor(() =>
+      expect(messageError).toHaveBeenCalledWith('A brain memory needs at least 40 characters of substance')
+    );
   });
 });

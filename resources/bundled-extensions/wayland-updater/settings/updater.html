@@ -237,7 +237,7 @@
         <header class="head">
           <div>
             <h1>Updater</h1>
-            <div class="subtitle">Wayland and Wayland Core update status from the extension host.</div>
+            <div class="subtitle">Wayland update status from the extension host.</div>
           </div>
           <div class="check-wrap">
             <span class="spinner" id="spinner" hidden></span>
@@ -259,13 +259,6 @@
               <div class="meta" id="wayland">No check has run yet.</div>
             </div>
             <span class="badge" id="waylandBadge">Idle</span>
-          </div>
-          <div class="card row">
-            <div>
-              <div class="title">Wayland Core</div>
-              <div class="meta" id="core">No check has run yet.</div>
-            </div>
-            <span class="badge" id="coreBadge">Idle</span>
           </div>
           <div class="card row">
             <div>
@@ -371,20 +364,6 @@
             setBadge('waylandBadge', 'Up to date', 'good');
           }
 
-          var core = data.ijfw || {};
-          if (core.installed && core.updateAvailable) {
-            $('core').textContent = 'IJFW ' + (core.currentVersion || '-') + ' -> ' + (core.latestVersion || '-');
-            setBadge('coreBadge', 'Available', 'available');
-          } else if (core.installed && !core.pathHealthy) {
-            $('core').textContent = 'IJFW is installed, but the ijfw command is not on PATH.';
-            setBadge('coreBadge', 'Path issue', 'warn');
-          } else if (core.installed) {
-            $('core').textContent = 'Current version: ' + (core.currentVersion || '-');
-            setBadge('coreBadge', 'Up to date', 'good');
-          } else {
-            $('core').textContent = 'Wayland Core updater status is unavailable.';
-            setBadge('coreBadge', 'Unknown', '');
-          }
           resize();
         }
 

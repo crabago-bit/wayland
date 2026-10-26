@@ -5,24 +5,22 @@
  */
 
 import { Brain, ChevronDown, ChevronRight, Archive, BookOpen } from 'lucide-react';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Tooltip } from '@arco-design/web-react';
 import classNames from 'classnames';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { wiki as wikiBridge } from '@/common/adapter/ipcBridge';
 import type { SiderTooltipProps } from '@renderer/utils/ui/siderTooltip';
 
 const EXPANDED_LS_KEY = 'wayland.sidebar.memory.expanded';
 
 /**
- * SiderMemoryEntry - expandable top-zone nav entry for the IJFW Memory section.
+ * SiderMemoryEntry - expandable top-zone nav entry for Memory (the user's brain).
  *
  * When expanded shows two indented children:
- *   - "Archive" → /memory
- *   - "Wiki"    → /wiki
+ *   - "Archive" → /memory           (every memory)
+ *   - "Wiki"    → /memory?type=wiki  (the wiki notes)
  *
- * An orange 8px dot badge appears on the parent row when wiki.orphanCandidates > 0.
  * Expand/collapse state is persisted to localStorage.
  */
 interface SiderMemoryEntryProps {
@@ -52,8 +50,6 @@ const SiderMemoryEntry: React.FC<SiderMemoryEntryProps> = ({ isMobile, isActive,
     return isOnMemoryOrWiki;
   });
 
-  const [orphanCount, setOrphanCount] = useState(0);
-
   const toggleExpanded = useCallback(() => {
     setExpanded((prev) => {
       const next = !prev;
@@ -66,31 +62,6 @@ const SiderMemoryEntry: React.FC<SiderMemoryEntryProps> = ({ isMobile, isActive,
     });
   }, []);
 
-  // Fetch orphan count on mount + subscribe to wiki state changes (Fix 12).
-  // Uses wiki.getState to get orphanCandidates on cold load without waiting
-  // for a stateChanged event.
-  useEffect(() => {
-    let cancelled = false;
-    const fetchOrphans = async (): Promise<void> => {
-      try {
-        const state = await wikiBridge.getState.invoke(undefined);
-        if (!cancelled && state) {
-          setOrphanCount(state.orphanCandidates.length);
-        }
-      } catch {
-        // Non-fatal
-      }
-    };
-    void fetchOrphans();
-    const unsub = wikiBridge.stateChanged.on((state) => {
-      if (!cancelled) setOrphanCount(state.orphanCandidates.length);
-    });
-    return () => {
-      cancelled = true;
-      unsub();
-    };
-  }, []);
-
   const handleNavigate = useCallback(
     (path: string) => {
       navigate(path);
@@ -98,8 +69,10 @@ const SiderMemoryEntry: React.FC<SiderMemoryEntryProps> = ({ isMobile, isActive,
     [navigate]
   );
 
-  const isArchiveActive = location.pathname.startsWith('/memory');
-  const isWikiActive = location.pathname.startsWith('/wiki');
+  const isWikiActive =
+    location.pathname.startsWith('/wiki') ||
+    (location.pathname.startsWith('/memory') && new URLSearchParams(location.search).get('type') === 'wiki');
+  const isArchiveActive = location.pathname.startsWith('/memory') && !isWikiActive;
 
   if (collapsed) {
     return (
@@ -113,20 +86,6 @@ const SiderMemoryEntry: React.FC<SiderMemoryEntryProps> = ({ isMobile, isActive,
           data-testid='sider-memory-entry'
         >
           <Brain size={16} className='block leading-none shrink-0' style={{ lineHeight: 0 }} />
-          {orphanCount > 0 && (
-            <span
-              style={{
-                position: 'absolute',
-                top: 6,
-                right: 6,
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: 'var(--orange, #FF7A45)',
-              }}
-              aria-label={`${orphanCount} emerging concepts`}
-            />
-          )}
         </div>
       </Tooltip>
     );
@@ -158,20 +117,6 @@ const SiderMemoryEntry: React.FC<SiderMemoryEntryProps> = ({ isMobile, isActive,
       >
         <span className='w-20px h-20px flex items-center justify-center shrink-0 relative'>
           <Brain size={16} className='block leading-none' style={{ lineHeight: 0 }} />
-          {orphanCount > 0 && (
-            <span
-              style={{
-                position: 'absolute',
-                top: 0,
-                right: 0,
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: 'var(--orange, #FF7A45)',
-              }}
-              aria-label={`${orphanCount} emerging concepts`}
-            />
-          )}
         </span>
         <span className='collapsed-hidden text-t-primary text-12px font-medium leading-20px flex-1'>{label}</span>
         <span className='collapsed-hidden text-t-3 flex items-center'>
@@ -205,7 +150,7 @@ const SiderMemoryEntry: React.FC<SiderMemoryEntryProps> = ({ isMobile, isActive,
                 ? 'bg-[rgba(var(--primary-6),0.12)] text-primary'
                 : 'text-t-secondary hover:bg-fill-3 active:bg-fill-4'
             )}
-            onClick={() => handleNavigate('/wiki')}
+            onClick={() => handleNavigate('/memory?type=wiki')}
             data-testid='sider-memory-wiki-entry'
           >
             <span className='w-20px h-20px flex items-center justify-center shrink-0'>

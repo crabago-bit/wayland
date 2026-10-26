@@ -11,8 +11,6 @@ import { Mailbox } from './Mailbox';
 import { TaskManager } from './TaskManager';
 import { TeammateManager } from './TeammateManager';
 import { TeamMcpServer, type StdioMcpConfig } from './mcp/team/TeamMcpServer';
-import { VerificationGate } from './VerificationGate';
-import { ijfwMcpClient } from '@process/services/ijfw/ijfwMcpClient';
 
 type SpawnAgentFn = (
   agentName: string,
@@ -60,15 +58,7 @@ export class TeamSession extends EventEmitter {
     // TaskManager validates task owners against the *current* team roster.
     // Pass a thunk (not a snapshot) so spawned/removed agents are reflected
     // on the next call without needing to rebuild TaskManager.
-    // P3 verification gate: a teammate proposing `completed` gets a second
-    // opinion from IJFW cross-audit before the completion stands. Policy is
-    // per-team (`advisory` default, `blocking` opt-in); the gate fails SOFT
-    // whenever IJFW is unavailable so a task is never trapped in `verifying`.
-    const verificationGate = new VerificationGate(
-      (verb, args, opts) => ijfwMcpClient.invoke(verb, args, opts),
-      () => team.verificationPolicy ?? 'advisory'
-    );
-    this.taskManager = new TaskManager(repo, () => this.teammateManager.getAgents(), logger, verificationGate);
+    this.taskManager = new TaskManager(repo, () => this.teammateManager.getAgents(), logger);
     this.teammateManager = new TeammateManager({
       teamId: team.id,
       agents: team.agents,

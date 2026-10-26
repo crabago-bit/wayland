@@ -2,7 +2,6 @@ import {
   ArrowRightLeft,
   BookOpen,
   Bot,
-  Brain,
   Cable,
   ChevronDown,
   Cpu,
@@ -189,12 +188,6 @@ export function getBuiltinSettingsNavItems(isDesktop: boolean, t: TranslateFn): 
       label: t('settings.sider.storage', { defaultValue: 'Storage' }),
       icon: <Globe size={16} />,
       path: 'storage',
-    },
-    ijfw: {
-      id: 'ijfw',
-      label: t('memory.settings.panel_title', { defaultValue: 'IJFW Memory' }),
-      icon: <Brain size={16} />,
-      path: 'ijfw',
     },
     about: { id: 'about', label: t('settings.about'), icon: <Info size={16} />, path: 'about' },
   };

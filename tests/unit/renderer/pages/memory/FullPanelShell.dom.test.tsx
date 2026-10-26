@@ -18,6 +18,7 @@
  *   - Esc key closes the drawer
  *   - empty state hero shown when no entries and no filters
  *   - status bar renders
+ *   - brain-only chrome (no IJFW strip / import / promotion), drop ingest
  */
 
 import React from 'react';
@@ -29,7 +30,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Fixtures
 // ---------------------------------------------------------------------------
 
-import type { MemoryStats, MemoryEntry, ProjectSummary, PromotionCandidates } from '@/common/types/memory';
+import type { MemoryStats, MemoryEntry, ProjectSummary } from '@/common/types/memory';
 
 const MOCK_STATS: MemoryStats = {
   total: 42,
@@ -71,43 +72,37 @@ const MOCK_STATS: MemoryStats = {
 const MOCK_ENTRY: MemoryEntry = {
   id: 'entry-001',
   type: 'decision',
-  project: 'wayland-app',
-  projectPath: '/dev/wayland/app',
-  summary: 'Always use Arco components',
+  project: 'wayland',
+  projectPath: 'brain://wayland',
+  summary: 'decision: always use Arco components',
   bodyPreview: 'Body preview...',
-  tags: ['arco'],
+  tags: ['decision', 'paste'],
   storedAt: Date.now() - 3600_000,
-  sourcePath: 'src/renderer/AGENTS.md',
-  sourceLine: 10,
+  sourcePath: 'brain://wayland/entry-001',
+  sourceLine: 0,
   referencedBy: 3,
   promotionScore: 70,
 };
 
 const MOCK_FULL_ENTRY = {
   ...MOCK_ENTRY,
-  body: 'Full body text.',
-  why: 'Because consistency.',
-  howToApply: 'Use Arco everywhere.',
+  body: 'Full body text explaining why Arco is used everywhere.',
 };
 
 const MOCK_PROJECTS: ProjectSummary[] = [
-  { path: '/dev/wayland/app', basename: 'wayland-app', count: 42, lastActive: Date.now() },
+  { path: 'brain://wayland', basename: 'wayland', count: 30, lastActive: Date.now() },
+  { path: 'brain://general', basename: 'general', count: 12, lastActive: Date.now(), isGlobalStore: true },
 ];
-
-const MOCK_CANDIDATES: PromotionCandidates = {
-  candidates: [],
-  threshold: 90,
-  lastRun: Date.now() - 60_000,
-  nextRun: Date.now() + 8 * 60 * 1000,
-};
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-const { mockMemory, mockShell, mockIjfw, mockModalConfirm } = vi.hoisted(() => {
+// Only the calls the Memory page is allowed to use. Anything else (ijfw.*,
+// memory.import.*, promote, readSourceContext, shell.*) is absent, so a stray
+// call throws and fails the test.
+const { mockMemory, mockModalConfirm } = vi.hoisted(() => {
   let _indexChangedListeners: Array<(v: unknown) => void> = [];
-  let _ijfwListeners: Array<(v: unknown) => void> = [];
   const mockIndexChangedEmitter = {
     on: (cb: (v: unknown) => void) => {
       _indexChangedListeners.push(cb);
@@ -116,52 +111,22 @@ const { mockMemory, mockShell, mockIjfw, mockModalConfirm } = vi.hoisted(() => {
       };
     },
   };
-  const mockIjfwStatusEmitter = {
-    on: (cb: (v: unknown) => void) => {
-      _ijfwListeners.push(cb);
-      return () => {
-        _ijfwListeners = _ijfwListeners.filter((l) => l !== cb);
-      };
-    },
-  };
 
   return {
     mockMemory: {
+      getBackend: { invoke: vi.fn() },
       getStats: { invoke: vi.fn() },
       listEntries: { invoke: vi.fn() },
       getEntry: { invoke: vi.fn() },
       getProjects: { invoke: vi.fn() },
       getTags: { invoke: vi.fn() },
-      getPromotionCandidates: { invoke: vi.fn() },
-      promote: { invoke: vi.fn() },
       setQuickAdd: { invoke: vi.fn() },
-      // #414 edit/archive mutations (used by the drawer actions).
       updateEntry: { invoke: vi.fn() },
       deleteEntry: { invoke: vi.fn() },
       listArchivedEntries: { invoke: vi.fn() },
       restoreArchivedEntry: { invoke: vi.fn() },
-      setPromotionThreshold: { invoke: vi.fn() },
+      ingestFiles: { invoke: vi.fn() },
       onIndexChanged: mockIndexChangedEmitter,
-      import: {
-        claudeMem: { invoke: vi.fn() },
-        obsidianVault: { invoke: vi.fn() },
-        scanDevDir: { invoke: vi.fn() },
-        processDropFolder: { invoke: vi.fn() },
-        getDropFolderStatus: {
-          invoke: vi.fn().mockResolvedValue({ path: '~/Documents/Wayland-Memory', watching: false, ingestedToday: 0 }),
-        },
-      },
-      readSourceContext: { invoke: vi.fn() },
-    },
-    mockShell: {
-      openFile: { invoke: vi.fn() },
-      openPath: { invoke: vi.fn().mockResolvedValue({ ok: true }) },
-    },
-    mockIjfw: {
-      getStatus: { invoke: vi.fn() },
-      onStatusChanged: mockIjfwStatusEmitter,
-      // Used by the embedded IjfwSetupStatus (#414 health strip) on expand.
-      brainInvoke: { invoke: vi.fn() },
     },
     // Captures the config passed to Modal.confirm so the archive-gate test can
     // assert deleteEntry fires ONLY from the confirm dialog's onOk.
@@ -171,16 +136,11 @@ const { mockMemory, mockShell, mockIjfw, mockModalConfirm } = vi.hoisted(() => {
 
 vi.mock('@/common/adapter/ipcBridge', () => ({
   memory: mockMemory,
-  shell: mockShell,
-  ijfw: mockIjfw,
-  IjfwStatusPayload: {},
 }));
 
 vi.mock('@/common', () => ({
   ipcBridge: {
-    shell: mockShell,
     memory: mockMemory,
-    ijfw: mockIjfw,
   },
 }));
 
@@ -214,44 +174,18 @@ vi.mock('@arco-design/web-react', async () => {
 vi.mock('@icon-park/react', () => ({
   Close: (p: Record<string, unknown>) => <span data-testid='icon-close' {...p} />,
   Copy: (p: Record<string, unknown>) => <span data-testid='icon-copy' {...p} />,
-  LinkOne: (p: Record<string, unknown>) => <span data-testid='icon-link' {...p} />,
   Edit: (p: Record<string, unknown>) => <span data-testid='icon-edit' {...p} />,
   Inbox: (p: Record<string, unknown>) => <span data-testid='icon-inbox' {...p} />,
-  FileCode: (p: Record<string, unknown>) => <span data-testid='icon-file-code' {...p} />,
-  Help: (p: Record<string, unknown>) => <span data-testid='icon-help' {...p} />,
-  // Used by the embedded IjfwSetupStatus (#414 health strip) when expanded.
-  CheckOne: (p: Record<string, unknown>) => <span data-testid='icon-check-one' {...p} />,
-  Attention: (p: Record<string, unknown>) => <span data-testid='icon-attention' {...p} />,
-  CloseOne: (p: Record<string, unknown>) => <span data-testid='icon-close-one' {...p} />,
-  Loading: (p: Record<string, unknown>) => <span data-testid='icon-loading' {...p} />,
-  Round: (p: Record<string, unknown>) => <span data-testid='icon-round' {...p} />,
 }));
 
 vi.mock('react-i18next', () => ({
-  // Unified stub: FullPanelShell calls t(key, 'string fallback'); the embedded
-  // IjfwSetupStatus calls t(key, { defaultValue }). Handle both forms.
   useTranslation: () => ({
-    t: (_key: string, arg?: unknown) => {
-      if (typeof arg === 'string') return arg;
-      if (arg && typeof arg === 'object' && 'defaultValue' in arg) {
-        return (arg as { defaultValue?: string }).defaultValue ?? _key;
-      }
-      return _key;
+    t: (_key: string, arg?: unknown, opts?: Record<string, unknown>) => {
+      if (typeof arg !== 'string') return _key;
+      return opts ? arg.replace(/\{\{(\w+)\}\}/g, (_m: string, k: string) => String(opts[k] ?? '')) : arg;
     },
   }),
 }));
-
-vi.mock(
-  '@renderer/pages/memory/components/PromotionThresholdModal',
-  () => ({
-    default: ({ onClose }: { onClose: () => void }) => (
-      <div data-testid='threshold-modal'>
-        <button onClick={onClose}>Close</button>
-      </div>
-    ),
-  }),
-  { ssr: false }
-);
 
 import FullPanelShell from '@renderer/pages/memory/state-branches/FullPanelShell';
 
@@ -265,7 +199,6 @@ const renderShell = (initialEntries: string[] = ['/memory']) =>
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
-  localStorage.clear(); // reset the persisted setup-status strip open state
 });
 
 beforeEach(() => {
@@ -274,17 +207,12 @@ beforeEach(() => {
   mockMemory.getEntry.invoke.mockResolvedValue(MOCK_FULL_ENTRY);
   mockMemory.getProjects.invoke.mockResolvedValue(MOCK_PROJECTS);
   mockMemory.getTags.invoke.mockResolvedValue([{ tag: 'arco', count: 5 }]);
-  mockMemory.getPromotionCandidates.invoke.mockResolvedValue(MOCK_CANDIDATES);
-  mockMemory.promote.invoke.mockResolvedValue({ ok: true });
   mockMemory.setQuickAdd.invoke.mockResolvedValue({ ok: true });
   mockMemory.deleteEntry.invoke.mockResolvedValue({ ok: true });
   mockMemory.listArchivedEntries.invoke.mockResolvedValue([]);
   mockMemory.restoreArchivedEntry.invoke.mockResolvedValue({ ok: true });
   mockMemory.updateEntry.invoke.mockResolvedValue({ ok: true });
-  mockMemory.import.scanDevDir.invoke.mockResolvedValue({ count: 0, projectsFound: 0, errors: [] });
-  mockShell.openFile.invoke.mockResolvedValue(undefined);
-  mockIjfw.getStatus.invoke.mockResolvedValue({ status: 'installed_current', cliCount: 5 });
-  mockIjfw.brainInvoke.invoke.mockResolvedValue({ ok: true });
+  mockMemory.ingestFiles.invoke.mockResolvedValue({ ok: true, ingested: 1, errors: [] });
 });
 
 // ---------------------------------------------------------------------------
@@ -394,84 +322,77 @@ describe('FullPanelShell (v0.6.4 Mail-style)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// #414 - Setup-status health strip folded into the Memory panel header
+// Brain-only chrome: no IJFW strip, import, promotion or settings controls.
 // ---------------------------------------------------------------------------
 
-describe('FullPanelShell setup-status strip (#414)', () => {
-  it('renders the strip toggle, collapsed by default (no body, no MCP probe)', async () => {
+describe('FullPanelShell brain chrome', () => {
+  it('shows the brain scope label and no IJFW strip, import or settings controls', async () => {
     await act(async () => {
       renderShell();
     });
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 30));
-    });
-    expect(screen.getByTestId('memory-setup-status-strip')).toBeTruthy();
-    expect(screen.getByTestId('memory-setup-status-toggle')).toBeTruthy();
-    // Collapsed: the checklist body is not mounted, so no MCP child is spawned.
-    expect(screen.queryByTestId('memory-setup-status-body')).toBeNull();
-    expect(mockIjfw.brainInvoke.invoke).not.toHaveBeenCalled();
+    expect(screen.getByTestId('memory-scope-label').textContent).toBe(
+      'Everything here lives in your brain MCP server, so your agents and this page share the same memories.'
+    );
+    expect(screen.queryByTestId('memory-setup-status-strip')).toBeNull();
+    expect(screen.queryByTestId('memory-btn-import')).toBeNull();
+    expect(screen.queryByTestId('memory-btn-settings')).toBeNull();
+    expect(screen.getByTestId('memory-btn-quickadd')).toBeTruthy();
+    expect(screen.getByTestId('memory-btn-archived')).toBeTruthy();
   });
 
-  it('reflects install health on the strip dot (ok when installed_current)', async () => {
+  it('always shows the category descriptions on the topbar chips', async () => {
     await act(async () => {
       renderShell();
     });
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 30));
-    });
-    const dot = screen.getByTestId('memory-setup-status-strip').querySelector('[data-tone]');
-    expect(dot?.getAttribute('data-tone')).toBe('ok');
+    expect(screen.getByTestId('topbar-chip-memories').getAttribute('title')).toBe(
+      'Everything stored in your brain, across all workspaces.'
+    );
+    expect(screen.getByTestId('topbar-chip-decisions').getAttribute('title')).toBe(
+      'Deploy choices, governance, hires, routines and plans.'
+    );
+    expect(screen.getByTestId('topbar-chip-wiki').getAttribute('title')).toBe(
+      'Notes from Obsidian, files, URLs and docs.'
+    );
   });
 
-  it('marks the dot warn when IJFW is not installed', async () => {
-    mockIjfw.getStatus.invoke.mockResolvedValue({ status: 'not_installed', cliCount: 0 });
+  it('status bar shows the brain total', async () => {
     await act(async () => {
       renderShell();
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 30));
     });
-    const dot = screen.getByTestId('memory-setup-status-strip').querySelector('[data-tone]');
-    expect(dot?.getAttribute('data-tone')).toBe('warn');
+    expect(screen.getByTestId('status-total-pill').textContent).toBe('42 memories');
   });
 
-  it('expands to show the IjfwSetupStatus checklist when the toggle is clicked', async () => {
+  it('opens the composer on the general workspace when no workspace filter is set', async () => {
     await act(async () => {
       renderShell();
     });
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 30));
+      fireEvent.click(screen.getByTestId('memory-btn-quickadd'));
     });
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('memory-setup-status-toggle'));
-      await new Promise((r) => setTimeout(r, 30));
-    });
-    expect(screen.getByTestId('memory-setup-status-body')).toBeTruthy();
-    // The embedded checklist renders its install row (title hidden via hideTitle).
-    expect(screen.getByTestId('ijfw-settings-setup-status')).toBeTruthy();
-    expect(screen.getByTestId('ijfw-status-item-install').getAttribute('data-status')).toBe('ok');
+    const picker = screen.getByTestId('composer-workspace-picker') as HTMLSelectElement;
+    expect(picker.value).toBe('general');
+    expect(Array.from(picker.options).map((o) => o.value)).toEqual(['general', 'wayland']);
   });
 
-  it('persists the expanded state across remounts (localStorage)', async () => {
+  it('ingests dropped notes through ingestFiles', async () => {
     await act(async () => {
       renderShell();
     });
+    const file = new File(['# Note\n\nA dropped note that is long enough to keep.'], 'note.md', {
+      type: 'text/markdown',
+    });
     await act(async () => {
+      fireEvent.drop(screen.getByTestId('memory-full-panel'), {
+        dataTransfer: { files: [file], types: ['Files'] },
+      });
       await new Promise((r) => setTimeout(r, 30));
     });
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('memory-setup-status-toggle'));
+    expect(mockMemory.ingestFiles.invoke).toHaveBeenCalledWith({
+      files: [{ name: 'note.md', content: '# Note\n\nA dropped note that is long enough to keep.' }],
     });
-    expect(localStorage.getItem('wayland.memory.setupStatus.open')).toBe('1');
-    cleanup();
-    await act(async () => {
-      renderShell();
-    });
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 30));
-    });
-    // Re-opened already expanded from the persisted flag.
-    expect(screen.getByTestId('memory-setup-status-body')).toBeTruthy();
   });
 });
 
@@ -500,12 +421,14 @@ describe('FullPanelShell archive confirm gate (#414)', () => {
     expect(mockModalConfirm).toHaveBeenCalledTimes(1);
     expect(mockMemory.deleteEntry.invoke).not.toHaveBeenCalled();
 
-    // The confirm copy promises retained, restorable recovery rather than deletion.
+    // The confirm copy says what archiving does to a brain memory.
     const cfg = mockModalConfirm.mock.calls[0]![0] as {
       content?: string;
       onOk?: () => Promise<void> | void;
     };
-    expect(String(cfg.content)).toContain('restore anytime');
+    expect(String(cfg.content)).toContain('hides the memory from Wayland');
+    expect(String(cfg.content)).toContain('brain keeps the original');
+    expect(String(cfg.content)).toContain('Archived');
 
     // Only firing the dialog's onOk performs the durable archive.
     await act(async () => {
@@ -521,7 +444,7 @@ describe('FullPanelShell archive confirm gate (#414)', () => {
         archiveId: '11111111-1111-4111-8111-111111111111',
         summary: 'Archived customer memory',
         archivedAt: Date.now(),
-        sourcePath: '/dev/wayland/.ijfw/memory/knowledge.md',
+        sourcePath: 'brain://wayland/abc',
       },
     ]);
 

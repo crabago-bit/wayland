@@ -102,8 +102,7 @@ const AboutModalContent: React.FC = () => {
           return;
         }
         const data = result.manual?.data;
-        // Wayland-app update only — an IJFW-only update (data.ijfw) must not flip
-        // this to "available" (mirrors UpdateModal's waylandUpdateAvailable logic).
+        // Wayland-app update only.
         const waylandUpdateAvailable = Boolean(data?.updateAvailable || result.autoUpdateAvailable);
         const nextState: AboutCheckCache['state'] = waylandUpdateAvailable ? 'available' : 'upToDate';
         const nextVersion = waylandUpdateAvailable ? data?.latest?.version || result.autoVersion || '' : '';

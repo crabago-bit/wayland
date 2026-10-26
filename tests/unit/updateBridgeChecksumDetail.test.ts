@@ -83,12 +83,6 @@ vi.mock('@process/services/autoUpdaterService', () => ({
   },
 }));
 
-vi.mock('@process/services/ijfwSystemService', () => ({
-  ijfwSystemService: {
-    detectLocalInstall: vi.fn(async () => ({ installed: false })),
-    getLatestPublished: vi.fn(async () => null),
-  },
-}));
 
 /**
  * Real en-US strings, `{{placeholder}}` substitution only. Key coverage is

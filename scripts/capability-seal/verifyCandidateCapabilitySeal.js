@@ -74,7 +74,6 @@ const EXCLUSION_INVENTORY = new Map([
       'src/process/team/mcpReadiness.ts',
       'src/process/webserver/routes/mcpConfigRoutes.ts',
       'src/process/webserver/routes/mcpOAuthRoutes.ts',
-      'src/process/services/ijfw/mcpWireProtocol.ts',
       'src/common/mcp',
       'src/common/mcp.ts',
       'src/renderer/mcp-catalog',

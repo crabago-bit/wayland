@@ -282,7 +282,7 @@ function writeTemporary(authorityPath: string, encrypted: string): string {
  * The first retry is deliberately short: this is a synchronous rename on the
  * Electron main thread, so the schedule front-loads the case that clears
  * immediately and only lengthens once it is clear something is really holding
- * the file. The repo's async prior art (`retryOnEbusy` in `ijfwSystemService`)
+ * the file. The repo's async prior art (`retryOnEbusy`)
  * can afford a flat 100 ms first sleep because it does not block anything.
  *
  * The total was set by measurement, not taste. Against the reproduction below

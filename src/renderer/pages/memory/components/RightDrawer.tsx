@@ -11,53 +11,30 @@
  * Width transitions 0→480 over 0.22s via CSS - push-content, NOT overlay.
  * The list column must have a synchronized margin-right transition.
  *
- * Sections rendered (S4 fix): Summary, Why, How to apply,
- * Used in the wild (ref cards), Tags, Source path.
- * Why must be visible without scrolling (K3 fix).
- *
- * Promotion score bar (S5): track 6px + fill + 90% threshold marker.
- * Color: green ≥90, amber 80-89, muted <80 (per §4 token table).
+ * Shows a brain memory: its workspace, category (with what that category
+ * means), stored date, source labels and full body, plus Copy / Edit / Archive.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Tag, Tooltip } from '@arco-design/web-react';
-import { Close, Copy, LinkOne, FileCode, Help, Edit, Inbox } from '@icon-park/react';
+import React, { useEffect } from 'react';
+import { Button, Tag } from '@arco-design/web-react';
+import { Close, Copy, Edit, Inbox } from '@icon-park/react';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
-import type { MemoryEntry, MemoryType } from '@/common/types/memory';
-import { ipcBridge } from '@/common';
+import type { MemoryEntry } from '@/common/types/memory';
+import { categoryOf } from '../categories';
 import styles from './RightDrawer.module.css';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-type ExtendedEntry = MemoryEntry & {
-  body: string;
-  dereferences?: Array<{
-    source: string;
-    line: number;
-    preview: string;
-    lastAt: number;
-  }>;
-};
+type ExtendedEntry = MemoryEntry & { body: string };
 
 export type RightDrawerProps = {
   entry: ExtendedEntry | null;
-  promotionThreshold?: number;
   onClose: () => void;
-  onPromote?: (id: string) => void;
-  onOpenSource?: (path: string, line: number) => void;
   onCopy?: (text: string) => void;
-  /** Open the editor for this entry (#414). */
+  /** Open the editor for this entry. */
   onEdit?: (entry: ExtendedEntry) => void;
-  /** Archive this entry after confirmation (#414). */
+  /** Archive this entry after confirmation. */
   onArchive?: (entry: ExtendedEntry) => void;
 };
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 const formatRelative = (ts: number): string => {
   const diff = Math.max(0, Date.now() - ts);
@@ -71,165 +48,11 @@ const formatRelative = (ts: number): string => {
   return `${days}d ago`;
 };
 
-const TYPE_COLORS: Record<MemoryType, string> = {
-  decision: '#FF7A45',
-  pattern: '#5EEAD4',
-  session: '#7DD3FC',
-  observation: '#94A3B8',
-  wiki: '#C084FC',
-  preference: '#FCD34D',
-};
+/** Source labels: the entry's tags minus the category itself (already shown as the badge). */
+export const sourceLabels = (entry: Pick<MemoryEntry, 'tags' | 'type'>): string[] =>
+  (entry.tags ?? []).filter((tag) => tag !== entry.type);
 
-const SCORE_TOOLTIP =
-  'Score = (referenced × 0.15) + (type weight) + (recency decay over 30d). Auto-promotes at threshold.';
-
-// ---------------------------------------------------------------------------
-// SourcePanel - expandable inline view of source file context
-// ---------------------------------------------------------------------------
-
-type SourcePanelState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'error'; error: string }
-  | {
-      status: 'ok';
-      before: string;
-      anchor: string;
-      after: string;
-      totalLines: number;
-      fromLine: number;
-      toLine: number;
-    };
-
-type SourcePanelProps = {
-  path: string;
-  line: number;
-  autoExpand?: boolean;
-};
-
-const SourcePanel: React.FC<SourcePanelProps> = ({ path, line, autoExpand = false }) => {
-  const [open, setOpen] = useState(autoExpand);
-  const [state, setState] = useState<SourcePanelState>({ status: 'idle' });
-  const fetchedRef = useRef(false);
-
-  const filename = path.split('/').pop() ?? path;
-
-  const fetchSource = useCallback(() => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
-    setState({ status: 'loading' });
-    ipcBridge.memory.readSourceContext
-      .invoke({ path, line, contextLines: 50 })
-      .then((result) => {
-        const r = result as {
-          ok: boolean;
-          before?: string;
-          anchor?: string;
-          after?: string;
-          totalLines?: number;
-          error?: string;
-        };
-        if (r.ok) {
-          const ctxLines = 50;
-          const anchorLine = Math.max(1, line);
-          const fromLine = Math.max(1, anchorLine - ctxLines);
-          const toLine = Math.min(r.totalLines ?? 0, anchorLine + ctxLines);
-          setState({
-            status: 'ok',
-            before: r.before ?? '',
-            anchor: r.anchor ?? '',
-            after: r.after ?? '',
-            totalLines: r.totalLines ?? 0,
-            fromLine,
-            toLine,
-          });
-        } else {
-          setState({ status: 'error', error: r.error ?? 'Unknown error' });
-        }
-      })
-      .catch((err: unknown) => {
-        setState({ status: 'error', error: (err as Error).message });
-      });
-  }, [path, line]);
-
-  // Auto-expand: fetch immediately on mount
-  useEffect(() => {
-    if (autoExpand) {
-      fetchSource();
-    }
-  }, [autoExpand, fetchSource]);
-
-  const handleToggle = useCallback(() => {
-    const next = !open;
-    setOpen(next);
-    if (next) fetchSource();
-  }, [open, fetchSource]);
-
-  return (
-    <div className={styles.sourcePanel} data-testid='source-panel'>
-      <button
-        type='button'
-        className={styles.sourcePanelToggle}
-        onClick={handleToggle}
-        aria-expanded={open}
-        data-testid='source-panel-toggle'
-      >
-        <span>📄 Read source · {filename}</span>
-        <span className={styles.sourcePanelCaret}>{open ? '▲' : '▼'}</span>
-      </button>
-
-      {open && (
-        <div className={styles.sourcePanelBody} data-testid='source-panel-body'>
-          {state.status === 'loading' && (
-            <div className={styles.sourcePanelLoading} data-testid='source-panel-loading'>
-              Loading source…
-            </div>
-          )}
-          {state.status === 'error' && (
-            <div className={styles.sourcePanelError} data-testid='source-panel-error'>
-              Couldn't read source: {state.error}
-            </div>
-          )}
-          {state.status === 'ok' && (
-            <>
-              <div className={styles.sourcePanelBadge} data-testid='source-panel-badge'>
-                Showing lines {state.fromLine}–{state.toLine} of {state.totalLines}
-              </div>
-              {state.before.length > 0 && (
-                <div className={styles.sourcePanelContext} data-testid='source-panel-before'>
-                  <ReactMarkdown>{state.before}</ReactMarkdown>
-                </div>
-              )}
-              <div className={styles.sourcePanelAnchor} data-testid='source-panel-anchor'>
-                <ReactMarkdown>{state.anchor}</ReactMarkdown>
-              </div>
-              {state.after.length > 0 && (
-                <div className={styles.sourcePanelContext} data-testid='source-panel-after'>
-                  <ReactMarkdown>{state.after}</ReactMarkdown>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
-const RightDrawer: React.FC<RightDrawerProps> = ({
-  entry,
-  promotionThreshold = 90,
-  onClose,
-  onPromote,
-  onOpenSource,
-  onCopy,
-  onEdit,
-  onArchive,
-}) => {
+const RightDrawer: React.FC<RightDrawerProps> = ({ entry, onClose, onCopy, onEdit, onArchive }) => {
   const { t } = useTranslation('memory');
 
   // Esc closes drawer
@@ -241,22 +64,9 @@ const RightDrawer: React.FC<RightDrawerProps> = ({
     return () => document.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
-  const handleCopySource = useCallback(
-    (path: string, line: number) => {
-      const text = `${path}:L${line}`;
-      // Use Electron clipboard if available, else navigator.clipboard
-      const win = window as unknown as { electronAPI?: { clipboard?: { writeText?: (s: string) => void } } };
-      if (win.electronAPI?.clipboard?.writeText) {
-        win.electronAPI.clipboard.writeText(text);
-      } else {
-        void navigator.clipboard.writeText(text);
-      }
-      onCopy?.(text);
-    },
-    [onCopy]
-  );
-
   const isOpen = entry !== null;
+  const category = entry ? categoryOf(entry.type) : null;
+  const labels = entry ? sourceLabels(entry) : [];
 
   return (
     <div
@@ -264,7 +74,7 @@ const RightDrawer: React.FC<RightDrawerProps> = ({
       data-testid='right-drawer'
       aria-hidden={!isOpen}
     >
-      {isOpen && (
+      {isOpen && category && (
         <div className={styles.inner} data-testid='right-drawer-inner'>
           {/* Header */}
           <div className={styles.header}>
@@ -288,55 +98,25 @@ const RightDrawer: React.FC<RightDrawerProps> = ({
             <div className={styles.meta} data-testid='drawer-meta'>
               <span
                 className={styles.typeBadge}
-                style={{
-                  background: `${TYPE_COLORS[entry.type] ?? '#888'}22`,
-                  color: TYPE_COLORS[entry.type] ?? '#888',
-                }}
+                style={{ background: `${category.color}22`, color: category.color }}
+                title={t(category.descriptionKey, category.description)}
                 data-testid='drawer-type-badge'
               >
-                {entry.type}
+                {category.glyph} {t(category.labelKey, category.label)}
               </span>
               <span className={styles.metaSep}>·</span>
-              <span className={styles.metaDate}>{formatRelative(entry.storedAt)}</span>
+              <span className={styles.metaDate} title={new Date(entry.storedAt).toLocaleString()}>
+                {formatRelative(entry.storedAt)}
+              </span>
               <span className={styles.metaSep}>·</span>
               <span className={styles.metaProject} data-testid='drawer-project'>
-                {entry.projectPath.split('/').pop() ?? entry.project}
+                {entry.project}
               </span>
-              {entry.referencedBy > 0 && (
-                <>
-                  <span className={styles.metaSep}>·</span>
-                  <span className={styles.refPill} data-testid='drawer-ref-pill'>
-                    ↺ {t('archive.drawer.usedNTimes', 'Used {{count}}× this week', { count: entry.referencedBy })}
-                  </span>
-                </>
-              )}
             </div>
           </div>
 
           {/* Action row */}
           <div className={styles.actions} data-testid='drawer-actions'>
-            <Button
-              type='primary'
-              size='small'
-              disabled={entry.type === 'wiki'}
-              onClick={() => {
-                if (entry.type !== 'wiki') onPromote?.(entry.id);
-              }}
-              data-testid='drawer-promote-btn'
-            >
-              {entry.type === 'wiki'
-                ? t('archive.drawer.alreadyPromoted', 'Already promoted ✓')
-                : t('archive.drawer.promote', '↑ Promote to Wiki')}
-            </Button>
-            <Button
-              type='text'
-              size='small'
-              icon={<LinkOne theme='outline' size='13' />}
-              onClick={() => onOpenSource?.(entry.sourcePath, entry.sourceLine)}
-              data-testid='drawer-open-btn'
-            >
-              {t('archive.drawer.openFile', 'Open file')}
-            </Button>
             <Button
               type='text'
               size='small'
@@ -366,125 +146,28 @@ const RightDrawer: React.FC<RightDrawerProps> = ({
             </Button>
           </div>
 
-          {/* Promotion score bar */}
-          <div className={styles.scoreWrap} data-testid='drawer-score-wrap'>
-            <div className={styles.scoreLabel}>
-              <span className={styles.scoreText} data-testid='drawer-score-text'>
-                {t('archive.drawer.promotionScore', 'Promotion score')} {entry.promotionScore}/100
-                {' - '}
-                {t('archive.drawer.autoPromotesAt', 'auto-promotes at {{n}}', { n: promotionThreshold })}
-              </span>
-              <Tooltip content={SCORE_TOOLTIP} position='top'>
-                {/* #751: wrap the icon so Arco gets a real DOM node. @icon-park
-                    icons don't forwardRef, so an unwrapped trigger yields a null
-                    getRootDOMNode/findDOMNode and Arco crashes while positioning
-                    on hover - which blanked the whole app (no error boundary). */}
-                <span style={{ display: 'inline-flex' }}>
-                  <Help
-                    theme='outline'
-                    size='13'
-                    style={{ cursor: 'help', opacity: 0.6 }}
-                    aria-label={t('archive.drawer.scoreFormula', 'Score formula')}
-                  />
-                </span>
-              </Tooltip>
-            </div>
-            <div className={styles.scoreTrack} data-testid='drawer-score-track'>
-              <div
-                className={[
-                  styles.scoreFill,
-                  entry.promotionScore >= promotionThreshold
-                    ? styles.scoreGreen
-                    : entry.promotionScore >= promotionThreshold - 10
-                      ? styles.scoreAmber
-                      : styles.scoreMuted,
-                ].join(' ')}
-                style={{ width: `${Math.min(100, Math.max(0, entry.promotionScore))}%` }}
-                data-testid='drawer-score-fill'
-              />
-              {/* 90% threshold marker */}
-              <div
-                className={styles.scoreMarker}
-                style={{ left: `${promotionThreshold}%` }}
-                data-testid='drawer-score-marker'
-              />
-            </div>
-          </div>
-
           {/* Scrollable body */}
           <div className={styles.body} data-testid='drawer-body'>
-            {/* Why - must be visible without scrolling (K3 fix) - placed first */}
-            <div className={styles.section} data-testid='drawer-section-why'>
-              <h3 className={styles.sectionLabel}>{t('archive.drawer.why', 'Why')}</h3>
-              <div className={styles.sectionContent}>
-                {entry.why ? (
-                  <p>{entry.why}</p>
-                ) : (
-                  <span className={styles.absent}>{t('archive.drawer.noWhy', 'No "Why" recorded')}</span>
-                )}
-              </div>
+            <div className={styles.section} data-testid='drawer-section-details'>
+              <h3 className={styles.sectionLabel}>{t('archive.drawer.details', 'Details')}</h3>
+              <dl className={styles.details}>
+                <dt>{t('archive.drawer.workspace', 'Workspace')}</dt>
+                <dd data-testid='drawer-workspace'>{entry.project}</dd>
+                <dt>{t('archive.drawer.category', 'Category')}</dt>
+                <dd data-testid='drawer-category'>
+                  {t(category.labelKey, category.label)}
+                  <span className={styles.absent}> - {t(category.descriptionKey, category.description)}</span>
+                </dd>
+                <dt>{t('archive.drawer.stored', 'Stored')}</dt>
+                <dd data-testid='drawer-stored'>{new Date(entry.storedAt).toLocaleString()}</dd>
+              </dl>
             </div>
 
-            {/* Summary */}
-            <div className={styles.section} data-testid='drawer-section-summary'>
-              <h3 className={styles.sectionLabel}>{t('archive.drawer.summary', 'Summary')}</h3>
-              <div className={styles.sectionContent}>
-                <p>{entry.summary}</p>
-              </div>
-            </div>
-
-            {/* How to apply */}
-            <div className={styles.section} data-testid='drawer-section-howto'>
-              <h3 className={styles.sectionLabel}>{t('archive.drawer.howToApply', 'How to apply')}</h3>
-              <div className={styles.sectionContent}>
-                {entry.howToApply ? (
-                  <p>{entry.howToApply}</p>
-                ) : (
-                  <span className={styles.absent}>{t('archive.drawer.noHowTo', 'No "How to apply" recorded')}</span>
-                )}
-              </div>
-            </div>
-
-            {/* Used in the wild (S4 fix) */}
-            {Array.isArray(entry.dereferences) && entry.dereferences.length > 0 && (
-              <div className={styles.section} data-testid='drawer-section-derefs'>
-                <h3 className={styles.sectionLabel}>{t('archive.drawer.usedInWild', 'Used in the wild')}</h3>
-                <p className={styles.derefHeader}>
-                  {t('archive.drawer.usedNTimesWeek', 'Used {{count}}× this week', { count: entry.referencedBy })}
-                </p>
-                <div className={styles.derefList}>
-                  {entry.dereferences.map((d, i) => (
-                    <div
-                      key={i}
-                      className={styles.derefCard}
-                      role='button'
-                      tabIndex={0}
-                      onClick={() => onOpenSource?.(d.source, d.line)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          onOpenSource?.(d.source, d.line);
-                        }
-                      }}
-                      aria-label={`Open ${d.source} at line ${d.line}`}
-                      data-testid='drawer-deref-card'
-                    >
-                      <div className={styles.derefMeta}>
-                        {d.source} · {t('archive.drawer.line', 'line')} {d.line} · {formatRelative(d.lastAt)}
-                      </div>
-                      <div className={styles.derefPreview}>"{d.preview}"</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Tags */}
-            {Array.isArray(entry.tags) && entry.tags.length > 0 && (
+            {labels.length > 0 && (
               <div className={styles.section} data-testid='drawer-section-tags'>
-                <h3 className={styles.sectionLabel}>{t('archive.drawer.tags', 'Tags')}</h3>
+                <h3 className={styles.sectionLabel}>{t('archive.drawer.source', 'Source')}</h3>
                 <div className={styles.tagRow}>
-                  {entry.tags.map((tag) => (
+                  {labels.map((tag) => (
                     <Tag key={tag} size='small' color='arcoblue'>
                       {tag}
                     </Tag>
@@ -493,29 +176,16 @@ const RightDrawer: React.FC<RightDrawerProps> = ({
               </div>
             )}
 
-            {/* Source path (Q5 acceptance) */}
-            <div
-              className={styles.sourcePath}
-              role='button'
-              tabIndex={0}
-              onClick={() => handleCopySource(entry.sourcePath, entry.sourceLine)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  handleCopySource(entry.sourcePath, entry.sourceLine);
-                }
-              }}
-              aria-label={`Copy source path ${entry.sourcePath}:L${entry.sourceLine}`}
-              data-testid='drawer-source-path'
-            >
-              <FileCode theme='outline' size='13' aria-hidden />
-              <code className={`${styles.sourcePathText} source-path`}>
-                {entry.sourcePath}:L{entry.sourceLine}
-              </code>
+            <div className={styles.section} data-testid='drawer-section-body'>
+              <h3 className={styles.sectionLabel}>{t('archive.drawer.memory', 'Memory')}</h3>
+              <div className={styles.sectionContent} data-testid='drawer-body-text'>
+                {entry.body.trim() ? (
+                  <ReactMarkdown>{entry.body}</ReactMarkdown>
+                ) : (
+                  <span className={styles.absent}>{t('archive.drawer.noBody', 'This memory has no body text.')}</span>
+                )}
+              </div>
             </div>
-
-            {/* Inline source context */}
-            <SourcePanel path={entry.sourcePath} line={entry.sourceLine} autoExpand={!entry.why && !entry.howToApply} />
           </div>
         </div>
       )}

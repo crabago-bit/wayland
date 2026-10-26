@@ -48,7 +48,6 @@ describe('getBuiltinSettingsNavItems', () => {
       'general',
       'notifications',
       'storage',
-      'ijfw',
       'doctor',
       'about',
     ]);
@@ -73,7 +72,6 @@ describe('getBuiltinSettingsNavItems', () => {
       'General',
       'Notifications',
       'Storage',
-      'IJFW Memory',
       'Doctor',
       'About',
     ]);

@@ -54,12 +54,6 @@ vi.mock('electron-log', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock('@/process/services/ijfwSystemService', () => ({
-  ijfwSystemService: {
-    detectLocalInstall: vi.fn(async () => ({ installed: false, detectedVia: 'none' })),
-    getLatestPublished: vi.fn(async () => null),
-  },
-}));
 
 // The raw auto-updater service — its quitAndInstall() is the hard-exit path that
 // the non-force route must NOT touch.

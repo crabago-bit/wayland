@@ -39,7 +39,7 @@ import * as path from 'node:path';
 import yaml from 'js-yaml';
 
 import { FLUX_SURFACE } from '@/common/config/flux';
-import { writeAtomic } from '@process/services/ijfw/atomicFile';
+import { writeAtomic } from '@process/utils/atomicFile';
 
 import { deleteReceipt, getReceipt, setReceipt } from './manifest';
 import type {

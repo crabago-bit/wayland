@@ -60,16 +60,12 @@ import MemoryRow from '@renderer/pages/memory/components/MemoryRow';
 describe('MemoryRow', () => {
   it('renders the title from entry.summary', () => {
     render(<MemoryRow entry={makeEntry()} />);
-    expect(screen.getByTestId('memory-row-title').textContent).toBe(
-      'Always use Arco for interactive elements',
-    );
+    expect(screen.getByTestId('memory-row-title').textContent).toBe('Always use Arco for interactive elements');
   });
 
   it('renders the snippet from entry.bodyPreview', () => {
     render(<MemoryRow entry={makeEntry()} />);
-    expect(screen.getByTestId('memory-row-snippet').textContent).toContain(
-      'Raw buttons and inputs are forbidden',
-    );
+    expect(screen.getByTestId('memory-row-snippet').textContent).toContain('Raw buttons and inputs are forbidden');
   });
 
   it('renders a relative date label', () => {
@@ -159,7 +155,7 @@ describe('MemoryRow', () => {
   const typeIconCases: [MemoryType, string][] = [
     ['decision', 'icon-Diamond'],
     ['pattern', 'icon-Triangle'],
-    ['observation', 'icon-Eye'],
+    ['observation', 'icon-Circle'],
     ['session', 'icon-Clock'],
     ['wiki', 'icon-BookOpen'],
     ['preference', 'icon-Settings'],
@@ -170,5 +166,12 @@ describe('MemoryRow', () => {
       render(<MemoryRow entry={makeEntry({ id: `e-${type}`, type })} />);
       expect(screen.getByTestId(iconTestId)).toBeTruthy();
     });
+  });
+
+  it('labels the type icon with the plural category name and its meaning', () => {
+    render(<MemoryRow entry={makeEntry({ id: 'e-label', type: 'session' })} />);
+    const icon = screen.getByTestId('memory-row-type-icon-session');
+    expect(icon.getAttribute('aria-label')).toBe('Sessions');
+    expect(icon.getAttribute('title')).toBe('Sessions: Session logs and heartbeats.');
   });
 });

@@ -7,84 +7,46 @@
 // @vitest-environment jsdom
 
 /**
- * DOM tests for the 6-state MemoryPage router.
+ * DOM tests for the MemoryPage shell.
  *
- * MemoryPage subscribes to `ipcBridge.ijfw.onStatusChanged` and dispatches one
- * of five Wave-4 production components based on {@link IjfwLifecycleStatus}.
- * The tests mock each branch component so the assertions verify MemoryPage's
- * routing logic without coupling to child implementation details (the child
- * components have their own dom tests).
+ * MemoryPage asks `ipcBridge.memory.getBackend` where Memory lives: `brain`
+ * renders FullPanelShell, `none` (or any failure to ask) renders the
+ * "Connect your brain" card, and a pending answer shows a loading line.
  */
 
 import React from 'react';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { IjfwStatusPayload } from '@/common/adapter/ipcBridge';
 
-type Listener = (payload: IjfwStatusPayload) => void;
-
-const { listeners, unsubscribeSpy, getStatusInvoke, getBackendInvoke } = vi.hoisted(() => ({
-  listeners: new Set<Listener>(),
-  unsubscribeSpy: vi.fn(),
-  getStatusInvoke: vi.fn<() => Promise<IjfwStatusPayload | undefined>>(),
-  getBackendInvoke: vi.fn<() => Promise<'brain' | 'ijfw'>>(),
-}));
-
-vi.mock('@/common', () => ({
-  ipcBridge: {
-    ijfw: {
-      onStatusChanged: {
-        on: (fn: Listener) => {
-          listeners.add(fn);
-          return () => {
-            listeners.delete(fn);
-            unsubscribeSpy();
-          };
-        },
-      },
-      getStatus: { invoke: getStatusInvoke },
+const { bridge } = vi.hoisted(() => ({
+  bridge: {
+    memory: { getBackend: { invoke: vi.fn<() => Promise<'brain' | 'none'>>() } } as {
+      getBackend?: { invoke: (() => Promise<'brain' | 'none'>) | unknown };
     },
-    memory: { getBackend: { invoke: getBackendInvoke } },
   },
 }));
 
-vi.mock('@renderer/pages/memory/state-branches/InstallerPitchCard', () => ({
-  default: () => <div data-testid='branch-installer-pitch' />,
-}));
+vi.mock('@/common', () => ({ ipcBridge: bridge }));
 
-vi.mock('@renderer/pages/memory/state-branches/AutoSettingUpCard', () => ({
-  default: () => <div data-testid='branch-auto-setting-up' />,
-}));
-
-vi.mock('@renderer/pages/memory/state-branches/InstallingCard', () => ({
-  default: ({ version }: { version?: string }) => <div data-testid='branch-installing' data-version={version ?? ''} />,
-}));
-
-vi.mock('@renderer/pages/memory/state-branches/InstallFailedCard', () => ({
-  default: ({ errorReason, stderr }: { errorReason?: string; stderr?: string }) => (
-    <div data-testid='branch-install-failed' data-reason={errorReason ?? ''} data-stderr={stderr ?? ''} />
-  ),
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string, fallback?: unknown) => (typeof fallback === 'string' ? fallback : key),
+  }),
 }));
 
 vi.mock('@renderer/pages/memory/state-branches/FullPanelShell', () => ({
-  default: () => <div data-testid='branch-full-panel-shell' />,
+  default: (props: Record<string, unknown>) => (
+    <div data-testid='branch-full-panel-shell' data-prop-count={Object.keys(props).length} />
+  ),
 }));
 
 import MemoryPage from '@renderer/pages/memory/MemoryPage';
 
-const emit = (payload: IjfwStatusPayload): void => {
-  act(() => {
-    for (const fn of listeners) fn(payload);
-  });
-};
+const invoke = vi.fn<() => Promise<'brain' | 'none'>>();
 
 beforeEach(() => {
-  listeners.clear();
-  unsubscribeSpy.mockReset();
-  getStatusInvoke.mockReset();
-  getStatusInvoke.mockResolvedValue(undefined);
-  getBackendInvoke.mockReset();
-  getBackendInvoke.mockResolvedValue('ijfw');
+  invoke.mockReset();
+  bridge.memory = { getBackend: { invoke } };
 });
 
 afterEach(() => {
@@ -92,106 +54,59 @@ afterEach(() => {
 });
 
 describe('MemoryPage', () => {
-  it('shows the full panel when the brain is the backend, whatever the IJFW status says', async () => {
-    getBackendInvoke.mockResolvedValue('brain');
-    getStatusInvoke.mockResolvedValue({ status: 'not_installed' });
+  it('shows a loading line while the backend is pending', () => {
+    invoke.mockReturnValue(new Promise(() => {}));
     render(<MemoryPage />);
-    emit({ status: 'installing' });
-    expect(await screen.findByTestId('branch-full-panel-shell')).toBeTruthy();
-    expect(screen.queryByTestId('branch-installing')).toBeNull();
-    expect(screen.queryByTestId('branch-auto-setting-up')).toBeNull();
+    expect(screen.getByTestId('memory-loading')).toBeTruthy();
+    expect(screen.getByTestId('memory-page')).toBeTruthy();
+    expect(screen.queryByTestId('branch-full-panel-shell')).toBeNull();
+    expect(screen.queryByTestId('memory-no-brain')).toBeNull();
   });
 
-  it('subscribes to status emitter on mount and unsubscribes on unmount', () => {
-    const { unmount } = render(<MemoryPage />);
-    expect(listeners.size).toBe(1);
-    unmount();
-    expect(listeners.size).toBe(0);
-    expect(unsubscribeSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it('renders AutoSettingUpCard (silent auto-install) when status is not_installed with no reason', () => {
-    // v0.6.3 disclosure flip: default not_installed view is the silent
-    // background-install surface. Bootstrap auto-installs at app boot, so
-    // the default UX is "Setting up Memory" -- NOT the manual pitch.
+  it('renders FullPanelShell with no props when the backend is brain', async () => {
+    invoke.mockResolvedValue('brain');
     render(<MemoryPage />);
-    emit({ status: 'not_installed' });
-    expect(screen.getByTestId('branch-auto-setting-up')).toBeTruthy();
+    const shell = await screen.findByTestId('branch-full-panel-shell');
+    expect(shell.getAttribute('data-prop-count')).toBe('0');
+    expect(screen.queryByTestId('memory-loading')).toBeNull();
+    expect(screen.queryByTestId('memory-no-brain')).toBeNull();
+    expect(screen.getByTestId('memory-page')).toBeTruthy();
   });
 
-  it('renders InstallerPitchCard (opt-out re-enable surface) when status is not_installed AND reason is opt_out', () => {
+  it('renders the "Connect your brain" card when the backend is none', async () => {
+    invoke.mockResolvedValue('none');
     render(<MemoryPage />);
-    emit({ status: 'not_installed', reason: 'opt_out' });
-    expect(screen.getByTestId('branch-installer-pitch')).toBeTruthy();
+    const card = await screen.findByTestId('memory-no-brain');
+    expect(card.textContent).toContain('Connect your brain');
+    expect(card.textContent).toContain('No MCP server named brain is configured. Add one in Settings to use Memory.');
+    expect(screen.queryByTestId('branch-full-panel-shell')).toBeNull();
   });
 
-  it('renders InstallingCard when status is installing', () => {
+  it('treats a rejected getBackend as none', async () => {
+    invoke.mockRejectedValue(new Error('ipc down'));
     render(<MemoryPage />);
-    emit({ status: 'installing', version: '1.5.4' });
-    const card = screen.getByTestId('branch-installing');
-    expect(card.getAttribute('data-version')).toBe('1.5.4');
+    expect(await screen.findByTestId('memory-no-brain')).toBeTruthy();
+    expect(screen.queryByTestId('branch-full-panel-shell')).toBeNull();
   });
 
-  it('renders InstallingCard when status is upgrading', () => {
-    render(<MemoryPage />);
-    emit({ status: 'upgrading', version: '1.2.3' });
-    const card = screen.getByTestId('branch-installing');
-    expect(card.getAttribute('data-version')).toBe('1.2.3');
-  });
-
-  it('renders InstallingCard when status is installed_pending_activation', () => {
-    render(<MemoryPage />);
-    emit({ status: 'installed_pending_activation', version: '2.0.0' });
-    const card = screen.getByTestId('branch-installing');
-    expect(card.getAttribute('data-version')).toBe('2.0.0');
-  });
-
-  it('renders InstallFailedCard with errorReason and stderr when status is install_failed', () => {
-    render(<MemoryPage />);
-    emit({ status: 'install_failed', errorReason: 'spawn_error', stderr: 'ENOENT npm' });
-    const card = screen.getByTestId('branch-install-failed');
-    expect(card.getAttribute('data-reason')).toBe('spawn_error');
-    expect(card.getAttribute('data-stderr')).toBe('ENOENT npm');
-  });
-
-  it('renders FullPanelShell directly when status is installed_current (no memory_facts gate)', () => {
-    // Prior behavior routed through `memory_facts({any:true})` which is a
-    // hallucinated arg shape (real schema requires {subject, predicate}). When
-    // the server returned empty facts, users with hundreds of memories were
-    // wedged on OnboardingEmptyState. Now the route is direct: any
-    // installed_current emission immediately surfaces the full tab shell, and
-    // each tab handles its own empty/error states locally.
-    render(<MemoryPage />);
-    emit({ status: 'installed_current', version: '1.0.0' });
-    expect(screen.getByTestId('branch-full-panel-shell')).toBeTruthy();
-  });
-
-  it('does not duplicate subscriptions under React strict-mode double-mount', () => {
-    const { unmount } = render(
-      <React.StrictMode>
-        <MemoryPage />
-      </React.StrictMode>
-    );
-    expect(listeners.size).toBe(1);
-    unmount();
-    expect(listeners.size).toBe(0);
-  });
-
-  it('Gemini H2: falls back to not_installed when getStatus.invoke throws synchronously', async () => {
-    // Regression for the H2 BLOCKER. The prior Promise.resolve(invoke()) chain
-    // did not catch synchronous throws (IPC dispatcher not yet hydrated,
-    // serialization error). The async-IIFE try/catch must trap both sync and
-    // async failures. The fallback emits `{ status: 'not_installed' }` with
-    // no reason -- v0.6.3 routes this to the silent AutoSettingUpCard.
-    getStatusInvoke.mockImplementationOnce(() => {
-      throw new Error('sync IPC dispatcher not initialized');
+  it('treats a synchronous throw from getBackend as none', async () => {
+    invoke.mockImplementation(() => {
+      throw new Error('not hydrated');
     });
     render(<MemoryPage />);
-    await waitFor(
-      () => {
-        expect(screen.getByTestId('branch-auto-setting-up')).toBeTruthy();
-      },
-      { timeout: 2000 }
-    );
+    expect(await screen.findByTestId('memory-no-brain')).toBeTruthy();
+  });
+
+  it('treats a missing getBackend provider as none', async () => {
+    bridge.memory = {};
+    render(<MemoryPage />);
+    expect(await screen.findByTestId('memory-no-brain')).toBeTruthy();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('treats an unexpected backend value as none', async () => {
+    invoke.mockResolvedValue('ijfw' as unknown as 'brain');
+    render(<MemoryPage />);
+    expect(await screen.findByTestId('memory-no-brain')).toBeTruthy();
   });
 });

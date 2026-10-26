@@ -72,13 +72,6 @@ const PreviewPopoutPage = React.lazy(() => import('@renderer/pages/preview/Previ
  * harmless - it latches a value nothing there reads.
  */
 import '@renderer/pages/preview/previewHandoffLatch';
-const IjfwSettingsPanel = React.lazy(() => import('@renderer/pages/settings/IjfwSettingsPanel'));
-const WikiHomePage = React.lazy(() =>
-  import('@renderer/pages/wiki/WikiHomePage').then((m) => ({ default: m.WikiHomePage }))
-);
-const WikiDetailPage = React.lazy(() =>
-  import('@renderer/pages/wiki/WikiDetailPage').then((m) => ({ default: m.WikiDetailPageRoute }))
-);
 
 const withRouteFallback = (Component: React.LazyExoticComponent<React.ComponentType>) => (
   <Suspense fallback={<AppLoader />}>
@@ -208,8 +201,6 @@ const PanelRoute: React.FC<{ layout: React.ReactElement }> = ({ layout }) => {
             <Route path='/settings/storage' element={withRouteFallback(StorageSettings)} />
             {/* Doctor - diagnostic health checks across all subsystems (#35). */}
             <Route path='/settings/doctor' element={withRouteFallback(DoctorSettings)} />
-            {/* IJFW MEMORY (Decision 3b: the ONLY Skip toggle in the app) */}
-            <Route path='/settings/ijfw' element={withRouteFallback(IjfwSettingsPanel)} />
             {/* ABOUT */}
             <Route path='/settings/about' element={withRouteFallback(SystemSettings)} />
             <Route
@@ -251,8 +242,9 @@ const PanelRoute: React.FC<{ layout: React.ReactElement }> = ({ layout }) => {
               app-root boundary and blank the whole app. Mirror /conversation's
               route-level boundary so a memory crash is contained to the page. */}
             <Route path='/memory' element={<ErrorBoundary>{withRouteFallback(MemoryPage)}</ErrorBoundary>} />
-            <Route path='/wiki' element={withRouteFallback(WikiHomePage)} />
-            <Route path='/wiki/:slug' element={withRouteFallback(WikiDetailPage)} />
+            {/* The Wiki is the Memory page filtered to wiki notes. */}
+            <Route path='/wiki' element={<Navigate to='/memory?type=wiki' replace />} />
+            <Route path='/wiki/:slug' element={<Navigate to='/memory?type=wiki' replace />} />
           </Route>
           <Route path='*' element={<Navigate to={status === 'authenticated' ? '/guid' : '/login'} replace />} />
         </Routes>

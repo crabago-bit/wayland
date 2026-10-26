@@ -64,7 +64,6 @@ test.describe('Settings Pages', () => {
     { tab: 'general', name: 'General Settings' },
     { tab: 'notifications', name: 'Notifications Settings' },
     { tab: 'storage', name: 'Storage Settings' },
-    { tab: 'ijfw', name: 'IJFW Memory Settings' },
     { tab: 'doctor', name: 'Doctor Settings' },
     { tab: 'about', name: 'About Page' },
   ];

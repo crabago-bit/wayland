@@ -71,7 +71,7 @@ import { pathToFileURL } from 'url';
 import { initMainAdapterWithWindow } from './common/adapter/main';
 import { ipcBridge } from './common';
 import { closeAllPopouts, isPopoutWebContents } from '@process/utils/popoutWindowManager';
-import { isCiRuntime as resolveCiRuntime, shouldDisableIjfw } from '@process/utils/ijfwGuard';
+import { isCiRuntime as resolveCiRuntime } from '@process/utils/ciRuntime';
 import { initPopoutBridge } from '@process/bridge/popoutBridge';
 import { AION_ASSET_PROTOCOL } from '@process/extensions';
 import { resolveAllowedAssetPath } from '@process/extensions/protocol/assetAllowlist';
@@ -719,7 +719,7 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
   // Initialize auto-updater service (skip when disabled via env, e.g. E2E / CI,
   // and in unpackaged dev where there is no installed app to update - the updater
   // would otherwise hit the GitHub feed on every dev launch and log spurious errors)
-  // Single owner: ijfwGuard.ts. A second copy here drifted from it once already.
+  // Single owner: ciRuntime.ts.
   const isCiRuntime = resolveCiRuntime(process.env);
   const disableAutoUpdater =
     !app.isPackaged ||
@@ -751,43 +751,6 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
       });
   } else {
     console.log('[Wayland] Auto-updater disabled via env/CI guard');
-  }
-
-  // Initialize IJFW system service (skip when disabled via env, e.g. E2E / CI / explicit opt-out)
-  // See ijfwGuard.ts: WAYLAND_E2E_TEST used to mean BOTH "isolate the profile"
-  // and "disable IJFW", so no packaged smoke could ever cover Memory. The guard
-  // now honours an explicit WAYLAND_DISABLE_IJFW=0 opt-in; defaults unchanged.
-  const disableIjfw = shouldDisableIjfw(process.env);
-  if (!disableIjfw) {
-    import('./process/services/ijfwSystemService')
-      .then(async ({ ijfwSystemService }) => {
-        // Activate any .pending tree from a previous boot BEFORE bootstrap, so a
-        // staged upgrade lands first and the live mcp-server is current.
-        try {
-          await ijfwSystemService.applyPendingUpgrade();
-        } catch (err) {
-          console.error('[Wayland] ijfw applyPendingUpgrade failed:', err);
-        }
-        // Subscribe to ~/.ijfw - emit not_installed if the user removes the
-        // install out from under us, and shut down the MCP client so a stale
-        // socket doesn't keep the renderer in 'installed_current' state.
-        try {
-          ijfwSystemService.startHealthWatcher();
-        } catch (err) {
-          console.error('[Wayland] ijfw startHealthWatcher failed:', err);
-        }
-        // Defer bootstrap by 5s so first-paint is not blocked by npm view.
-        setTimeout(() => {
-          void ijfwSystemService.bootstrap().catch((err) => {
-            console.error('[Wayland] ijfw bootstrap failed:', err);
-          });
-        }, 5000);
-      })
-      .catch((error) => {
-        console.error('[Wayland] Failed to initialize ijfwSystemService:', error);
-      });
-  } else {
-    console.log('[Wayland] IJFW system service disabled via env/CI guard');
   }
 
   // Load the renderer: dev server URL in development, built HTML file in production

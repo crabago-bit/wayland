@@ -5,167 +5,71 @@
  */
 
 /**
- * Memory page shell + 6-state router.
+ * Memory page shell.
  *
- * Subscribes to `ipcBridge.ijfw.onStatusChanged` and dispatches one of five
- * production components based on {@link IjfwLifecycleStatus}. Once status is
- * `installed_current`, the FullPanelShell owns the per-tab data flow - empty
- * states surface inside individual tabs, not at the route level. (The prior
- * `memory_facts({any:true})` route-level gate was a hallucinated arg shape
- * that wedged users with hundreds of memories on an onboarding screen.)
+ * Memory lives in the user's brain MCP server. The page asks the main process
+ * which backend is available: `brain` renders the full archive, `none` (or any
+ * failure to ask) renders a card pointing at Settings.
  */
 
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ipcBridge } from '@/common';
-import type { IjfwStatusPayload } from '@/common/adapter/ipcBridge';
-import AutoSettingUpCard from './state-branches/AutoSettingUpCard';
-import InstallerPitchCard from './state-branches/InstallerPitchCard';
-import InstallingCard from './state-branches/InstallingCard';
-import InstallFailedCard from './state-branches/InstallFailedCard';
 import FullPanelShell from './state-branches/FullPanelShell';
 import styles from './MemoryPage.module.css';
 
-const renderStateBranch = (status: IjfwStatusPayload | null, backend: 'brain' | 'ijfw' | null): React.ReactElement => {
-  if (!status) {
-    return (
-      <div className={styles.center} data-testid='memory-loading' role='status' aria-busy='true' aria-live='polite'>
-        <p className='text-14px text-t-secondary m-0'>Checking IJFW status…</p>
-      </div>
-    );
-  }
-  switch (status.status) {
-    case 'not_installed':
-      // v0.6.3 disclosure / auto-install UX flip: bootstrap auto-installs at
-      // +5s on app boot, so the default `not_installed` view is the silent
-      // "Setting up Memory" surface. The InstallerPitchCard is now exclusively
-      // the OPT-OUT re-enable surface -- shown only when the user explicitly
-      // disabled IJFW via Settings (`reason === 'opt_out'`).
-      if (status.reason === 'opt_out') {
-        return <InstallerPitchCard />;
-      }
-      return <AutoSettingUpCard />;
-    case 'installing':
-      return <InstallingCard version={status.version} />;
-    case 'upgrading':
-      return <InstallingCard version={status.version} />;
-    case 'installed_pending_activation':
-      return <InstallingCard version={status.version} />;
-    case 'install_failed':
-      return <InstallFailedCard errorReason={status.errorReason} stderr={status.stderr} />;
-    case 'installed_current':
-      return <FullPanelShell backend={backend ?? undefined} />;
-    default:
-      // Exhaustiveness guard - keeps FullPanelShell reachable for the
-      // typechecker and gives Wave 5 a fallback for unknown states.
-      return <FullPanelShell backend={backend ?? undefined} />;
-  }
-};
-
-// PageShell migration (M8): the installed_current branch (FullPanelShell) is a
-// full-bleed, height:100% mail-style grid that owns its OWN page header (the
-// "Archive" breadcrumb topbar) and renders edge-to-edge with no centered cap.
-// A standard PageShell wrap would double the page title and break the grid, so
-// it gets a dedicated full-bleed container on the shared black background token
-// (var(--bg-base), the same token PageShell uses) with no inset padding. The
-// other five branches stay full-bleed-centered states inside `.page`.
-const isFullPanel = (status: IjfwStatusPayload | null): boolean =>
-  status?.status === 'installed_current' ||
-  // Mirrors the renderStateBranch default fallback (unknown -> FullPanelShell).
-  (status !== null &&
-    !['not_installed', 'installing', 'upgrading', 'installed_pending_activation', 'install_failed'].includes(
-      status.status
-    ));
+type Backend = 'brain' | 'none';
 
 const MemoryPage: React.FC = () => {
-  const [status, setStatus] = useState<IjfwStatusPayload | null>(null);
+  const { t } = useTranslation('memory');
+  const [backend, setBackend] = useState<Backend | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    let snapshotArrived = false;
-    const fallbackToNotInstalled = (): void => {
-      if (cancelled || snapshotArrived) return;
-      snapshotArrived = true;
-      setStatus({ status: 'not_installed' });
-    };
-
-    // Gemini H2: prior `Promise.resolve(invoke()).then(...).catch(...)` chain
-    // did NOT catch SYNCHRONOUS throws from `invoke()`. The IPC dispatcher can
-    // throw synchronously before returning a promise (not yet hydrated,
-    // serialization error on `void` params, channel uninitialized). Such a
-    // throw escaped the Promise chain entirely and left the page stuck on the
-    // initial loading state. The async IIFE + try/catch wraps both sync and
-    // async failures in a single guard.
-    const initialSnapshot = async (): Promise<void> => {
-      const getStatusProvider = ipcBridge.ijfw.getStatus;
-      if (!getStatusProvider || typeof getStatusProvider.invoke !== 'function') {
-        fallbackToNotInstalled();
-        return;
-      }
-      try {
-        const payload = await getStatusProvider.invoke();
-        if (cancelled) return;
-        if (payload && typeof payload === 'object') {
-          snapshotArrived = true;
-          setStatus(payload as IjfwStatusPayload);
-        } else {
-          fallbackToNotInstalled();
-        }
-      } catch {
-        // Sync throw or rejected promise - both routed here. Fall back so the
-        // user sees the install pitch instead of an infinite spinner.
-        fallbackToNotInstalled();
-      }
-    };
-    void initialSnapshot();
-
-    // Safety net: if neither invoke nor an early emit settles within 1.5s,
-    // assume not_installed. Real status changes still update the UI via the
-    // emitter subscription below.
-    const safetyTimer = setTimeout(fallbackToNotInstalled, 1500);
-
-    const unsubscribe = ipcBridge.ijfw.onStatusChanged.on((payload) => {
-      if (cancelled) return;
-      snapshotArrived = true;
-      setStatus(payload);
-    });
-
-    return () => {
-      cancelled = true;
-      clearTimeout(safetyTimer);
-      unsubscribe();
-    };
-  }, []);
-
-  // With the brain MCP server as the store there is no IJFW install to wait for: the page
-  // is ready as soon as the backend is known, whatever the IJFW lifecycle says.
-  const [backend, setBackend] = useState<'brain' | 'ijfw' | null>(null);
-  useEffect(() => {
-    let cancelled = false;
+    // The async IIFE + try/catch covers both a synchronous throw from invoke()
+    // and a rejected promise.
     void (async () => {
+      let kind: Backend = 'none';
       try {
         const provider = ipcBridge.memory?.getBackend;
-        const kind = provider && typeof provider.invoke === 'function' ? await provider.invoke() : 'ijfw';
-        if (!cancelled) setBackend(kind === 'brain' ? 'brain' : 'ijfw');
+        if (provider && typeof provider.invoke === 'function') {
+          kind = (await provider.invoke()) === 'brain' ? 'brain' : 'none';
+        }
       } catch {
-        if (!cancelled) setBackend('ijfw');
+        kind = 'none';
       }
+      if (!cancelled) setBackend(kind);
     })();
     return () => {
       cancelled = true;
     };
   }, []);
-  const shownStatus: IjfwStatusPayload | null = backend === 'brain' ? { status: 'installed_current' } : status;
 
-  const fullPanel = isFullPanel(shownStatus);
+  if (backend === 'brain') {
+    // FullPanelShell is a full-bleed grid that owns its own header.
+    return (
+      <div className={styles.pageFullBleed} data-testid='memory-page' role='region' aria-label='Memory'>
+        <FullPanelShell />
+      </div>
+    );
+  }
 
   return (
-    <div
-      className={fullPanel ? styles.pageFullBleed : styles.page}
-      data-testid='memory-page'
-      role='region'
-      aria-label='Memory'
-    >
-      {renderStateBranch(shownStatus, backend)}
+    <div className={styles.page} data-testid='memory-page' role='region' aria-label='Memory'>
+      {backend === null ? (
+        <div className={styles.center} data-testid='memory-loading' role='status' aria-busy='true' aria-live='polite'>
+          <p className='text-14px text-t-secondary m-0'>{t('page.loading', 'Connecting to your brain…')}</p>
+        </div>
+      ) : (
+        <div className={styles.center}>
+          <div className={styles.card} data-testid='memory-no-brain'>
+            <h2 className={styles.cardTitle}>{t('page.noBrain.title', 'Connect your brain')}</h2>
+            <p className={styles.cardBody}>
+              {t('page.noBrain.body', 'No MCP server named brain is configured. Add one in Settings to use Memory.')}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

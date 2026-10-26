@@ -19,7 +19,6 @@ import {
   readProjectSummaries,
   writeProjectSummary,
   appendProjectDecision,
-  readProjectIjfwMemory,
 } from '@process/services/projectKnowledge/knowledge';
 import { hasUsableModel, oneShotComplete, oneShotCompleteBest } from '@process/services/completion/oneShot';
 
@@ -290,11 +289,5 @@ export function initProjectBridge(): void {
     const workspace = await requireWorkspace(id);
     const decisions = await appendProjectDecision(workspace, text);
     return { decisions };
-  });
-
-  ipcBridge.project.readIjfwMemory.provider(async ({ id }) => {
-    const project = await projectService.getProject(id);
-    if (!project?.workspace) return { available: false, files: [] };
-    return readProjectIjfwMemory(project.workspace);
   });
 }

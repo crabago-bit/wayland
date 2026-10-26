@@ -215,11 +215,6 @@ export interface IConfigStorageRefer {
    * installs don't all collapse to the same suggestion on day 1.
    */
   'app.installUuid'?: string;
-  /**
-   * v0.6.3 - When true, ijfwSystemService.bootstrap() short-circuits and
-   * never spawns `npx @ijfw/install`. Wave 6 wires the Settings toggle.
-   */
-  'ijfw.skipSetup'?: boolean;
   /** Persisted app-wide UI zoom factor for Display settings */
   'ui.zoomFactor'?: number;
   /** Presentation-only shell selection. Missing or unknown values resolve to Classic. */
@@ -423,6 +418,19 @@ export interface IConfigStorageRefer {
   'system.keepAwake'?: boolean;
   // Route all agent requests through Flux Router (consent gate; default false until first connect)
   'system.routeThroughFlux'?: boolean;
+  /**
+   * Memories Wayland hides from its own views (the brain is append-only, so an archive or an
+   * edit never removes the chunk). `archived` entries are listed under Archived and can be
+   * restored; `superseded` ones were replaced by an edit.
+   */
+  'memory.brainHidden'?: Array<{
+    archiveId: string;
+    entryId: string;
+    kind: 'archived' | 'superseded';
+    summary: string;
+    sourcePath: string;
+    archivedAt: number;
+  }>;
   // Automatically preview newly created Office files in the current workspace
   'system.autoPreviewOfficeFiles'?: boolean;
   // Update-on-quiesce (#651/#632): defer an auto-update restart while any

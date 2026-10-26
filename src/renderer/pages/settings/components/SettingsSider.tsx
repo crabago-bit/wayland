@@ -2,7 +2,6 @@ import {
   ArrowRightLeft,
   Bot,
   BookOpen,
-  Brain,
   Cable,
   Cpu,
   Globe,
@@ -219,12 +218,6 @@ const SettingsSider: React.FC<{ collapsed?: boolean; tooltipEnabled?: boolean }>
         label: t('settings.sider.storage', { defaultValue: 'Storage' }),
         icon: <Globe />,
         path: 'storage',
-      },
-      ijfw: {
-        id: 'ijfw',
-        label: t('memory.settings.panel_title', { defaultValue: 'IJFW Memory' }),
-        icon: <Brain />,
-        path: 'ijfw',
       },
       doctor: {
         id: 'doctor',

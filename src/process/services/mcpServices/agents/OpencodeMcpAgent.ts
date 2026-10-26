@@ -12,7 +12,7 @@ import type { IMcpServer, IMcpServerTransport } from '@/common/config/storage';
 import type { McpOperationResult } from '../McpProtocol';
 import { AbstractMcpAgent } from '../McpProtocol';
 import { agentConfigPath } from '../agentConfigRoot';
-import { writeAtomic } from '@process/services/ijfw/atomicFile';
+import { writeAtomic } from '@process/utils/atomicFile';
 
 type OpencodeToolConfig = Record<string, boolean | undefined>;
 

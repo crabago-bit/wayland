@@ -10,7 +10,7 @@
 
 import * as fs from 'node:fs';
 
-import { writeAtomic } from '@process/services/ijfw/atomicFile';
+import { writeAtomic } from '@process/utils/atomicFile';
 
 import type { FluxManifest, InstallReceipt } from './types';
 

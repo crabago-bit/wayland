@@ -4,7 +4,6 @@ import { TeamTaskDuplicateError } from './repository/ITeamRepository';
 import type { ITeamRepository } from './repository/ITeamRepository';
 import { LEASE_TTL_MS } from './types';
 import type { TeamAgent, TeamTask } from './types';
-import type { VerificationGate } from './VerificationGate';
 
 /** Parameters for creating a new task */
 type CreateTaskParams = {
@@ -62,18 +61,8 @@ export class TaskManager {
   constructor(
     private readonly repo: ITeamRepository,
     private readonly getAgents: GetAgentsFn,
-    private readonly eventLogger?: EventLogger,
-    /**
-     * P3 - optional verification gate. When present, a transition to
-     * `completed` is routed through it (status held at `verifying` while the
-     * cross-audit runs). Absence keeps the legacy direct-complete behavior, so
-     * existing call sites and tests work unchanged.
-     */
-    private readonly verificationGate?: VerificationGate
+    private readonly eventLogger?: EventLogger
   ) {}
-
-  /** P3 - task ids with a verification gate in flight, to single-flight the gate. */
-  private readonly gating = new Set<string>();
 
   /**
    * Validate that `owner` is a real slotId on the current team. No-op when
@@ -171,31 +160,6 @@ export class TaskManager {
   async update(taskId: string, updates: UpdateTaskParams): Promise<TeamTask> {
     this.validateOwner(updates.owner);
 
-    // P3 verification gate: intercept a proposed transition to `completed`.
-    // The gate runs at most once per proposal - it persists `verifying` while
-    // the cross-audit runs, then writes the FINAL status itself - so we must
-    // NOT re-enter when the gate's own completing write flows back through.
-    if (this.verificationGate && updates.status === 'completed') {
-      const current = await this.repo.findTaskById(taskId);
-      if (current) {
-        // A task escalated to `needs_human` is PARKED: dropping the completion
-        // (rather than re-running the paid gate on every re-proposal) so it
-        // cannot loop indefinitely. A human must resolve it out of band.
-        const verification = current.metadata?.verification as { needsHuman?: boolean } | undefined;
-        if (verification?.needsHuman) return current;
-        // Only gate a genuine in-flight proposal. If the task is already
-        // `verifying` (a re-entrant call) we skip the gate to avoid a
-        // verifying -> completed -> verifying loop and complete directly below.
-        if (current.status !== 'verifying') {
-          // Single-flight: a second concurrent `completed` proposal for the same
-          // task is dropped rather than launching a duplicate (paid) cross-audit
-          // that would clobber the first's verification record.
-          if (this.gating.has(taskId)) return current;
-          return this.runVerificationGate(taskId, current, updates);
-        }
-      }
-    }
-
     const updated = await this.repo.updateTask(taskId, {
       ...updates,
       ...(await this.leaseFieldsForInProgress(taskId, updates)),
@@ -237,81 +201,6 @@ export class TaskManager {
     if (!owner) return {};
     const now = Date.now();
     return { leaseOwner: owner, leaseExpiresAt: now + LEASE_TTL_MS, lastHeartbeat: now };
-  }
-
-  /**
-   * P3 - route a proposed `completed` transition through the verification gate.
-   *
-   * 1. Persist `verifying` (so Mission Control shows the second opinion in
-   *    flight) carrying any owner/description/metadata the proposal included.
-   * 2. Run the gate (it always resolves - never traps a task in `verifying`).
-   * 3. On `complete`: write the FINAL `completed` plus the verification record.
-   *    On `reject`: write `in_progress` plus the critique (blocking mode only).
-   *
-   * The gate's own writes go straight to `repo.updateTask` (not back through
-   * `update`), so the re-entrancy branch in `update()` is belt-and-suspenders.
-   */
-  private async runVerificationGate(taskId: string, current: TeamTask, updates: UpdateTaskParams): Promise<TeamTask> {
-    // The add AND the `verifying` write are inside the try so that if the
-    // verifying write throws, the finally still removes taskId from `gating` -
-    // otherwise the single-flight guard would silently drop all future completions.
-    this.gating.add(taskId);
-    try {
-      const verifyingNow = Date.now();
-      await this.repo.updateTask(taskId, {
-        status: 'verifying',
-        ...(updates.owner !== undefined ? { owner: updates.owner } : {}),
-        ...(updates.description !== undefined ? { description: updates.description } : {}),
-        ...(updates.metadata !== undefined ? { metadata: { ...current.metadata, ...updates.metadata } } : {}),
-        updatedAt: verifyingNow,
-      });
-      this.logTaskEvent(current.teamId, current.owner, taskId, 'verifying');
-
-      const decision = await this.verificationGate!.verify(current);
-      const finalStatus: TeamTask['status'] = decision.kind === 'complete' ? 'completed' : 'in_progress';
-      const now = Date.now();
-
-      // A blocking reject sends the task back to in_progress for re-work: stamp a
-      // fresh lease so the Watchdog can still reclaim it if the owner then dies.
-      const leaseFields =
-        finalStatus === 'in_progress' && current.owner
-          ? { leaseOwner: current.owner, leaseExpiresAt: now + LEASE_TTL_MS, lastHeartbeat: now }
-          : {};
-
-      const result = await this.repo.updateTask(taskId, {
-        status: finalStatus,
-        ...leaseFields,
-        metadata: { ...current.metadata, ...updates.metadata, verification: decision.verification },
-        updatedAt: now,
-      });
-      this.logTaskEvent(result.teamId, result.owner, result.id, finalStatus);
-      return result;
-    } catch (error) {
-      // The gate is throw-free, but the final write can fail (locked DB, disk).
-      // Never leave the task stranded in `verifying`: best-effort revert it to a
-      // live state so normal flow (or the Watchdog's verify-recovery) picks it up.
-      const message = error instanceof Error ? error.message : String(error);
-      const reverted = await this.repo
-        .updateTask(taskId, {
-          status: 'in_progress',
-          metadata: {
-            ...current.metadata,
-            ...updates.metadata,
-            verification: {
-              outcome: 'advisory',
-              note: `verify write failed: ${message}`,
-              failCount: 0,
-              checkedAt: Date.now(),
-            },
-          },
-          updatedAt: Date.now(),
-        })
-        .catch(() => current);
-      this.logTaskEvent(current.teamId, current.owner, taskId, 'in_progress');
-      return reverted;
-    } finally {
-      this.gating.delete(taskId);
-    }
   }
 
   /** W1e - append a single `task` event when an event logger is wired. */

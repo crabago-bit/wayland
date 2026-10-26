@@ -33,7 +33,6 @@ import type {
   ArtifactSummary,
 } from '../types/artifacts';
 import type { MigrationPlan, MigrationResult, MigrationToolId } from '../types/migration';
-import type { IjfwErrorReason, IjfwInvokeResult, IjfwRuntimeModePublic } from '../types/ijfw';
 import type {
   CodexSetupResult,
   CodexStatusResult,
@@ -2514,74 +2513,6 @@ export const hub = {
   onStateChanged: buildEmitter<{ name: string; status: HubExtensionStatus; error?: string }>('hub.state-changed'),
 };
 
-// ==================== IJFW Install Lifecycle (v0.6.3 Wave 1) ====================
-
-/**
- * Status union surfaced by `ijfwSystemService` as the local IJFW install
- * progresses through detection → install/upgrade → activation. Wave 6 will
- * add a Settings toggle that listens to this emitter; Wave 1 wires the
- * emit-side only.
- */
-export type IjfwLifecycleStatus =
-  | 'not_installed'
-  | 'installing'
-  | 'upgrading'
-  | 'installed_current'
-  | 'installed_pending_activation'
-  | 'install_failed';
-
-export type IjfwStatusPayload = {
-  status: IjfwLifecycleStatus;
-  version?: string;
-  reason?: string;
-  errorReason?: IjfwErrorReason;
-  stderr?: string;
-  offline?: boolean;
-  /** Count of detected CLIs IJFW knows about, excluding Wayland Core itself. */
-  cliCount?: number;
-};
-
-export const ijfw = {
-  /** Lifecycle event for the local IJFW install (detection → install → activation). */
-  onStatusChanged: buildEmitter<IjfwStatusPayload>('ijfw.status-changed'),
-  /** Invoke a memory verb on the local IJFW MCP server (Wave 2). */
-  brainInvoke: buildProvider<IjfwInvokeResult, { verb: string; args?: Record<string, unknown> }>('ijfw.brain-invoke'),
-  /** Snapshot of the current lifecycle status. */
-  getStatus: buildProvider<IjfwStatusPayload, void>('ijfw.get-status'),
-  /** Refresh the version cache without installing. */
-  checkNow: buildProvider<{ ok: true; version: string | null } | { ok: false; error: string }, void>('ijfw.check-now'),
-  /** Fire bootstrap immediately - wired to the renderer "Install" button. */
-  triggerInstall: buildProvider<{ ok: true } | { ok: false; error: string }, void>('ijfw.trigger-install'),
-  /** Persist the Settings opt-out flag. */
-  skipSetup: buildProvider<{ ok: true }, { enabled: boolean }>('ijfw.skip-setup'),
-  /**
-   * Read the persisted opt-out flag DIRECTLY.
-   *
-   * The Settings switch used to infer this from the lifecycle status
-   * (`not_installed` + `opt_out`), which conflates a user SETTING with on-disk
-   * STATE. With an install present the status is `installed_current` no matter
-   * what the flag says, so the switch could not stay ON: any fresh `getStatus`
-   * (a remount, navigating away and back) re-derived it to OFF and masked the
-   * user's persisted choice. The flag is the only honest source for the switch.
-   */
-  getSkipSetup: buildProvider<{ enabled: boolean }, void>('ijfw.get-skip-setup'),
-  /** Returns whether the MCP client is reachable (`full`) or short-circuiting (`degraded`). */
-  getRuntimeMode: buildProvider<IjfwRuntimeModePublic, void>('ijfw.get-runtime-mode'),
-
-  /** Drop-tab: list files currently queued in the ingest dump dir. */
-  dropList: buildProvider<{ files: IjfwDropEntry[] }, void>('ijfw.drop-list'),
-  /** Drop-tab: ingest a user-supplied file path into the dump dir (main-side safety checks). */
-  dropIngest: buildProvider<IjfwDropIngestResult, { path: string }>('ijfw.drop-ingest'),
-  /** Drop-tab: quarantine the named file out of the active queue. */
-  dropQuarantine: buildProvider<{ ok: true } | { ok: false; error: string }, { name: string }>('ijfw.drop-quarantine'),
-};
-
-export type IjfwDropEntry = { name: string; size: number; mtimeMs: number };
-
-export type IjfwDropIngestResult =
-  | { ok: true; name: string }
-  | { ok: false; error: string; errorReason: IjfwErrorReason };
-
 // --- Models & Providers redesign (Wave 0 contract) ------------------------
 // New two-tier model registry. Distinct from the legacy `providers` namespace
 // above (which is removed in a later wave) - uses `modelRegistry.*` channel
@@ -3381,9 +3312,9 @@ export const jarvis = {
   hardFloor: buildProvider<import('@/common/jarvis/autonomy').HardFloorInfo, void>('jarvis.hardFloor'),
 };
 
-// ==================== Memory Archive (v0.6.4) ====================
-// Direct filesystem access to .ijfw/memory/*.md files - does NOT go through
-// the MCP server. The MCP server stays as the write/orchestrate layer.
+// ==================== Memory (the user's brain MCP server) ====================
+// Every call is served from the brain MCP server by BrainMemoryService; nothing here touches
+// the local disk.
 
 import type {
   MemoryEntry,
@@ -3391,133 +3322,50 @@ import type {
   ProjectSummary,
   TagCount,
   IndexStats,
-  PromotionCandidates,
   GetStatsResult,
-  WikiConcept,
-  WikiState,
-  WikiTopicTag,
-  WikiFreshness,
   ArchivedMemoryEntry,
 } from '@/common/types/memory';
 
 export const memory = {
-  /** Aggregated stats from the in-memory index (counts, deltas, sparkline). */
+  /** Where Memory lives: the user's brain MCP server, or `none` when no `brain` server is configured. */
+  getBackend: buildProvider<'brain' | 'none', void>('memory.get-backend'),
+  /** Counts by category, recent activity and the streak, computed from the brain. */
   getStats: buildProvider<GetStatsResult, void>('memory.get-stats'),
-  /** Filtered + sorted list of entries. */
+  /** Filtered + sorted list of memories (search uses the brain's hybrid search). */
   listEntries: buildProvider<{ entries: MemoryEntry[]; total: number }, ListFilter | void>('memory.list-entries'),
-  /** Full entry including body text (read from disk on demand). */
+  /** One memory including its full body. */
   getEntry: buildProvider<(MemoryEntry & { body: string }) | null, { id: string }>('memory.get-entry'),
-  /** Ranked list of projects by entry count + last-active time. */
+  /** Brain workspaces ranked by memory count and last activity. */
   getProjects: buildProvider<ProjectSummary[], void>('memory.get-projects'),
-  /** Top-20 tags, optionally scoped to a project. */
+  /** Top tags, optionally scoped to a workspace. */
   getTags: buildProvider<TagCount[], { project?: string } | void>('memory.get-tags'),
-  /** Promote a memory entry to the project's .ijfw/wiki/ directory. */
-  promote: buildProvider<{ ok: boolean; wikiPath?: string } | { ok: false; error: string }, { id: string }>(
-    'memory.promote'
-  ),
-  /** Quick-add a new memory from the renderer input. */
+  /** Save a new memory to the brain (`projectPath` is `brain://<workspace>`). */
   setQuickAdd: buildProvider<
     { ok: boolean; error?: string },
     { content: string; scope: 'project' | 'global'; type?: string; projectPath?: string }
   >('memory.set-quick-add'),
-  /** Entries whose promotionScore meets the threshold. */
-  getPromotionCandidates: buildProvider<PromotionCandidates, void>('memory.get-promotion-candidates'),
-  /** Persist the promotion threshold (0–100). */
-  setPromotionThreshold: buildProvider<void, { threshold: number }>('memory.set-promotion-threshold'),
-  /** Enable or disable auto-promotion on schedule (added W3). */
-  setAutoPromoteEnabled: buildProvider<void, { enabled: boolean }>('memory.set-auto-promote-enabled'),
-  /** Undo a recent promotion within the 24h grace window (added W3). */
-  undoPromotion: buildProvider<{ ok: boolean; error?: string }, { id: string }>('memory.undo-promotion'),
-  /** Edit a single memory entry in place (#414); returns the new id if the summary changed. */
+  /** Edit a memory: the brain stores a new version and supersedes the old one. */
   updateEntry: buildProvider<
     { ok: boolean; error?: string; newId?: string },
     { id: string; summary?: string; type?: string; tags?: string[]; body?: string }
   >('memory.update-entry'),
-  /** Archive a memory entry and return the durable archive id (#414). */
+  /** Archive a memory: hidden from Wayland (recoverable); the brain keeps the original. */
   deleteEntry: buildProvider<{ ok: boolean; error?: string; archiveId?: string }, { id: string }>(
     'memory.delete-entry'
   ),
-  /** List memory entries retained in the durable recovery archive. */
+  /** Memories archived from Wayland. */
   listArchivedEntries: buildProvider<ArchivedMemoryEntry[], void>('memory.list-archived-entries'),
-  /** Restore a retained memory entry to its original source file. */
+  /** Bring an archived memory back. */
   restoreArchivedEntry: buildProvider<{ ok: boolean; error?: string }, { archiveId: string }>(
     'memory.restore-archived-entry'
   ),
-  /** Trigger an immediate promotion sweep (added W3). */
-  forceSweep: buildProvider<void, void>('memory.force-sweep'),
-  /** Read a windowed slice of a source file centred on `line` for inline display. */
-  readSourceContext: buildProvider<
-    { ok: true; before: string; anchor: string; after: string; totalLines: number } | { ok: false; error: string },
-    { path: string; line: number; contextLines?: number }
-  >('memory.read-source-context'),
-  /** Which store the Memory page reads: the user's brain MCP server, or the local IJFW files. */
-  getBackend: buildProvider<'brain' | 'ijfw', void>('memory.get-backend'),
-  /** Fired when the file watcher triggers a re-index. */
-  onIndexChanged: buildEmitter<IndexStats>('memory.index-changed'),
-  /** Import verbs - stubs until W1a wires the actual importers. */
-  import: {
-    claudeMem: buildProvider<{ count: number; errors: string[] }, void>('memory.import.claude-mem'),
-    /** Scan ~/Documents (max depth 4) for Obsidian vaults (dirs containing .obsidian/). */
-    obsidianDetectVaults: buildProvider<Array<{ path: string; name: string; mdFileCount: number }>, void>(
-      'memory.import.obsidian-detect-vaults'
-    ),
-    obsidianVault: buildProvider<{ count: number; errors: string[] }, { vaultPath: string }>(
-      'memory.import.obsidian-vault'
-    ),
-    scanDevDir: buildProvider<{ count: number; projectsFound: number; errors: string[] }, void>(
-      'memory.import.scan-dev-dir'
-    ),
-    processDropFolder: buildProvider<{ count: number; errors: string[] }, void>('memory.import.process-drop-folder'),
-    /** Return live status of the drop folder watcher for the status bar chip. */
-    getDropFolderStatus: buildProvider<{ path: string; watching: boolean; ingestedToday: number }, void>(
-      'memory.import.get-drop-folder-status'
-    ),
-  },
-  /** Ingest raw file contents (from drag-drop) directly into the memory dir. */
+  /** Save dropped note files to the brain as Wiki memories. */
   ingestFiles: buildProvider<
     { ok: boolean; ingested: number; errors: string[] },
     { files: { name: string; content: string; scope?: 'project' | 'global' }[] }
   >('memory.ingest-files'),
-};
-
-// ==================== Wiki (v0.6.4) ====================
-// Synthesized concept pages built from MemoryEntry records.
-// Stored in <project>/.ijfw/wiki/*.md (Obsidian-compatible).
-// Sidecar index at <project>/.ijfw/wiki-state/index.json.
-
-export const wiki = {
-  /** List concepts with optional topic/search/freshness/sort filter. */
-  listConcepts: buildProvider<
-    { concepts: WikiConcept[]; total: number },
-    {
-      topicTag?: WikiTopicTag;
-      search?: string;
-      freshness?: WikiFreshness;
-      sort?: 'recent' | 'most-referenced' | 'alphabetical';
-    } | void
-  >('wiki.list-concepts'),
-  /** Get a single concept by slug. */
-  getConcept: buildProvider<WikiConcept | null, { slug: string }>('wiki.get-concept'),
-  /** Synthesize a new concept page from orphan memory IDs. */
-  synthesizeOrphan: buildProvider<{ ok: boolean; slug?: string; error?: string }, { memoryIds: string[] }>(
-    'wiki.synthesize-orphan'
-  ),
-  /** Re-synthesize an existing concept from its source memories. */
-  reSynthesize: buildProvider<{ ok: boolean; lastSynthesizedAt?: number; error?: string }, { slug: string }>(
-    'wiki.re-synthesize'
-  ),
-  /** Resolve a raw wikilink text to a concept slug. */
-  resolveBacklink: buildProvider<{ slug: string | null; name: string | null }, { wikilinkText: string }>(
-    'wiki.resolve-backlink'
-  ),
-  /** Full backlink graph: slug → list of slugs that link to it. */
-  getBacklinkGraph: buildProvider<Record<string, string[]>, void>('wiki.get-backlink-graph'),
-  /** Full wiki state (concepts + backlinkGraph + orphanCandidates) - used on cold load. */
-  getState: buildProvider<WikiState, void>('wiki.get-state'),
-  /** Fired when the wiki state mutates (synthesize / re-synthesize). */
-  stateChanged: buildEmitter<WikiState>('wiki.state-changed'),
-  /** Trigger a full synthesis sweep immediately and return count of new concepts. */
-  synthesizeNow: buildProvider<{ ok: boolean; newConcepts: number; error?: string }, void>('wiki.synthesize-now'),
+  /** Fired when the brain index changes (a memory was added, edited, archived or the index refreshed). */
+  onIndexChanged: buildEmitter<IndexStats>('memory.index-changed'),
 };
 
 /**
@@ -3613,11 +3461,6 @@ export const project = {
   >('project.generate-knowledge-draft'),
   /** Append one dated decision to .wayland/decisions.md; returns the updated doc. */
   appendDecision: buildProvider<{ decisions: string }, { id: string; text: string }>('project.append-decision'),
-  /** Read IJFW's own per-project memory ({workspace}/.ijfw/memory/*.md) if present - read-only, attributed. */
-  readIjfwMemory: buildProvider<
-    { available: boolean; files: Array<{ name: string; content: string }> },
-    { id: string }
-  >('project.read-ijfw-memory'),
   /**
    * Fired whenever the project list or a project's membership changes.
    *

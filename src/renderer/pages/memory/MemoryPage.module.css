@@ -1,7 +1,6 @@
 /**
- * Memory page - Wave 3 shell. The placeholder state branches render their
- * own inset cards; this module only owns the page-level flex column. Wave 4
- * will extend it once the real FullPanelShell ships its own surface chrome.
+ * Memory page shell: the loading line and "Connect your brain" card use .page;
+ * FullPanelShell uses .pageFullBleed.
  */
 .page {
   display: flex;
@@ -16,7 +15,7 @@
 }
 
 /*
- * PageShell migration (M8): the installed_current branch (FullPanelShell) is a
+ * PageShell migration (M8): the brain branch (FullPanelShell) is a
  * full-bleed, height:100% mail-style grid that owns its own header. It cannot
  * use a standard PageShell wrap (double title + broken grid), so it gets this
  * dedicated full-bleed container on the shared PageShell background token
@@ -38,6 +37,29 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.card {
+  max-width: 420px;
+  padding: 24px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 12px;
+  background: var(--color-bg-2);
+  text-align: center;
+}
+
+.cardTitle {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-1);
+}
+
+.cardBody {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-2);
 }
 
 @media (max-width: 1024px) {

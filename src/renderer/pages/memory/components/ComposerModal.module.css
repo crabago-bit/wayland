@@ -64,7 +64,9 @@
   color: var(--color-text-3);
   border-radius: 6px;
   padding: 0;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .closeBtn:hover {
@@ -123,10 +125,11 @@
   font-weight: 600;
 }
 
-/* ---- Scope toggle ---- */
+/* ---- Category pills / workspace row ---- */
 
 .scopeRow {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 12px 20px 0;
@@ -145,7 +148,10 @@
   border: 1px solid var(--color-border-2);
   background: var(--color-fill-1);
   color: var(--color-text-2);
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
 }
 
 .scopePill:hover {
@@ -159,73 +165,21 @@
   color: var(--wayland-orange, #f56a00);
 }
 
-/* ---- Tag row ---- */
+/* ---- Category hint + workspace picker ---- */
 
-.tagRow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 20px 0;
-  min-height: 36px;
+.categoryHint {
+  margin: 6px 20px 0;
+  font-size: 12px;
+  color: var(--color-text-3);
   flex-shrink: 0;
 }
 
-.tagChip {
+.workspaceLabel {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  background: var(--color-fill-2);
-  border-radius: 12px;
-  font-size: 12px;
+  gap: 8px;
+  font-size: 13px;
   color: var(--color-text-2);
-  border: 1px solid var(--color-border-2);
-}
-
-.tagRemoveBtn {
-  display: flex;
-  align-items: center;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  padding: 0;
-  color: var(--color-text-3);
-  border-radius: 50%;
-  transition: color 0.1s;
-}
-
-.tagRemoveBtn:hover {
-  color: var(--color-text-1);
-}
-
-.addTagBtn {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border: 1px dashed var(--color-border-2);
-  border-radius: 12px;
-  background: transparent;
-  font-size: 12px;
-  color: var(--color-text-3);
-  cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
-}
-
-.addTagBtn:hover {
-  border-color: var(--wayland-orange, #f56a00);
-  color: var(--wayland-orange, #f56a00);
-}
-
-.tagInput {
-  border: 1px solid var(--wayland-orange, #f56a00);
-  border-radius: 12px;
-  padding: 2px 8px;
-  font-size: 12px;
-  background: var(--color-fill-1);
-  color: var(--color-text-1);
-  outline: none;
-  width: 80px;
 }
 
 /* ---- Drop zone ---- */
@@ -241,7 +195,9 @@
   font-size: 12px;
   color: var(--color-text-4);
   cursor: default;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
   flex-shrink: 0;
 }
 

@@ -23,21 +23,13 @@ import React, { useCallback } from 'react';
 import { Button } from '@arco-design/web-react';
 import { Virtuoso } from 'react-virtuoso';
 import type { MemoryEntry, MemoryType } from '@/common/types/memory';
+import { MEMORY_CATEGORIES } from '../categories';
 import MemoryRow from './MemoryRow';
 import styles from './MemoryList.module.css';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-const ALL_TYPES: MemoryType[] = [
-  'decision',
-  'pattern',
-  'session',
-  'wiki',
-  'observation',
-  'preference',
-];
 
 type ChipDef = {
   type: MemoryType | 'all';
@@ -46,12 +38,7 @@ type ChipDef = {
 
 const CHIPS: ChipDef[] = [
   { type: 'all', label: 'All' },
-  { type: 'decision', label: 'Decisions' },
-  { type: 'pattern', label: 'Patterns' },
-  { type: 'session', label: 'Sessions' },
-  { type: 'wiki', label: 'Wiki' },
-  { type: 'observation', label: 'Observations' },
-  { type: 'preference', label: 'Preferences' },
+  ...MEMORY_CATEGORIES.map((c) => ({ type: c.type, label: c.label })),
 ];
 
 // ---------------------------------------------------------------------------
@@ -88,19 +75,16 @@ const MemoryList: React.FC<MemoryListProps> = ({
   typeCounts,
   onEndReached,
 }) => {
-
   const handleChipClick = useCallback(
     (chipType: MemoryType | 'all') => {
       if (chipType === 'all') {
         onTypeFilterChange([]);
         return;
       }
-      const next = typeFilter.includes(chipType)
-        ? typeFilter.filter((t) => t !== chipType)
-        : [...typeFilter, chipType];
+      const next = typeFilter.includes(chipType) ? typeFilter.filter((t) => t !== chipType) : [...typeFilter, chipType];
       onTypeFilterChange(next);
     },
-    [typeFilter, onTypeFilterChange],
+    [typeFilter, onTypeFilterChange]
   );
 
   const handleClearFilters = useCallback(() => {
@@ -112,7 +96,7 @@ const MemoryList: React.FC<MemoryListProps> = ({
 
   const chipLabel = (chip: ChipDef): string => {
     if (chip.type === 'all') {
-      const allCount = ALL_TYPES.reduce((sum, t) => sum + (typeCounts[t] ?? 0), 0);
+      const allCount = MEMORY_CATEGORIES.reduce((sum, c) => sum + (typeCounts[c.type] ?? 0), 0);
       return `All (${allCount.toLocaleString()})`;
     }
     const count = typeCounts[chip.type] ?? 0;
@@ -135,9 +119,7 @@ const MemoryList: React.FC<MemoryListProps> = ({
       <div className={styles.body} data-testid='memory-list-body'>
         {isEmpty ? (
           <div className={styles.emptyState} data-testid='memory-list-empty'>
-            <p className={styles.emptyText}>
-              No matches. Try removing a filter or clearing the search.
-            </p>
+            <p className={styles.emptyText}>No matches. Try removing a filter or clearing the search.</p>
             <Button size='mini' onClick={handleClearFilters} data-testid='memory-list-clear-btn'>
               Clear filters
             </Button>
@@ -150,14 +132,7 @@ const MemoryList: React.FC<MemoryListProps> = ({
             itemContent={(index) => {
               const entry = entries[index];
               if (!entry) return null;
-              return (
-                <MemoryRow
-                  key={entry.id}
-                  entry={entry}
-                  selected={entry.id === selectedId}
-                  onClick={onSelect}
-                />
-              );
+              return <MemoryRow key={entry.id} entry={entry} selected={entry.id === selectedId} onClick={onSelect} />;
             }}
           />
         )}

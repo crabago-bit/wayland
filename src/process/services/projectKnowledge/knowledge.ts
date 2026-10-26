@@ -6,13 +6,12 @@
 
 import fs from 'fs/promises';
 import type { Dirent } from 'fs';
-import os from 'os';
 import path from 'path';
 import { WAYLAND_KNOWLEDGE_DIR } from './bootstrap';
 import { PROJECT_KNOWLEDGE_BLOCK_FOOTER, PROJECT_KNOWLEDGE_BLOCK_HEADER } from './blockFormat';
 import { confinePath } from '@process/bridge/pathConfinement';
 import { resolveWithinApprovedDirectory } from '@process/bridge/userApprovedPaths';
-import { getIjfwArchiveService } from '@process/services/memory/ijfwArchiveService';
+import { getBrainMemory } from '@process/services/memory/memoryBackend';
 import i18n from '@process/services/i18n';
 
 /**
@@ -231,50 +230,33 @@ const MEMORY_BLOCK_CHAR_CAP = 24_000;
 const MEMORY_BLOCK_MAX_ENTRIES = 50;
 
 /**
- * Compose the user's global Wayland Memory store (`~/.ijfw/memory/*.md`) into a
- * single attributed block ready to append to a conversation's system-rules
- * channel, alongside the project-knowledge block. This is what lets the chat
- * agent answer questions about content the user dropped into the Memory UI
- * (GitHub #256): drop ingestion writes full file content under the GLOBAL memory
- * dir, but the only context the agent previously saw was project `.wayland/`
- * knowledge, so dropped memory was invisible to chat.
- *
- * We read from the already-in-process `getIjfwArchiveService()` index (no new
- * disk walk or watcher) and pull only entries whose source file lives under the
- * global memory dir - exactly where drop ingestion and `quickAdd('global')`
- * write - so per-project memory (surfaced separately, read-only, in the Memory
- * tab) is not pulled in and cannot double with project knowledge. Bodies are
- * read in full (the list index only carries a 200-char preview); per-entry and
- * total size are capped, and the block truncates gracefully. Returns '' when the
- * store is empty or unreadable, so nothing is injected.
- *
- * The entry cap (MEMORY_BLOCK_MAX_ENTRIES) is applied AFTER the global-store
- * filter, never before (#256). `listEntries` returns the whole corpus -
- * global AND per-project entries, recency-sorted - so capping at the service
- * layer would let a user's active project (which may have written dozens of
- * recent journal/observation entries) push every global-memory entry past the
- * cap, leaving the global filter empty and re-introducing the "not found"
- * symptom. We deliberately do NOT use `listEntries({ project: 'global' })`: the
- * `global` tag is not reliably present on everything under the global dir
- * (`quickAdd('global')` writes `tags: []`, and drops that already carry their
- * own frontmatter bypass the `scope: global` mapping), so the sourcePath prefix
- * is the true source of truth for global-store membership.
+ * The user's memory block, read from the brain MCP server and injected into a new chat
+ * alongside the project-knowledge block, so the agent knows the standing rules, decisions
+ * and patterns the user has saved. Only curated categories from the global workspace are
+ * used (see the filter below); per-entry and total size are capped and the block truncates
+ * gracefully, naming how many entries were left out. Returns '' when there is no brain, it
+ * is unreachable, or it holds nothing in those categories, so nothing is injected.
  */
 export async function loadGlobalMemoryBlock(): Promise<string> {
-  const globalDir = path.join(os.homedir(), '.ijfw', 'memory');
-  const svc = getIjfwArchiveService();
-  let listed: Awaited<ReturnType<typeof svc.listEntries>>;
+  const brain = await getBrainMemory().catch((): null => null);
+  if (!brain) return '';
+  let listed: Awaited<ReturnType<typeof brain.listEntries>>;
   try {
-    // No `limit`: pull the full recency-sorted corpus so the global filter and
-    // the entry cap below both operate on global entries only, not on a corpus
-    // already truncated by the user's active per-project entries.
-    listed = await svc.listEntries({ sort: 'recent' });
+    // The user's curated knowledge in the global workspace, newest first. Session logs and
+    // loose observations are the bulk of the brain (and mostly noise for a new chat), so only
+    // preferences, decisions, patterns and wiki notes are offered.
+    listed = await brain.listEntries({
+      project: 'global',
+      types: ['preference', 'decision', 'pattern', 'wiki'],
+      sort: 'recent',
+      limit: 500,
+    });
   } catch (err) {
     console.warn('[projectKnowledge] global memory block: list failed:', err);
     return '';
   }
 
-  const allGlobal = listed.entries.filter((e) => e.sourcePath.startsWith(globalDir + path.sep));
+  const allGlobal = listed.entries;
   const globalEntries = allGlobal.slice(0, MEMORY_BLOCK_MAX_ENTRIES);
   if (globalEntries.length === 0) return '';
 
@@ -295,7 +277,7 @@ export async function loadGlobalMemoryBlock(): Promise<string> {
     let body = entry.bodyPreview;
     let previewOnly = true;
     try {
-      const full = await svc.getEntry(entry.id);
+      const full = await brain.getEntry(entry.id);
       if (full?.body) {
         body = full.body;
         // #924 F3: `getEntry` does NOT throw on an unreadable source - it
@@ -337,7 +319,7 @@ export async function loadGlobalMemoryBlock(): Promise<string> {
   }
   const label = i18n.t('memory.injectedLabel', {
     defaultValue:
-      'User memory (from Wayland Memory) - the user dropped or saved this; use it to answer questions about it',
+      'User memory (from your brain) - standing rules, decisions and patterns the user saved; follow them and use them to answer questions about them',
   });
   return `[${label}]\n\n${sections.join('\n\n')}`;
 }
@@ -440,43 +422,6 @@ export async function appendProjectDecision(workspace: string, text: string): Pr
   const next = existing.trim() ? `${existing.replace(/\s+$/, '')}\n${bullet}\n` : `${bullet}\n`;
   await fs.writeFile(file, next, 'utf-8');
   return next;
-}
-
-const IJFW_MEMORY_DIR = path.join('.ijfw', 'memory');
-const IJFW_FILE_CHAR_CAP = 24_000;
-
-export type IjfwMemoryFile = { name: string; content: string };
-
-/**
- * Read IJFW's own per-project memory (`{workspace}/.ijfw/memory/*.md`) when IJFW
- * has actually run in this project's workspace. This is IJFW's record (its
- * progress journal / handoffs), surfaced READ-ONLY and clearly attributed in the
- * project Memory tab - never edited here and never auto-injected into chats.
- * Returns `{ available: false }` when the folder is absent.
- */
-export async function readProjectIjfwMemory(
-  workspace: string
-): Promise<{ available: boolean; files: IjfwMemoryFile[] }> {
-  if (!workspace || !workspace.trim()) return { available: false, files: [] };
-  const dir = path.join(workspace, IJFW_MEMORY_DIR);
-  let entries: string[];
-  try {
-    entries = await fs.readdir(dir);
-  } catch {
-    return { available: false, files: [] };
-  }
-  const mdFiles = entries.filter((n) => n.toLowerCase().endsWith('.md')).sort();
-  const files: IjfwMemoryFile[] = [];
-  for (const name of mdFiles) {
-    try {
-      const raw = await fs.readFile(path.join(dir, name), 'utf-8');
-      const content = raw.length > IJFW_FILE_CHAR_CAP ? `${raw.slice(0, IJFW_FILE_CHAR_CAP)}\n\n…(truncated)` : raw;
-      files.push({ name, content });
-    } catch {
-      // unreadable file - skip
-    }
-  }
-  return { available: files.length > 0, files };
 }
 
 /** List files dropped into the project's `.wayland/reference/` folder. */
