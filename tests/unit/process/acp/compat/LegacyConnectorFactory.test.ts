@@ -77,6 +77,7 @@ describe('LegacyConnectorFactory', () => {
       backend: 'codex',
       conversationId: makeConfig().agentId,
       handlers,
+      remote: false,
     });
   });
 

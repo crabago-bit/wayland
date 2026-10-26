@@ -168,7 +168,7 @@ describe('GuidActionRow', () => {
 
     await vi.waitFor(() => {
       expect(ipcBridge.dialog.showOpen.invoke).toHaveBeenCalledWith({
-        properties: ['openDirectory', 'createDirectory'],
+        properties: ['openDirectory', 'createDirectory', 'allowRemote'],
       });
       expect(onSelectWorkspace).toHaveBeenCalledWith('/chosen/path');
     });

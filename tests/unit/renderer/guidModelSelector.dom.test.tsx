@@ -146,6 +146,10 @@ vi.mock('@/common', () => ({
     modelRegistry: {
       resolveForChatStart: { invoke: mockResolveForChatStart },
     },
+    // The Fuigo picker merges the user's BYOK models in; none here.
+    systemSettings: {
+      listFuigoByokModels: { invoke: vi.fn().mockResolvedValue([]) },
+    },
     // GuidModelSelector fires fire-and-forget usage telemetry on selection
     // (useUsageTelemetry -> ipcBridge.usage.recordEvent.invoke). Without this
     // namespace the call reads `.recordEvent` off undefined and the rejection
