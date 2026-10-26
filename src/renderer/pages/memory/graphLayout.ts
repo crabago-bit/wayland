@@ -111,24 +111,38 @@ export function layoutClusters(
 
   const cx = GRAPH_WIDTH / 2;
   const cy = GRAPH_HEIGHT / 2;
-  const rx = present.length > 1 ? 320 : 0;
-  const ry = present.length > 1 ? 210 : 0;
+  const rx = present.length > 1 ? 360 : 0;
+  const ry = present.length > 1 ? 235 : 0;
   const clusters: Cluster[] = [];
   present.forEach((type, i) => {
     const members = groups.get(type) ?? [];
     const angle = (i / present.length) * Math.PI * 2 - Math.PI / 2;
     const centerX = cx + Math.cos(angle) * rx;
     const centerY = cy + Math.sin(angle) * ry;
-    const radius = Math.min(140, 34 + Math.sqrt(members.length) * 11);
+    const radius = Math.min(95, 28 + Math.sqrt(members.length) * 7.5);
     const ids = new Set(members.map((m) => m.id));
     const local = layoutGraph(
       members,
       edges.filter((e) => ids.has(e.source) && ids.has(e.target)),
       140
     );
-    const scale = radius / 300;
+    // The force layout fills a wide rectangle; pour it into a disc by keeping each node's
+    // direction from the centroid and scaling its distance so the farthest sits on the rim.
+    let mx = 0;
+    let my = 0;
+    for (const p of local.values()) {
+      mx += p.x;
+      my += p.y;
+    }
+    mx /= local.size || 1;
+    my /= local.size || 1;
+    let farthest = 1;
+    for (const p of local.values()) farthest = Math.max(farthest, Math.hypot(p.x - mx, p.y - my));
     for (const [id, p] of local) {
-      positions.set(id, { x: centerX + (p.x - cx) * scale, y: centerY + (p.y - cy) * scale });
+      const dist = Math.hypot(p.x - mx, p.y - my);
+      const angle = Math.atan2(p.y - my, p.x - mx);
+      const r = radius * Math.pow(dist / farthest, 0.75);
+      positions.set(id, { x: centerX + Math.cos(angle) * r, y: centerY + Math.sin(angle) * r });
     }
     clusters.push({ type, x: centerX, y: centerY, radius, count: members.length });
   });

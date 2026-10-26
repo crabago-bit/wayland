@@ -111,8 +111,19 @@ const ConstellationView: React.FC<ConstellationViewProps> = ({
             const cat = categoryOf(c.type as never);
             return (
               <g key={c.type} data-testid={`memory-constellation-cluster-${c.type}`}>
-                <circle cx={c.x} cy={c.y} r={c.radius * 1.5} fill={`url(#star-${c.type})`} opacity={0.1} />
-                <text x={c.x} y={c.y - c.radius * 1.5 - 6} textAnchor='middle' className={styles.clusterLabel}>
+                <circle cx={c.x} cy={c.y} r={c.radius + 12} fill={`url(#star-${c.type})`} opacity={0.12} />
+                <circle
+                  cx={c.x}
+                  cy={c.y}
+                  r={c.radius + 12}
+                  fill='none'
+                  stroke={cat.color}
+                  strokeOpacity={0.35}
+                  strokeWidth={1}
+                  strokeDasharray='3 5'
+                  data-testid={`memory-constellation-ring-${c.type}`}
+                />
+                <text x={c.x} y={c.y - c.radius - 20} textAnchor='middle' className={styles.clusterLabel}>
                   {cat.glyph} {cat.label} · {c.count.toLocaleString()}
                 </text>
               </g>

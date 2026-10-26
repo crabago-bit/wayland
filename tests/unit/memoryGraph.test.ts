@@ -109,6 +109,18 @@ describe('layoutClusters', () => {
   });
 });
 
+describe('layoutClusters shape', () => {
+  it('keeps every star inside its cluster circle', () => {
+    const nodes = Array.from({ length: 40 }, (_, i) => ({ id: `n${i}`, type: 'wiki' }));
+    const edges = nodes.slice(1).map((n, i) => ({ source: `n${i}`, target: n.id, weight: 1 }));
+    const { positions, clusters } = layoutClusters(nodes, edges, ['wiki']);
+    const c = clusters[0];
+    for (const p of positions.values()) {
+      expect(Math.hypot(p.x - c.x, p.y - c.y)).toBeLessThanOrEqual(c.radius + 0.001);
+    }
+  });
+});
+
 describe('buildMemoryLinks', () => {
   it('gives each end of a link the same edge', () => {
     const links = buildMemoryLinks([entry('a', 'alpha-one beta-two'), entry('b', 'alpha-one beta-two')]);
