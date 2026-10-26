@@ -3318,6 +3318,8 @@ export const jarvis = {
 
 import type {
   MemoryEntry,
+  MemoryGraph,
+  MemoryGraphFilter,
   ListFilter,
   ProjectSummary,
   TagCount,
@@ -3337,6 +3339,8 @@ export const memory = {
   getEntry: buildProvider<(MemoryEntry & { body: string }) | null, { id: string }>('memory.get-entry'),
   /** Brain workspaces ranked by memory count and last activity. */
   getProjects: buildProvider<ProjectSummary[], void>('memory.get-projects'),
+  /** Memories linked by the specific things they mention in common (files, hosts, identifiers). */
+  getGraph: buildProvider<MemoryGraph, MemoryGraphFilter>('memory.get-graph'),
   /** Top tags, optionally scoped to a workspace. */
   getTags: buildProvider<TagCount[], { project?: string } | void>('memory.get-tags'),
   /** Save a new memory to the brain (`projectPath` is `brain://<workspace>`). */

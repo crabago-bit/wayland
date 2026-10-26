@@ -123,3 +123,36 @@ export type TagCount = {
  * Using a wrapper so the renderer can safely distinguish success from failure.
  */
 export type GetStatsResult = { ok: true; stats: MemoryStats } | { ok: false; error: string };
+
+/** One memory as a node in the Memory graph. */
+export type MemoryGraphNode = {
+  id: string;
+  summary: string;
+  type: MemoryType;
+  project: string;
+  /** How many other memories it shares terms with. */
+  degree: number;
+  referencedBy: number;
+};
+
+/** Two memories that mention the same specific things (files, hosts, identifiers). */
+export type MemoryGraphEdge = {
+  source: string;
+  target: string;
+  weight: number;
+  /** The shared terms that link them, strongest first. */
+  terms: string[];
+};
+
+export type MemoryGraph = {
+  nodes: MemoryGraphNode[];
+  edges: MemoryGraphEdge[];
+  /** Memories in scope, including ones with no links (not drawn). */
+  totalEntries: number;
+  /** Memories in scope that share something with at least one other (the graph draws the best-connected). */
+  linked: number;
+  /** Memories in scope with nothing in common with any other. */
+  unlinked: number;
+};
+
+export type MemoryGraphFilter = { types?: string[]; project?: string };

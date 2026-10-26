@@ -18,6 +18,7 @@ import type {
   GetStatsResult,
   ListFilter,
   MemoryEntry,
+  MemoryGraph,
   ProjectSummary,
   TagCount,
 } from '@/common/types/memory';
@@ -55,6 +56,8 @@ const updateEntrySchema = z.object({
   tags: z.array(z.string().max(80)).max(50).optional(),
   body: z.string().max(100_000).optional(),
 });
+
+const graphFilterSchema = z.object({ types: z.array(z.string()).optional(), project: z.string().optional() });
 
 const archiveIdSchema = z.object({ archiveId: z.string().uuid() });
 
@@ -139,6 +142,13 @@ export function initMemoryArchiveBridge(): void {
       () => []
     )
   );
+
+  ipcBridge.memory.getGraph.provider(async (rawFilter: unknown) => {
+    const parsed = graphFilterSchema.safeParse(rawFilter ?? {});
+    const empty = (): MemoryGraph => ({ nodes: [], edges: [], totalEntries: 0, linked: 0, unlinked: 0 });
+    if (!parsed.success) return empty();
+    return withBrain<MemoryGraph>('getGraph', (b) => b.getGraph(parsed.data), empty, empty);
+  });
 
   ipcBridge.memory.getTags.provider(async (args: unknown) => {
     const parsed = tagsQuerySchema.safeParse(args ?? {});

@@ -38,6 +38,9 @@ import type { ListFilter, MemoryEntry, MemoryType } from '@/common/types/memory'
 import { useTranslation } from 'react-i18next';
 import { useInRouterContext } from 'react-router-dom';
 import MemoryList from '../components/MemoryList';
+import CardsView from '../components/CardsView';
+import GraphView from '../components/GraphView';
+import { useMemoryGraph } from '../hooks/useMemoryGraph';
 import RightDrawer from '../components/RightDrawer';
 import TopbarChips from '../components/TopbarChips';
 import UrlTypeSync from '../components/UrlTypeSync';
@@ -72,6 +75,24 @@ function timeWindowToFilter(tw: TimeWindow): ListFilter['timeWindow'] {
 // Constants
 // ---------------------------------------------------------------------------
 
+type MemoryViewMode = 'list' | 'cards' | 'graph';
+const VIEW_MODES: ReadonlyArray<{ value: MemoryViewMode; label: string }> = [
+  { value: 'list', label: 'List' },
+  { value: 'cards', label: 'Cards' },
+  { value: 'graph', label: 'Graph' },
+];
+const VIEW_MODE_KEY = 'wayland.memory.view';
+
+function readStoredViewMode(): MemoryViewMode {
+  try {
+    const stored = window.localStorage.getItem(VIEW_MODE_KEY);
+    if (stored === 'list' || stored === 'cards' || stored === 'graph') return stored;
+  } catch {
+    /* storage unavailable */
+  }
+  return 'list';
+}
+
 const DEFAULT_FILTER: ListFilter = {
   project: 'all',
   types: [],
@@ -101,7 +122,18 @@ const FullPanelShell: React.FC = () => {
   const [filter, setFilter] = useState<ListFilter>(DEFAULT_FILTER);
   const [timeWindow, setTimeWindow] = useState<TimeWindow>('all');
 
+  const [viewMode, setViewMode] = useState<MemoryViewMode>(readStoredViewMode);
+  const chooseView = useCallback((next: MemoryViewMode) => {
+    setViewMode(next);
+    try {
+      window.localStorage.setItem(VIEW_MODE_KEY, next);
+    } catch {
+      /* storage unavailable: the choice just is not remembered */
+    }
+  }, []);
+
   const { stats, entries, projects, total, isLoading, reload } = useMemoryIndex(filter);
+  const graphState = useMemoryGraph(filter, viewMode === 'graph');
   const { selectedId, selected, selectEntry, clearSelection } = useSelectedEntry();
 
   const [composerOpen, setComposerOpen] = useState(false);
@@ -440,6 +472,20 @@ const FullPanelShell: React.FC = () => {
           <TimeDropdown selected={timeWindow} onSelect={handleTimeSelect} />
           <TypeDropdown typeCounts={typeCounts} selected={filter.types ?? []} onFilterChange={handleTypeFilter} />
         </div>
+        <div className={styles.viewToggle} role='group' aria-label='View' data-testid='memory-view-toggle'>
+          {VIEW_MODES.map((mode) => (
+            <button
+              key={mode.value}
+              type='button'
+              className={`${styles.viewBtn}${viewMode === mode.value ? ` ${styles.viewBtnActive}` : ''}`}
+              aria-pressed={viewMode === mode.value}
+              onClick={() => chooseView(mode.value)}
+              data-testid={`memory-view-${mode.value}`}
+            >
+              {t(`archive.view.${mode.value}`, mode.label)}
+            </button>
+          ))}
+        </div>
         <div className={styles.resultCount} data-testid='memory-result-count'>
           {resultCountLabel}
         </div>
@@ -456,18 +502,35 @@ const FullPanelShell: React.FC = () => {
               className={`${styles.listCol}${selectedId ? ` ${styles.listColDrawerOpen}` : ''}`}
               data-testid='memory-list-col'
             >
-              <MemoryList
-                entries={entries}
-                total={total}
-                selectedId={selectedId ?? undefined}
-                onSelect={handleSelectRow}
-                search={filter.search ?? ''}
-                onSearchChange={handleSearchChange}
-                typeFilter={filter.types ?? []}
-                onTypeFilterChange={handleTypeFilter}
-                typeCounts={typeCounts}
-                onEndReached={handleEndReached}
-              />
+              {viewMode === 'graph' ? (
+                <GraphView
+                  graph={graphState.graph}
+                  isLoading={graphState.isLoading}
+                  error={graphState.error}
+                  selectedId={selectedId ?? undefined}
+                  onSelect={handleSelectRow}
+                />
+              ) : viewMode === 'cards' ? (
+                <CardsView
+                  entries={entries}
+                  selectedId={selectedId ?? undefined}
+                  onSelect={handleSelectRow}
+                  onEndReached={handleEndReached}
+                />
+              ) : (
+                <MemoryList
+                  entries={entries}
+                  total={total}
+                  selectedId={selectedId ?? undefined}
+                  onSelect={handleSelectRow}
+                  search={filter.search ?? ''}
+                  onSearchChange={handleSearchChange}
+                  typeFilter={filter.types ?? []}
+                  onTypeFilterChange={handleTypeFilter}
+                  typeCounts={typeCounts}
+                  onEndReached={handleEndReached}
+                />
+              )}
             </div>
 
             {/* Right drawer - push-content, 480px.

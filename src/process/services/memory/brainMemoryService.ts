@@ -35,12 +35,15 @@ import type {
   IndexStats,
   ListFilter,
   MemoryEntry,
+  MemoryGraph,
+  MemoryGraphFilter,
   MemoryStats,
   MemoryType,
   ProjectSummary,
   StatKey,
   TagCount,
 } from '@/common/types/memory';
+import { buildMemoryGraph } from './memoryGraph';
 
 /** The seam to the brain MCP server; tests inject a fake. */
 export interface BrainTools {
@@ -411,6 +414,17 @@ export class BrainMemoryService {
 
   async getEntry(id: string): Promise<(Entry & { bodyIsPreview?: boolean }) | null> {
     return (await this.ensureIndex()).byId.get(id) ?? null;
+  }
+
+  /** Memories linked by what they mention in common, for the Graph view. */
+  async getGraph(filter: MemoryGraphFilter = {}): Promise<MemoryGraph> {
+    const index = await this.ensureIndex();
+    const types = filter.types?.length ? new Set(filter.types) : null;
+    const workspace = this.workspaceOf(filter.project);
+    const scoped = index.entries.filter(
+      (e) => (!types || types.has(e.type)) && (!workspace || e.project === workspace)
+    );
+    return buildMemoryGraph(scoped);
   }
 
   async getProjects(): Promise<ProjectSummary[]> {
