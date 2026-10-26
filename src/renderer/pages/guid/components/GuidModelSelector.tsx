@@ -443,6 +443,36 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
     return sortModelsNewestFirst(curated ?? []).map((m) => ({ id: m.id, label: m.displayName }));
   }, [currentAcpCachedModelInfo?.availableModels, curated]);
 
+  // The user's own provider models (`byok/<provider>/<model>`). The engine only advertises
+  // them after its first session, so a fresh server has none cached; list them from the
+  // connected provider rows instead and merge whatever the engine did advertise.
+  const [byokFetched, setByokFetched] = React.useState<AcpModelInfo['availableModels']>([]);
+  React.useEffect(() => {
+    if (agentKey !== 'fuigo') {
+      setByokFetched([]);
+      return;
+    }
+    let cancelled = false;
+    ipcBridge.systemSettings.listFuigoByokModels
+      .invoke()
+      .then((models) => {
+        if (!cancelled) setByokFetched(Array.isArray(models) ? models : []);
+      })
+      .catch(() => {
+        if (!cancelled) setByokFetched([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentKey]);
+  const byokModels = React.useMemo<AcpModelInfo['availableModels']>(() => {
+    const merged = new Map<string, AcpModelInfo['availableModels'][number]>();
+    for (const m of byokFetched) merged.set(m.id, m);
+    for (const m of acpModels) if (m.id.startsWith('byok/')) merged.set(m.id, m);
+    return [...merged.values()];
+  }, [byokFetched, acpModels]);
+  const nativeAcpModels = React.useMemo(() => acpModels.filter((m) => !m.id.startsWith('byok/')), [acpModels]);
+
   const acpSelectedLabel = React.useMemo(() => {
     if (isFluxModelId(selectedAcpModel)) return FLUX_MODEL_DISPLAY[selectedAcpModel as FluxModelId];
     // Resolve the label from the SAME unified list the dropdown renders
@@ -453,13 +483,14 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
     // the selection look like it did nothing. `acpModels` carries the curated
     // rows, so the freshly-picked model resolves to its real label immediately.
     return (
-      acpModels.find((m) => m.id === selectedAcpModel)?.label ||
+      [...acpModels, ...byokModels].find((m) => m.id === selectedAcpModel)?.label ||
       currentAcpCachedModelInfo?.currentModelLabel ||
       currentAcpCachedModelInfo?.currentModelId ||
       ''
     );
   }, [
     acpModels,
+    byokModels,
     currentAcpCachedModelInfo?.currentModelId,
     currentAcpCachedModelInfo?.currentModelLabel,
     selectedAcpModel,
@@ -520,7 +551,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
   // to show (live cache or curated catalog). This kills the cold-start dead-end:
   // a connected Flux user sees Flux Auto from the first frame, and an enumerable
   // CLI (Codex) surfaces its live GPT models even before a session caches them.
-  if (showAcpFlux || acpModels.length > 0) {
+  if (showAcpFlux || acpModels.length > 0 || byokModels.length > 0) {
     // Inline scope caption - keeps the Arco Menu legal (no raw <div> kids).
     const scopeCaptionItem = (
       <Menu.Item key='scope-caption' disabled className='px-12px pt-8px pb-6px text-11px text-t-tertiary leading-snug'>
@@ -554,8 +585,29 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
                 ))}
               </Menu.ItemGroup>
             )}
+            {byokModels.length > 0 && (
+              <Menu.ItemGroup title={t('conversation.welcome.byokModelsGroupLabel')}>
+                {byokModels.map((model) => (
+                  <Menu.Item
+                    key={model.id}
+                    onClick={() => {
+                      setSelectedAcpModel(model.id);
+                      recordTelemetry({
+                        eventType: 'guid.model_selected',
+                        cliBackend: agentKey,
+                        metadata: { modelId: model.id, source: 'byok' },
+                      });
+                    }}
+                  >
+                    <div className='flex items-center gap-8px w-full'>
+                      <span className='flex-1 min-w-0 truncate'>{model.label}</span>
+                    </div>
+                  </Menu.Item>
+                ))}
+              </Menu.ItemGroup>
+            )}
             {scopeCaptionItem}
-            {acpModels.map((model) => {
+            {nativeAcpModels.map((model) => {
               const tier = acpTierFor(model.id, model.label);
               return (
                 <Menu.Item

@@ -17,6 +17,7 @@ import { getPlatformServices } from '@/common/platform';
 import { ProcessConfig } from '@process/utils/initStorage';
 import { changeLanguage } from '@process/services/i18n';
 import { getClaudeNativeDefaultModelId } from '@process/services/ccSwitchModelSource';
+import { readFuigoByokProviders } from '@process/agent/fuigo/byok';
 import { TERMINAL_ENABLED_KEY } from '@process/terminal/terminalConfig';
 
 // Keep-awake power blocker state
@@ -103,6 +104,17 @@ export function initSystemSettingsBridge(): void {
   ipcBridge.systemSettings.getRouteThroughFlux.provider(async () => {
     const value = await ProcessConfig.get('system.routeThroughFlux');
     return value ?? false;
+  });
+
+  // Models of the user's own providers, for the new-chat Fuigo picker (ids and labels only).
+  ipcBridge.systemSettings.listFuigoByokModels.provider(async () => {
+    try {
+      const providers = await readFuigoByokProviders();
+      return providers.flatMap((p) => p.entries.map((e) => ({ id: e.id, label: e.name })));
+    } catch (error) {
+      console.warn('[systemSettingsBridge] listing Fuigo BYOK models failed:', error);
+      return [];
+    }
   });
 
   // Set "route through Flux"

@@ -1437,6 +1437,12 @@ export const systemSettings = {
   getKeepAwake: buildProvider<boolean, void>('system-settings:get-keep-awake'),
   setKeepAwake: buildProvider<void, { enabled: boolean }>('system-settings:set-keep-awake'),
   getRouteThroughFlux: buildProvider<boolean, void>('system-settings:get-route-through-flux'),
+  // The user's own (BYOK) models a Fuigo chat can run, as `byok/<provider>/<model>` ids with
+  // display labels. Read from the connected provider rows, so the new-chat picker can list
+  // them before any Fuigo session has populated the engine's model cache. No keys cross.
+  listFuigoByokModels: buildProvider<Array<{ id: string; label: string }>, void>(
+    'system-settings:list-fuigo-byok-models'
+  ),
   setRouteThroughFlux: buildProvider<void, { enabled: boolean }>('system-settings:set-route-through-flux'),
   // Native Claude default model slot for a new Claude Code chat (null = no native
   // login). Lets a Claude chat default to the subscription instead of flux-auto.
