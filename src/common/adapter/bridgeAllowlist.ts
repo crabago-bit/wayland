@@ -30,6 +30,7 @@
  */
 
 import { bridge, storage } from '@office-ai/platform';
+import { parseSshWorkspace } from '@/common/utils/sshWorkspace';
 
 /** Keys registered via `buildProvider` (main-process providers, renderer invokes). */
 const providerKeys = new Set<string>();
@@ -157,7 +158,7 @@ export function buildProvider<Data, Params = undefined>(
     // Fail fast on a key the server's WS dispatcher will refuse anyway. Reading
     // the SAME predicate the dispatcher applies is what makes drift structurally
     // impossible - there is no second copy of the denylist.
-    if (isRemoteDeniedProviderKey(key)) throw new BridgeUnavailableError(key, 'remote-forbidden');
+    if (isRemoteDeniedProviderKey(key, params)) throw new BridgeUnavailableError(key, 'remote-forbidden');
     const result = await baseInvoke(params);
     // Defence in depth: a refusal can still arrive for a key this side did not
     // classify as denied (e.g. the value-level config-write gate). Convert it.
@@ -340,6 +341,36 @@ const REMOTE_DENIED_PREFIXES: readonly string[] = [
 // Note: fs provider keys are registered WITHOUT an `fs.` prefix on the wire
 // (e.g. `write-file`, `remove-entry`), so the dangerous fs surface is enumerated
 // explicitly in REMOTE_DENIED_KEYS below rather than matched by prefix.
+
+/**
+ * File providers that may act on an SSH host's files. The remote-denied fs keys exist so a
+ * paired browser cannot read or write THIS machine's disk. A path of the form
+ * `ssh://<alias>/<path>` never reaches this machine's disk: the provider resolves the alias
+ * against the server's own ssh config and runs a fixed read-only/overwrite script on that
+ * host (or returns nothing for an unknown alias). Each key lists the params that carry a
+ * path; the call is exempt only when every one of them is an ssh:// path.
+ */
+const SSH_FS_PATH_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  'read-file': ['path'],
+  'read-file-buffer': ['path'],
+  'write-file': ['path'],
+  'get-file-metadata': ['path'],
+  'get-image-base64': ['path'],
+  'get-file-by-dir': ['dir', 'root'],
+  'list-workspace-files': ['root'],
+};
+
+/** True iff `key` is a file provider called only with ssh:// paths. */
+export function isSshFsCall(key: string, params: unknown): boolean {
+  const fields = SSH_FS_PATH_FIELDS[key];
+  if (!fields || params === null || typeof params !== 'object') return false;
+  const record = params as Record<string, unknown>;
+  // Every named path field must be present and remote: a missing or local one means the
+  // call could still touch this machine, so it falls back to the denylist.
+  return fields.every(
+    (field) => parseSshWorkspace(typeof record[field] === 'string' ? (record[field] as string) : null) !== null
+  );
+}
 
 /**
  * Exact provider keys denied to remote WS callers. Covers the fs mutation/raw-read
@@ -745,14 +776,16 @@ export const REMOTE_DENIED_KEYS: ReadonlySet<string> = new Set([
  * @param name Full inbound wire name as received from the WebSocket client.
  * @returns `false` if the resolved provider key is in the remote denylist.
  */
-export function isAllowedForRemote(name: string): boolean {
+export function isAllowedForRemote(name: string, data?: unknown): boolean {
   if (typeof name !== 'string' || name.length === 0) return false;
 
   // Only provider invocations carry capability; everything else (callbacks,
   // heartbeat) is already constrained by isAllowedInboundName.
   if (!name.startsWith('subscribe-')) return true;
 
-  return !isRemoteDeniedProviderKey(name.slice('subscribe-'.length));
+  // The wire envelope is `{ id, data: <params> }`; the params decide the SSH-path exception.
+  const params = (data as { data?: unknown } | null | undefined)?.data;
+  return !isRemoteDeniedProviderKey(name.slice('subscribe-'.length), params);
 }
 
 /**
@@ -764,8 +797,12 @@ export function isAllowedForRemote(name: string): boolean {
  * the denylist changes here - `isAllowedForRemote` is the identical function it
  * was, expressed in terms of this predicate.
  */
-export function isRemoteDeniedProviderKey(key: string): boolean {
+export function isRemoteDeniedProviderKey(key: string, params?: unknown): boolean {
   if (typeof key !== 'string' || key.length === 0) return false;
+  // A file call whose every path is on an SSH host is not a read of THIS machine's disk, so
+  // the local-disk denylist does not apply to it (see isSshFsCall). The same key with any
+  // other path stays denied.
+  if (isSshFsCall(key, params)) return false;
   if (REMOTE_DENIED_KEYS.has(key)) return true;
   for (const prefix of REMOTE_DENIED_PREFIXES) {
     if (key.startsWith(prefix)) return true;

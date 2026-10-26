@@ -89,7 +89,7 @@ export function initWebAdapter(wss: WebSocketServer): void {
     // local trusted user. Apply the remote-reduced allowlist on top of the
     // inbound allowlist so a token-holding remote client cannot drive
     // fs.*/shell.*/skill-mutation/mcp-mutation/hub/app write/exec providers.
-    if (!isAllowedForRemote(name)) {
+    if (!isAllowedForRemote(name, data)) {
       console.error('[adapter] Rejected remote-forbidden WebSocket bridge event:', name);
       settleRejectedInvoke(ws, name, data, 'remote-forbidden');
       return;
