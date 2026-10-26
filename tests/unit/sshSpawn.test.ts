@@ -37,6 +37,13 @@ describe('buildSshSpawn', () => {
     expect(remote).not.toMatch(/[^\\']\$\(id\)[^']/);
   });
 
+  it('sources the host-side agent env file instead of carrying secrets in the command', () => {
+    const remote = buildSshSpawn(host, '/srv/app', ['x']).args.slice(-1)[0];
+    expect(remote).toContain('.wayland-agent.env');
+    expect(remote).toContain('set -a');
+    expect(remote.indexOf('. ')).toBeLessThan(remote.indexOf('exec'));
+  });
+
   it('rejects relative or NUL-bearing paths and empty commands', () => {
     expect(() => buildSshSpawn(host, 'relative', ['x'])).toThrow();
     expect(() => buildSshSpawn(host, '/a\0b', ['x'])).toThrow();

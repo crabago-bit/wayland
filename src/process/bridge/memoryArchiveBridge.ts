@@ -14,6 +14,8 @@ import log from 'electron-log';
 import { z } from 'zod';
 import { ipcBridge } from '@/common';
 import { getIjfwArchiveService } from '@process/services/memory/ijfwArchiveService';
+import { BrainMemoryService, type MemoryBackend } from '@process/services/memory/brainMemoryService';
+import { BrainMcpClient, readBrainEndpoint } from '@process/services/memory/brainMcpClient';
 import { promoteEntry, undoPromotion } from '@process/services/memory/wikiWriter';
 import { startPromotionSweep } from '@process/services/memory/promotionSweep';
 import { readSourceContext } from '@process/services/memory/sourceReader';
@@ -76,28 +78,60 @@ const readSourceContextSchema = z.object({
 
 let sweepHandle: SweepHandle | null = null;
 
+// ===== Backend selection =====
+
+let backendPromise: Promise<{ backend: MemoryBackend; kind: 'brain' | 'ijfw' }> | null = null;
+
+/**
+ * The brain MCP server is the source of Memory whenever the user has it configured and
+ * enabled; the local `.ijfw` index is only the fallback for a machine with no brain.
+ * `WAYLAND_MEMORY_BACKEND=ijfw` forces the old behaviour.
+ */
+function resolveMemoryBackend(): Promise<{ backend: MemoryBackend; kind: 'brain' | 'ijfw' }> {
+  backendPromise ??= (async () => {
+    if (process.env.WAYLAND_MEMORY_BACKEND !== 'ijfw') {
+      try {
+        const endpoint = await readBrainEndpoint();
+        if (endpoint) {
+          log.info('[memory-archive] using the brain MCP server', { url: endpoint.url });
+          return { backend: new BrainMemoryService(new BrainMcpClient(endpoint)), kind: 'brain' as const };
+        }
+      } catch (err) {
+        log.warn('[memory-archive] brain endpoint lookup failed, falling back to IJFW', { err });
+      }
+    }
+    return { backend: getIjfwArchiveService() as unknown as MemoryBackend, kind: 'ijfw' as const };
+  })();
+  return backendPromise;
+}
+
 /** Exposed for bridge/index.ts to call after initMemoryArchiveBridge(). */
 export function initPromotionSweep(): void {
   if (sweepHandle) return;
-  const svc = getIjfwArchiveService();
-  sweepHandle = startPromotionSweep({ archive: svc });
+  void resolveMemoryBackend().then(({ kind }) => {
+    // The brain promotes memories between tiers itself; the sweep is for local files.
+    if (kind !== 'ijfw' || sweepHandle) return;
+    sweepHandle = startPromotionSweep({ archive: getIjfwArchiveService() });
+  });
 }
 
 // ===== Bridge init =====
 
 export function initMemoryArchiveBridge(): void {
-  const svc = getIjfwArchiveService();
+  const backend = async () => (await resolveMemoryBackend()).backend;
 
   // Kick off the initial index in the background - don't block bridge init.
-  void svc.init().catch((err) => {
-    log.warn('[memory-archive] background init failed', { err });
-  });
+  void backend()
+    .then((svc) => svc.init())
+    .catch((err) => {
+      log.warn('[memory-archive] background init failed', { err });
+    });
 
   // ===== Queries =====
 
   ipcBridge.memory.getStats.provider(async () => {
     try {
-      const stats = await svc.getStats();
+      const stats = await (await backend()).getStats();
       return { ok: true as const, stats };
     } catch (err) {
       log.error('[memory-archive] getStats failed', { err });
@@ -111,7 +145,7 @@ export function initMemoryArchiveBridge(): void {
       return { entries: [], total: 0 };
     }
     try {
-      return await svc.listEntries(parsed.data as ListFilter);
+      return await (await backend()).listEntries(parsed.data as ListFilter);
     } catch (err) {
       log.error('[memory-archive] listEntries failed', { err });
       return { entries: [], total: 0 };
@@ -122,7 +156,7 @@ export function initMemoryArchiveBridge(): void {
     const parsed = idSchema.safeParse(args);
     if (!parsed.success) return null;
     try {
-      return await svc.getEntry(parsed.data.id);
+      return await (await backend()).getEntry(parsed.data.id);
     } catch (err) {
       log.error('[memory-archive] getEntry failed', { err });
       return null;
@@ -131,7 +165,7 @@ export function initMemoryArchiveBridge(): void {
 
   ipcBridge.memory.getProjects.provider(async () => {
     try {
-      return await svc.getProjects();
+      return await (await backend()).getProjects();
     } catch (err) {
       log.error('[memory-archive] getProjects failed', { err });
       return [];
@@ -142,7 +176,7 @@ export function initMemoryArchiveBridge(): void {
     const parsed = tagsQuerySchema.safeParse(args ?? {});
     if (!parsed.success) return [];
     try {
-      return await svc.getTags(parsed.data.project);
+      return await (await backend()).getTags(parsed.data.project);
     } catch (err) {
       log.error('[memory-archive] getTags failed', { err });
       return [];
@@ -165,7 +199,7 @@ export function initMemoryArchiveBridge(): void {
         };
       }
       // Fallback before sweep starts.
-      return await svc.getPromotionCandidates();
+      return await (await backend()).getPromotionCandidates();
     } catch (err) {
       log.error('[memory-archive] getPromotionCandidates failed', { err });
       return { candidates: [], threshold: 90, lastRun: 0, nextRun: 0 };
@@ -178,7 +212,7 @@ export function initMemoryArchiveBridge(): void {
     const parsed = promoteSchema.safeParse(args);
     if (!parsed.success) return { ok: false, error: 'invalid id' };
     try {
-      const entry = await svc.getEntry(parsed.data.id);
+      const entry = await (await backend()).getEntry(parsed.data.id);
       if (!entry) return { ok: false, error: 'entry not found' };
       return await promoteEntry(entry);
     } catch (err) {
@@ -191,7 +225,9 @@ export function initMemoryArchiveBridge(): void {
     const parsed = quickAddSchema.safeParse(args);
     if (!parsed.success) return { ok: false, error: parsed.error.message };
     try {
-      await svc.quickAdd(parsed.data.content, parsed.data.scope, parsed.data.type, parsed.data.projectPath);
+      await (
+        await backend()
+      ).quickAdd(parsed.data.content, parsed.data.scope, parsed.data.type, parsed.data.projectPath);
       return { ok: true };
     } catch (err) {
       log.error('[memory-archive] setQuickAdd failed', { err });
@@ -242,7 +278,7 @@ export function initMemoryArchiveBridge(): void {
       return { ok: false, error: 'no_changes' };
     }
     try {
-      return await svc.editEntry(id, patch);
+      return await (await backend()).editEntry(id, patch);
     } catch (err) {
       log.error('[memory-archive] updateEntry failed', { err });
       return { ok: false, error: (err as Error).message };
@@ -253,7 +289,7 @@ export function initMemoryArchiveBridge(): void {
     const parsed = deleteEntrySchema.safeParse(args);
     if (!parsed.success) return { ok: false, error: 'invalid id' };
     try {
-      return await svc.deleteEntry(parsed.data.id);
+      return await (await backend()).deleteEntry(parsed.data.id);
     } catch (err) {
       log.error('[memory-archive] deleteEntry failed', { err });
       return { ok: false, error: (err as Error).message };
@@ -262,7 +298,7 @@ export function initMemoryArchiveBridge(): void {
 
   ipcBridge.memory.listArchivedEntries.provider(async () => {
     try {
-      return await svc.listArchivedEntries();
+      return await (await backend()).listArchivedEntries();
     } catch (err) {
       log.error('[memory-archive] listArchivedEntries failed', { err });
       return [];
@@ -273,7 +309,7 @@ export function initMemoryArchiveBridge(): void {
     const parsed = restoreArchivedEntrySchema.safeParse(args);
     if (!parsed.success) return { ok: false, error: 'invalid id' };
     try {
-      return await svc.restoreArchivedEntry(parsed.data.archiveId);
+      return await (await backend()).restoreArchivedEntry(parsed.data.archiveId);
     } catch (err) {
       log.error('[memory-archive] restoreArchivedEntry failed', { err });
       return { ok: false, error: (err as Error).message };
@@ -299,7 +335,9 @@ export function initMemoryArchiveBridge(): void {
 
   // ===== Emitters =====
 
-  svc.onIndexChange((stats) => {
-    ipcBridge.memory.onIndexChanged.emit(stats);
-  });
+  void backend().then((svc) =>
+    svc.onIndexChange((stats) => {
+      ipcBridge.memory.onIndexChanged.emit(stats);
+    })
+  );
 }

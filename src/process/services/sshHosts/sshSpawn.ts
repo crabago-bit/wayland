@@ -8,6 +8,9 @@ import { CLAUDE_ACP_NPX_PACKAGE, CODEX_ACP_NPX_PACKAGE } from '@/common/types/ac
 import { findSshHost, type SshHost } from './sshConfig';
 import { shellQuote } from './sshRemoteBrowse';
 
+/** Per-host environment file for remote agents, in the SSH user's home directory. */
+export const AGENT_ENV_FILE = '.wayland-agent.env';
+
 /** A resolved process launch: what to hand to `child_process.spawn`. */
 export type SshSpawn = { command: 'ssh'; args: string[]; env: NodeJS.ProcessEnv };
 
@@ -40,7 +43,10 @@ export function remoteAgentArgv(backend: string, command?: string, args: string[
 export function buildSshSpawn(host: SshHost, cwd: string, argv: string[]): SshSpawn {
   if (!cwd.startsWith('/') || cwd.includes('\0')) throw new Error('Remote workspace must be an absolute path');
   if (argv.length === 0 || argv.some((a) => a.includes('\0'))) throw new Error('Invalid remote command');
-  const script = `cd ${shellQuote(cwd)} && exec ${argv.map(shellQuote).join(' ')}`;
+  // The host's own agent settings (`~/.wayland-agent.env`, e.g. ANTHROPIC_BASE_URL and a key
+  // for a router) are sourced on the host itself, so no secret ever appears in the ssh
+  // command line or in this server's process list.
+  const script = `cd ${shellQuote(cwd)} && if [ -f "$HOME/${AGENT_ENV_FILE}" ]; then set -a; . "$HOME/${AGENT_ENV_FILE}"; set +a; fi && exec ${argv.map(shellQuote).join(' ')}`;
   return {
     command: 'ssh',
     args: [
