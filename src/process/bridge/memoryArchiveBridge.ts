@@ -127,6 +127,8 @@ export function initMemoryArchiveBridge(): void {
       log.warn('[memory-archive] background init failed', { err });
     });
 
+  ipcBridge.memory.getBackend.provider(async () => (await resolveMemoryBackend()).kind);
+
   // ===== Queries =====
 
   ipcBridge.memory.getStats.provider(async () => {

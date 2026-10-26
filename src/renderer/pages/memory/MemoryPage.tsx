@@ -28,13 +28,7 @@ import styles from './MemoryPage.module.css';
 const renderStateBranch = (status: IjfwStatusPayload | null): React.ReactElement => {
   if (!status) {
     return (
-      <div
-        className={styles.center}
-        data-testid='memory-loading'
-        role='status'
-        aria-busy='true'
-        aria-live='polite'
-      >
+      <div className={styles.center} data-testid='memory-loading' role='status' aria-busy='true' aria-live='polite'>
         <p className='text-14px text-t-secondary m-0'>Checking IJFW status…</p>
       </div>
     );
@@ -78,13 +72,9 @@ const isFullPanel = (status: IjfwStatusPayload | null): boolean =>
   status?.status === 'installed_current' ||
   // Mirrors the renderStateBranch default fallback (unknown -> FullPanelShell).
   (status !== null &&
-    ![
-      'not_installed',
-      'installing',
-      'upgrading',
-      'installed_pending_activation',
-      'install_failed',
-    ].includes(status.status));
+    !['not_installed', 'installing', 'upgrading', 'installed_pending_activation', 'install_failed'].includes(
+      status.status
+    ));
 
 const MemoryPage: React.FC = () => {
   const [status, setStatus] = useState<IjfwStatusPayload | null>(null);
@@ -146,16 +136,32 @@ const MemoryPage: React.FC = () => {
     };
   }, []);
 
-  const fullPanel = isFullPanel(status);
+  // With the brain MCP server as the store there is no IJFW install to wait for: the page
+  // is ready as soon as the backend is known, whatever the IJFW lifecycle says.
+  const [backend, setBackend] = useState<'brain' | 'ijfw' | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    ipcBridge.memory.getBackend
+      .invoke()
+      .then((kind) => !cancelled && setBackend(kind === 'brain' ? 'brain' : 'ijfw'))
+      .catch(() => !cancelled && setBackend('ijfw'));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const shownStatus: IjfwStatusPayload | null =
+    backend === 'brain' ? { status: 'installed_current' } : backend === null ? null : status;
+
+  const fullPanel = isFullPanel(shownStatus);
 
   return (
     <div
       className={fullPanel ? styles.pageFullBleed : styles.page}
       data-testid='memory-page'
       role='region'
-      aria-label='IJFW Memory'
+      aria-label='Memory'
     >
-      {renderStateBranch(status)}
+      {renderStateBranch(shownStatus)}
     </div>
   );
 };

@@ -3450,6 +3450,8 @@ export const memory = {
     { ok: true; before: string; anchor: string; after: string; totalLines: number } | { ok: false; error: string },
     { path: string; line: number; contextLines?: number }
   >('memory.read-source-context'),
+  /** Which store the Memory page reads: the user's brain MCP server, or the local IJFW files. */
+  getBackend: buildProvider<'brain' | 'ijfw', void>('memory.get-backend'),
   /** Fired when the file watcher triggers a re-index. */
   onIndexChanged: buildEmitter<IndexStats>('memory.index-changed'),
   /** Import verbs - stubs until W1a wires the actual importers. */
