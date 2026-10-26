@@ -580,6 +580,8 @@ export type TChatConversation =
         'acp',
         {
           workspace?: string;
+          /** `~/.ssh/config` alias the agent runs on; `workspace` is then a path on that host. */
+          sshHost?: string;
           backend: AcpBackend;
           cliPath?: string;
           customWorkspace?: boolean;

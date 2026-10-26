@@ -9,12 +9,14 @@
 import { bridge } from '@office-ai/platform';
 import React, { useCallback, useEffect, useState } from 'react';
 import { SHOW_OPEN_REQUEST_EVENT } from '@/common/adapter/constant';
+import { ALLOW_REMOTE_PROPERTY } from '@/common/utils/sshWorkspace';
 import DirectorySelectionModal from '@renderer/components/settings/DirectorySelectionModal';
 
 interface DirectorySelectionRequest {
   id: string;
   isFileMode?: boolean;
   properties?: string[];
+  data?: { properties?: string[] };
 }
 
 export const useDirectorySelection = () => {
@@ -76,6 +78,7 @@ export const useDirectorySelection = () => {
     <DirectorySelectionModal
       visible={visible}
       isFileMode={requestData?.isFileMode}
+      allowRemote={(requestData?.properties ?? requestData?.data?.properties)?.includes(ALLOW_REMOTE_PROPERTY) === true}
       onConfirm={handleConfirm}
       onCancel={handleCancel}
     />

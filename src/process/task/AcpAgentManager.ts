@@ -128,6 +128,8 @@ import { createMcpSessionDigestKey } from '@process/services/mcpServices/mcpSess
 
 interface AcpAgentManagerData {
   workspace?: string;
+  /** `~/.ssh/config` alias the agent runs on; `workspace` is then a path on that host. */
+  sshHost?: string;
   backend: AcpBackend;
   cliPath?: string;
   /**
@@ -2128,6 +2130,7 @@ ${collectedResponses.join('\n')}`;
         customEnv: customEnv,
         extra: {
           workspace: data.workspace,
+          sshHost: data.sshHost,
           backend: data.backend,
           cliPath: cliPath,
           launch: launch,

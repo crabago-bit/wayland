@@ -11,6 +11,8 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { fileOperationLimiter } from './middleware/security';
+import { findSshHost, loadSshHosts } from '../services/sshHosts/sshConfig';
+import { browseRemoteDirectory } from '../services/sshHosts/sshRemoteBrowse';
 
 // Allow browsing within the running workspace, current user's home directory,
 // the filesystem root (/) on Unix-like systems, and all drive letters on Windows
@@ -183,6 +185,22 @@ function getWindowsDrives(): Array<{ name: string; path: string; isDirectory: bo
  */
 // Rate limit directory browsing to mitigate brute-force scanning
 router.get('/browse', fileOperationLimiter, (req, res) => {
+  // Remote listing: only an alias that exists in the server's ssh config is
+  // accepted, so the query can never pick an arbitrary host or inject ssh options.
+  const hostAlias = typeof req.query.host === 'string' ? req.query.host : '';
+  if (hostAlias) {
+    const host = findSshHost(hostAlias);
+    if (!host) return res.status(400).json({ error: 'Unknown SSH host' });
+    const remotePath = typeof req.query.path === 'string' ? req.query.path : '';
+    browseRemoteDirectory(host, remotePath, req.query.showFiles === 'true')
+      .then((listing) => res.json(listing))
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Failed to read remote directory';
+        res.status(502).json({ error: `${host.alias}: ${message}` });
+      });
+    return;
+  }
+
   try {
     const queryPath = req.query.path as string;
 
@@ -294,6 +312,15 @@ router.get('/browse', fileOperationLimiter, (req, res) => {
     console.error('Directory browse error:', error);
     res.status(500).json({ error: 'Failed to read directory' });
   }
+});
+
+/**
+ * SSH hosts the server can browse, read from its own ~/.ssh/config.
+ * Names and non-secret connection hints only; keys never leave the server.
+ */
+router.get('/ssh-hosts', fileOperationLimiter, (_req, res) => {
+  const hosts = loadSshHosts().map(({ alias, hostName, user, port }) => ({ alias, hostName, user, port }));
+  res.json({ hosts });
 });
 
 /**

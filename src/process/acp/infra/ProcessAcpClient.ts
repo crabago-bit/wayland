@@ -146,6 +146,13 @@ export type ProcessAcpClientOptions = {
   platform?: NodeJS.Platform;
   /** Override {@link TRANSPORT_SILENCE_MS}. Tests only; production uses the default. */
   transportSilenceMs?: number;
+  /**
+   * The agent runs on another machine over SSH. Wayland's fs handlers read this
+   * server's disk, so a remote agent must never be offered them (it uses its own file
+   * tools there); session params that name paths or stdio servers on THIS machine
+   * are dropped too, since neither exists on the remote.
+   */
+  remote?: boolean;
 };
 
 export class ProcessAcpClient implements AcpClient {
@@ -228,8 +235,14 @@ export class ProcessAcpClient implements AcpClient {
       (_agent): Client => ({
         sessionUpdate: async (params) => this.options.handlers.onSessionUpdate(params),
         requestPermission: async (params) => this.options.handlers.onRequestPermission(params),
-        readTextFile: async (params) => this.options.handlers.onReadTextFile(params),
-        writeTextFile: async (params) => this.options.handlers.onWriteTextFile(params),
+        readTextFile: async (params) => {
+          if (this.options.remote) throw RequestError.methodNotFound('fs/read_text_file');
+          return this.options.handlers.onReadTextFile(params);
+        },
+        writeTextFile: async (params) => {
+          if (this.options.remote) throw RequestError.methodNotFound('fs/write_text_file');
+          return this.options.handlers.onWriteTextFile(params);
+        },
         // Vendor extensions. The SDK does NOT schema-validate these; without
         // this arm it answers methodNotFound and logs on every frame.
         extNotification: async (method, params) => this.options.handlers.onExtNotification?.(method, params),
@@ -260,7 +273,7 @@ export class ProcessAcpClient implements AcpClient {
             clientInfo: { name: 'Wayland', version: '2.0.0' },
             protocolVersion: PROTOCOL_VERSION,
             clientCapabilities: {
-              fs: { readTextFile: true, writeTextFile: true },
+              fs: { readTextFile: !this.options.remote, writeTextFile: !this.options.remote },
             },
           })
         ),
@@ -281,11 +294,17 @@ export class ProcessAcpClient implements AcpClient {
     return this.runConnectionRequest(() =>
       this.conn.newSession({
         cwd: params.cwd,
-        mcpServers: params.mcpServers ?? [],
-        additionalDirectories: params.additionalDirectories,
+        mcpServers: this.sessionMcpServers(params.mcpServers),
+        additionalDirectories: this.options.remote ? undefined : params.additionalDirectories,
         _meta: projectSessionMetadata(params.metadata),
       })
     );
+  }
+
+  /** MCP servers to hand the agent: a remote agent only gets URL-based ones. */
+  private sessionMcpServers<T extends object>(servers: T[] | undefined): T[] {
+    const all = servers ?? [];
+    return this.options.remote ? all.filter((server) => !('command' in server)) : all;
   }
 
   async loadSession(params: LoadSessionParams): Promise<LoadSessionResponse> {
@@ -293,8 +312,8 @@ export class ProcessAcpClient implements AcpClient {
       this.conn.loadSession({
         sessionId: params.sessionId,
         cwd: params.cwd,
-        mcpServers: params.mcpServers ?? [],
-        additionalDirectories: params.additionalDirectories,
+        mcpServers: this.sessionMcpServers(params.mcpServers),
+        additionalDirectories: this.options.remote ? undefined : params.additionalDirectories,
         _meta: projectSessionMetadata(params.metadata),
       })
     );
@@ -318,7 +337,7 @@ export class ProcessAcpClient implements AcpClient {
     return this.runConnectionRequest(() =>
       this.conn.extMethod('session/new', {
         cwd: params.cwd,
-        mcpServers: params.mcpServers ?? [],
+        mcpServers: this.sessionMcpServers(params.mcpServers),
         _meta: withClaudeCodeOptions(params.meta, { resume: params.sessionId }),
         forkSession: true,
       })

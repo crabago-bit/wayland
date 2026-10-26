@@ -9,6 +9,7 @@
 import type { TChatConversation } from '@/common/config/storage';
 import { Message } from '@arco-design/web-react';
 import React from 'react';
+import { formatSshWorkspace } from '@/common/utils/sshWorkspace';
 import ChatWorkspace from '../Workspace';
 
 const ChatSider: React.FC<{
@@ -31,7 +32,11 @@ const ChatSider: React.FC<{
     workspaceNode = (
       <ChatWorkspace
         conversation_id={conversation.id}
-        workspace={conversation.extra.workspace}
+        workspace={
+          conversation.extra.sshHost
+            ? formatSshWorkspace(conversation.extra.sshHost, conversation.extra.workspace)
+            : conversation.extra.workspace
+        }
         eventPrefix='acp'
         messageApi={messageApi}
         teamId={teamId}

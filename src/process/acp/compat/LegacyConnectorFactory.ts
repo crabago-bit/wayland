@@ -28,7 +28,8 @@ import {
 } from '@process/agent/acp/acpConnectors';
 import { AcpError } from '@process/acp/errors/AcpError';
 import { isAcpLaunchSpec } from '@/common/types/acpTypes';
-import type { ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { buildRemoteAgentSpawn } from '@process/services/sshHosts/sshSpawn';
 
 type BuiltinConnectFn = (cwd: string, hooks: NpxConnectHooks, customEnv?: Record<string, string>) => Promise<void>;
 
@@ -45,6 +46,7 @@ export class LegacyConnectorFactory implements ClientFactory {
       backend: config.agentBackend,
       conversationId: config.agentId,
       handlers,
+      remote: Boolean(config.sshHost),
     });
   }
 }
@@ -54,7 +56,26 @@ export class LegacyConnectorFactory implements ClientFactory {
  * ProcessAcpClient manages stderr capture, lifecycle, and transport internally,
  * so we only need to produce the ChildProcess.
  */
+/**
+ * Start the agent on an SSH host. The local environment (`config.env`, which
+ * carries router keys) is deliberately not forwarded: the remote agent runs on
+ * its own login. A local mkdir of the workspace is skipped for the same reason.
+ */
+function spawnRemoteChild(config: AgentConfig): ChildProcess {
+  let launch;
+  try {
+    launch = buildRemoteAgentSpawn(config.sshHost ?? '', config.agentBackend, config.cwd, config.command, config.args);
+  } catch (err) {
+    throw new AcpError('CONNECTION_FAILED', (err as Error).message, { cause: err, retryable: false });
+  }
+  const detached = process.platform !== 'win32';
+  const child = spawn(launch.command, launch.args, { stdio: ['pipe', 'pipe', 'pipe'], env: launch.env, detached });
+  if (detached) child.unref();
+  return child;
+}
+
 async function spawnLegacyChild(config: AgentConfig): Promise<ChildProcess> {
+  if (config.sshHost) return spawnRemoteChild(config);
   const backend = config.agentBackend;
   const cwd = config.cwd;
 

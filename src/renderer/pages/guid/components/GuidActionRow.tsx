@@ -6,6 +6,7 @@
  * Modified by Ferrox Labs in 2026. Changes are documented in the project history.
  */
 
+import { ALLOW_REMOTE_PROPERTY } from '@/common/utils/sshWorkspace';
 import { ArrowUp, Brain, Folder, FolderOpen, FolderPlus, PenLine, Shield } from 'lucide-react';
 import { ipcBridge } from '@/common';
 import ComposerAddMenu, {
@@ -175,7 +176,9 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
   );
   const browseServerFolder = useCallback(() => {
     ipcBridge.dialog.showOpen
-      .invoke({ properties: ['openDirectory', 'createDirectory'] })
+      // 'allowRemote' is Wayland's own marker (not an Electron property): this caller can
+      // start the agent on an SSH host, so the picker may offer one.
+      .invoke({ properties: ['openDirectory', 'createDirectory', ALLOW_REMOTE_PROPERTY] as never })
       .then((dirs) => {
         if (dirs && dirs[0]) {
           selectWorkspaceAndRemember(dirs[0]);
@@ -301,7 +304,13 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
                     </span>
                   </Menu.Item>
                 ))}
-                {recentWorkspaces.length > 0 && <Menu.Item key='__divider' disabled style={{ height: 1, padding: 0, margin: '4px 0', background: 'var(--color-border-2)' }} />}
+                {recentWorkspaces.length > 0 && (
+                  <Menu.Item
+                    key='__divider'
+                    disabled
+                    style={{ height: 1, padding: 0, margin: '4px 0', background: 'var(--color-border-2)' }}
+                  />
+                )}
                 <Menu.Item key='__browse'>
                   <span className='flex items-center gap-8px'>
                     <FolderPlus size={14} style={{ flexShrink: 0 }} />

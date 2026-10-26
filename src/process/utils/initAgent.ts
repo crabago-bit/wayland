@@ -20,6 +20,7 @@ export { hasNativeSkillSupport };
 import { existsSync, type Stats } from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
+import { findSshHost } from '@process/services/sshHosts/sshConfig';
 import { getSkillsDir, getBuiltinSkillsCopyDir, getAutoSkillsDir, getSystemDir, ProcessConfig } from './initStorage';
 import { computeOpenClawIdentityHash } from './openclawUtils';
 import { writeWorkspaceGitignore } from './workspaceGitignore';
@@ -491,34 +492,48 @@ export const createGeminiAgent = async (
 
 export const createAcpAgent = async (options: ICreateConversationParams): Promise<TChatConversation> => {
   const { extra } = options;
-  const { workspace, customWorkspace } = await buildWorkspaceWidthFiles(
-    `${extra.backend}-temp-${Date.now()}`,
-    extra.workspace,
-    extra.defaultFiles,
-    extra.customWorkspace
-  );
+  const sshHost = extra.sshHost || undefined;
+  if (sshHost) {
+    // The workspace lives on another machine: nothing under it may be created,
+    // resolved or populated from this one. Only an alias from the server's own
+    // ssh config is accepted, and the path must be absolute.
+    if (!findSshHost(sshHost)) throw new Error(`Unknown SSH host "${sshHost}"`);
+    if (!extra.workspace || !extra.workspace.startsWith('/') || extra.workspace.includes('\0')) {
+      throw new Error('A remote chat needs an absolute workspace path on the host');
+    }
+  }
+  const { workspace, customWorkspace } = sshHost
+    ? { workspace: extra.workspace as string, customWorkspace: true }
+    : await buildWorkspaceWidthFiles(
+        `${extra.backend}-temp-${Date.now()}`,
+        extra.workspace,
+        extra.defaultFiles,
+        extra.customWorkspace
+      );
 
   // Set up skill symlinks for temp + project workspaces (native discovery).
   // An app-created durable task folder (a scheduled routine's workspace) is
   // set up too - see `setupWorkspaceSkills` for why that is a separate signal.
-  await setupWorkspaceSkills(
-    workspace,
-    customWorkspace,
-    !!extra.projectId,
-    {
-      backend: extra.backend,
-      enabledSkills: extra.enabledSkills,
-      extraSkillPaths: extra.extraSkillPaths,
-      excludeBuiltinSkills: extra.excludeBuiltinSkills,
-    },
-    extra.appCreatedWorkspace === true
-  );
+  if (!sshHost)
+    await setupWorkspaceSkills(
+      workspace,
+      customWorkspace,
+      !!extra.projectId,
+      {
+        backend: extra.backend,
+        enabledSkills: extra.enabledSkills,
+        extraSkillPaths: extra.extraSkillPaths,
+        excludeBuiltinSkills: extra.excludeBuiltinSkills,
+      },
+      extra.appCreatedWorkspace === true
+    );
 
   return {
     type: 'acp',
     desc: customWorkspace ? workspace : '',
     extra: {
       workspace: workspace,
+      ...(sshHost ? { sshHost } : {}),
       customWorkspace,
       backend: extra.backend as AcpBackend,
       cliPath: extra.cliPath,

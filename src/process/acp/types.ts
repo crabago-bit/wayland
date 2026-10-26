@@ -46,6 +46,13 @@ export type AgentConfig = {
     gracePeriodMs?: number; // Phase 1 wait time for three-phase shutdown, default 100ms
   };
 
+  /**
+   * Alias of an `~/.ssh/config` host to run the agent on. `cwd` is then a path on
+   * that host. Validated against the server's own ssh config at spawn; never
+   * trusted as given.
+   */
+  sshHost?: string;
+
   // Session configuration
   cwd: string;
   /**

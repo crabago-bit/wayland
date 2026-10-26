@@ -6,6 +6,16 @@
  * Modified by Ferrox Labs in 2026. Changes are documented in the project history.
  */
 
+import {
+  buildRemoteTree,
+  isRemotePath,
+  remoteList,
+  remoteReadBinary,
+  remoteReadFile,
+  remoteStat,
+  remoteWriteFile,
+  resolveRemoteRef,
+} from '@process/services/sshHosts/sshRemoteFs';
 import { WAYLAND_TIMESTAMP_SEPARATOR } from '@/common/config/constants';
 import fs from 'fs/promises';
 import type { Dirent } from 'fs';
@@ -526,6 +536,17 @@ export function initFsBridge(): void {
   };
 
   ipcBridge.fs.getFilesByDir.provider(async ({ dir }) => {
+    if (isRemotePath(dir)) {
+      const ref = resolveRemoteRef(dir);
+      if (!ref) return [];
+      try {
+        const { entries } = await remoteList(ref, 3);
+        return [buildRemoteTree(ref, entries)];
+      } catch (error) {
+        console.error('[fsBridge] Failed to read remote directory:', dir, error);
+        return [];
+      }
+    }
     try {
       // Confine to authorized roots (SEC-IPC-02): block arbitrary directory
       // listing (e.g. ~/.ssh, /etc) from a compromised renderer or an
@@ -541,6 +562,19 @@ export function initFsBridge(): void {
   });
 
   ipcBridge.fs.listWorkspaceFiles.provider(async ({ root }) => {
+    if (isRemotePath(root)) {
+      const ref = resolveRemoteRef(root);
+      if (!ref) return [];
+      try {
+        const { entries } = await remoteList(ref, 6);
+        return entries
+          .filter((e) => e.isFile)
+          .map(({ name, fullPath, relativePath }) => ({ name, fullPath, relativePath }));
+      } catch (error) {
+        console.error('[fsBridge] Failed to list remote workspace files:', root, error);
+        return [];
+      }
+    }
     try {
       // Confine to authorized roots (SEC-IPC-02): block recursive enumeration
       // of arbitrary directories from a compromised renderer or remote WebUI.
@@ -581,6 +615,11 @@ export function initFsBridge(): void {
       if (!mime) {
         console.warn('[fsBridge] getImageBase64 rejected non-allowlisted extension:', ext || '(none)');
         return PLACEHOLDER;
+      }
+      if (isRemotePath(filePath)) {
+        const ref = resolveRemoteRef(filePath);
+        const bytes = ref ? await remoteReadBinary(ref) : null;
+        return bytes ? `data:${mime};base64,${bytes.toString('base64')}` : PLACEHOLDER;
       }
       // Confine to authorized roots (SEC-IPC-02): block arbitrary file reads.
       const safePath = await confinePath(filePath);
@@ -817,6 +856,16 @@ export function initFsBridge(): void {
   const MAX_READ_FILE_BUFFER_SIZE = 64 * 1024 * 1024; // 64 MB
 
   ipcBridge.fs.readFile.provider(async ({ path: filePath }) => {
+    if (isRemotePath(filePath)) {
+      const ref = resolveRemoteRef(filePath);
+      if (!ref) return null;
+      try {
+        return (await remoteReadFile(ref))?.toString('utf8') ?? null;
+      } catch (error) {
+        console.error('[fsBridge] Failed to read remote file:', filePath, error);
+        return null;
+      }
+    }
     try {
       // Confine to authorized roots: reject arbitrary absolute reads
       // (e.g. ~/.ssh/id_rsa, the app's .env) from a compromised renderer or
@@ -843,6 +892,17 @@ export function initFsBridge(): void {
 
   // Read binary file as ArrayBuffer
   ipcBridge.fs.readFileBuffer.provider(async ({ path: filePath }) => {
+    if (isRemotePath(filePath)) {
+      const ref = resolveRemoteRef(filePath);
+      if (!ref) return null;
+      try {
+        const bytes = await remoteReadBinary(ref);
+        return bytes ? (bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer) : null;
+      } catch (error) {
+        console.error('[fsBridge] Failed to read remote file buffer:', filePath, error);
+        return null;
+      }
+    }
     try {
       // Confine to authorized roots (SEC-IPC-02): block arbitrary binary reads.
       const safePath = await confinePath(filePath);
@@ -868,6 +928,17 @@ export function initFsBridge(): void {
 
   // Write file
   ipcBridge.fs.writeFile.provider(async ({ path: filePath, data }) => {
+    if (isRemotePath(filePath)) {
+      const ref = resolveRemoteRef(filePath);
+      if (!ref) return false;
+      try {
+        await remoteWriteFile(ref, data);
+        return true;
+      } catch (error) {
+        console.error('[fsBridge] Failed to write remote file:', filePath, error);
+        return false;
+      }
+    }
     try {
       // Confine to authorized roots (SEC-IPC-01): block arbitrary writes
       // (e.g. overwriting ~/.zshrc or planting a startup item) from a
@@ -1112,6 +1183,23 @@ export function initFsBridge(): void {
       type: '',
       lastModified: 0,
     };
+    if (isRemotePath(filePath)) {
+      const ref = resolveRemoteRef(filePath);
+      try {
+        const stat = ref ? await remoteStat(ref) : null;
+        if (!stat) return emptyMetadata;
+        return {
+          name: path.posix.basename(filePath),
+          path: filePath,
+          size: stat.size,
+          type: '',
+          lastModified: stat.lastModified,
+          isDirectory: stat.isDirectory,
+        };
+      } catch {
+        return emptyMetadata;
+      }
+    }
     try {
       // Confine to authorized roots (SEC-IPC-02): block stat probes of
       // arbitrary paths from a compromised renderer or remote WebUI client.

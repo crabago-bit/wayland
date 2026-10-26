@@ -10,6 +10,7 @@ import { ipcBridge } from '@/common';
 import type { TProviderWithModel } from '@/common/config/storage';
 import type { TChatConversation } from '@/common/config/storage';
 import { buildAgentConversationParams } from '@/common/utils/buildAgentConversationParams';
+import { parseSshWorkspace } from '@/common/utils/sshWorkspace';
 import { emitter } from '@/renderer/utils/emitter';
 import { buildDisplayMessage } from '@/renderer/utils/file/messageFiles';
 import { resolveImageVisionBlock } from '@/renderer/utils/model/imageVisionGate';
@@ -171,7 +172,11 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     // project's managed folder. An auto-filled project dir (dir === project
     // workspace) is not custom, so it never disables the project self-heal guards.
     const isCustomWorkspace = !!dir && dir !== projectWorkspace;
-    const finalWorkspace = dir || '';
+    // A folder chosen on an SSH host arrives as `ssh://host/path`: the agent runs
+    // there, so the workspace is the remote path and the host rides in `extra`.
+    const remoteWorkspace = parseSshWorkspace(dir);
+    const finalWorkspace = remoteWorkspace ? remoteWorkspace.path : dir || '';
+    const sshExtra = remoteWorkspace ? { sshHost: remoteWorkspace.host } : {};
     // Stamped into every create path's extra when the composer runs inside a
     // project. Omitted from extra when undefined so it never pollutes a normal chat.
     const projectExtra = projectId ? { projectId } : {};
@@ -234,6 +239,17 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
         Message.warning(t(imageBlock.reasonKey, imageBlock.reasonParams));
         return false;
       }
+    }
+
+    const remoteBackend = isPreset ? finalEffectiveAgentType : selectedAgent;
+    if (remoteWorkspace && remoteBackend !== 'claude' && remoteBackend !== 'codex') {
+      Message.warning(
+        t('conversation.welcome.remoteAgentUnsupported', {
+          defaultValue:
+            'Only the Claude and Codex agents can run on an SSH host. Pick one of them, or choose a local folder.',
+        })
+      );
+      return false;
     }
 
     // Gemini path
@@ -422,6 +438,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
           defaultFiles: files,
           ...projectExtra,
           ...sessionSkillsExtra,
+          ...sshExtra,
           excludeBuiltinSkills,
         },
       });

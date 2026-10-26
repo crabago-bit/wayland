@@ -1920,6 +1920,8 @@ export interface ICreateConversationParams {
   model: TProviderWithModel;
   extra: {
     workspace?: string;
+    /** `~/.ssh/config` alias the agent runs on; `workspace` is then a path on that host (ACP backends). */
+    sshHost?: string;
     customWorkspace?: boolean;
     defaultFiles?: string[];
     backend?: AgentBackend;

@@ -73,6 +73,8 @@ export type OldAcpAgentConfig = {
     enabledSkills?: string[];
     /** Builtin auto-injected skills to exclude (with enabledSkills above). */
     excludeBuiltinSkills?: string[];
+    /** `~/.ssh/config` alias the agent runs on; `workingDir` is then a path on that host. */
+    sshHost?: string;
   };
   onStreamEvent: (data: unknown) => void;
   onSignalEvent?: (data: unknown) => void;
@@ -134,6 +136,7 @@ export function toAgentConfig(old: OldAcpAgentConfig): AgentConfig {
     args: old.extra?.customArgs ?? old.customArgs,
     env: old.extra?.customEnv ?? old.customEnv,
     cwd: old.workingDir,
+    sshHost: old.extra?.sshHost || undefined,
     sessionMetadata: old.extra?.sessionMetadata,
     activeMcpServers: old.extra?.activeMcpServers,
 

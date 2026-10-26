@@ -6,6 +6,7 @@
  * Modified by Ferrox Labs in 2026. Changes are documented in the project history.
  */
 
+import { buildRemoteTree, isRemotePath, remoteList, resolveRemoteRef } from '@process/services/sshHosts/sshRemoteFs';
 import { GeminiAgent, GeminiApprovalStore } from '@process/agent/gemini';
 import type { TChatConversation } from '@/common/config/storage';
 import type { IAgentManager } from '@process/task/IAgentManager';
@@ -495,6 +496,20 @@ export function initConversationBridge(
   })();
 
   ipcBridge.conversation.getWorkspace.provider(async ({ workspace, search, path: requestedPath }) => {
+    if (isRemotePath(workspace) || isRemotePath(requestedPath)) {
+      // A workspace on an SSH host: list it over ssh rather than reading this disk.
+      const ref = resolveRemoteRef(requestedPath || workspace);
+      if (!ref) return [];
+      try {
+        const { entries } = await remoteList(ref, search ? 6 : 3);
+        const needle = search?.trim().toLowerCase();
+        const shown = needle ? entries.filter((e) => e.name.toLowerCase().includes(needle)) : entries;
+        return [buildRemoteTree(ref, shown)];
+      } catch (error) {
+        console.error('[conversationBridge] remote getWorkspace error:', error);
+        return [];
+      }
+    }
     try {
       const fileService = GeminiAgent.buildFileServer(workspace);
       return await readDirectoryRecursive(requestedPath, {

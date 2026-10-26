@@ -7,9 +7,10 @@
  */
 
 import { ChevronUp, FileText, FolderOpen } from 'lucide-react';
-import { Button, Modal, Spin } from '@arco-design/web-react';
+import { Button, Modal, Select, Spin } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { formatSshWorkspace } from '@/common/utils/sshWorkspace';
 
 interface DirectoryItem {
   name: string;
@@ -24,9 +25,20 @@ interface DirectoryData {
   parentPath?: string;
 }
 
+interface SshHostOption {
+  alias: string;
+  hostName?: string;
+  user?: string;
+}
+
+/** The empty host means "this server". */
+const LOCAL_HOST = '';
+
 interface DirectorySelectionModalProps {
   visible: boolean;
   isFileMode?: boolean;
+  /** Offer SSH hosts and let the caller choose a folder on one (returned as `ssh://host/path`). */
+  allowRemote?: boolean;
   onConfirm: (paths: string[] | undefined) => void;
   onCancel: () => void;
 }
@@ -34,6 +46,7 @@ interface DirectorySelectionModalProps {
 const DirectorySelectionModal: React.FC<DirectorySelectionModalProps> = ({
   visible,
   isFileMode = false,
+  allowRemote = false,
   onConfirm,
   onCancel,
 }) => {
@@ -43,15 +56,22 @@ const DirectorySelectionModal: React.FC<DirectorySelectionModalProps> = ({
   const [selectedPath, setSelectedPath] = useState<string>('');
   const [currentPath, setCurrentPath] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const [sshHosts, setSshHosts] = useState<SshHostOption[]>([]);
+  const [host, setHost] = useState<string>(LOCAL_HOST);
+  const remote = host !== LOCAL_HOST;
+  // A remote path only means something to a caller that can start an agent on that
+  // host; every other picker keeps seeing this server's folders only.
+  const remoteSelectable = allowRemote && !isFileMode;
 
   const loadDirectory = useCallback(
-    async (dirPath = '') => {
+    async (dirPath = '', hostAlias = host) => {
       setLoading(true);
       setError(null);
       try {
         const showFiles = isFileMode ? 'true' : 'false';
         const response = await fetch(
-          `/api/directory/browse?path=${encodeURIComponent(dirPath)}&showFiles=${showFiles}`,
+          `/api/directory/browse?path=${encodeURIComponent(dirPath)}&showFiles=${showFiles}` +
+            (hostAlias ? `&host=${encodeURIComponent(hostAlias)}` : ''),
           {
             method: 'GET',
             credentials: 'include',
@@ -76,15 +96,31 @@ const DirectorySelectionModal: React.FC<DirectorySelectionModalProps> = ({
         setLoading(false);
       }
     },
-    [isFileMode]
+    [isFileMode, host]
   );
 
   useEffect(() => {
     if (visible) {
       setSelectedPath('');
-      loadDirectory('').catch((error) => console.error('Failed to load initial directory:', error));
+      setHost(LOCAL_HOST);
+      loadDirectory('', LOCAL_HOST).catch((error) => console.error('Failed to load initial directory:', error));
+      if (!allowRemote) setSshHosts([]);
+      else
+        fetch('/api/directory/ssh-hosts', { credentials: 'include' })
+          .then((r): Promise<{ hosts?: SshHostOption[] }> => (r.ok ? r.json() : Promise.resolve({ hosts: [] })))
+          .then((data) => setSshHosts(Array.isArray(data.hosts) ? data.hosts : []))
+          .catch(() => setSshHosts([]));
     }
-  }, [visible, loadDirectory]);
+    // loadDirectory changes with `host`; re-running here on a host switch would reset it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, allowRemote]);
+
+  const handleHostChange = (next: string) => {
+    setHost(next);
+    setSelectedPath('');
+    setDirectoryData({ items: [], canGoUp: false });
+    loadDirectory('', next).catch((error) => console.error('Failed to load host directory:', error));
+  };
 
   const handleItemClick = (item: DirectoryItem) => {
     if (item.isDirectory) {
@@ -111,11 +147,12 @@ const DirectorySelectionModal: React.FC<DirectorySelectionModalProps> = ({
 
   const handleConfirm = () => {
     if (selectedPath) {
-      onConfirm([selectedPath]);
+      onConfirm([remote ? formatSshWorkspace(host, selectedPath) : selectedPath]);
     }
   };
 
   const canSelect = (item: DirectoryItem) => {
+    if (remote && !remoteSelectable) return false;
     return isFileMode ? item.isFile : item.isDirectory;
   };
 
@@ -151,6 +188,28 @@ const DirectorySelectionModal: React.FC<DirectorySelectionModalProps> = ({
         </div>
       }
     >
+      {allowRemote && sshHosts.length > 0 && (
+        <div className='mb-10px'>
+          <Select value={host} onChange={handleHostChange} style={{ width: '100%' }}>
+            <Select.Option value={LOCAL_HOST}>
+              {t('fileSelection.thisServer', { defaultValue: 'This server' })}
+            </Select.Option>
+            {sshHosts.map((h) => (
+              <Select.Option key={h.alias} value={h.alias}>
+                {h.alias}
+                {h.user && h.hostName ? ` (${h.user}@${h.hostName})` : ''}
+              </Select.Option>
+            ))}
+          </Select>
+          {remote && (
+            <div className='mt-6px text-12px text-t-tertiary'>
+              {t('fileSelection.remoteBrowseOnly', {
+                defaultValue: 'The chat will run its agent on this machine over SSH, in the folder you choose.',
+              })}
+            </div>
+          )}
+        </div>
+      )}
       <Spin loading={loading} className='w-full'>
         <div className='w-full border border-b-base rd-4px overflow-hidden' style={{ height: 'min(400px, 60vh)' }}>
           <div className='h-full overflow-y-auto'>
