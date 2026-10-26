@@ -124,7 +124,14 @@ function statusTone(status: IjfwLifecycleStatus | null): 'ok' | 'warn' | 'checki
 // Component
 // ---------------------------------------------------------------------------
 
-const FullPanelShell: React.FC = () => {
+/** What each topbar chip counts when the brain MCP server is the store. */
+const BRAIN_CHIP_DESCRIPTIONS = {
+  memories: 'Everything stored in your brain, across all workspaces.',
+  decisions: 'Semantic tier: knowledge the brain has distilled and consolidated from your notes.',
+  wiki: 'Long-term knowledge: the semantic and procedural tiers (distilled facts and rules). Overlaps Decisions.',
+} as const;
+
+const FullPanelShell: React.FC<{ backend?: 'brain' | 'ijfw' }> = ({ backend }) => {
   const { t } = useTranslation('memory');
   // Root-namespace t for the one string reused from #591 (memory.settings.*),
   // so the strip adds no new i18n keys.
@@ -523,7 +530,13 @@ const FullPanelShell: React.FC = () => {
           </span>
 
           {/* Type chips (no-deferment #1) */}
-          <TopbarChips typeCounts={typeCounts} activeType={activeChipType} onFilterChange={handleChipFilter} />
+          <TopbarChips
+            typeCounts={typeCounts}
+            activeType={activeChipType}
+            onFilterChange={handleChipFilter}
+            total={backend === 'brain' ? stats?.total : undefined}
+            descriptions={backend === 'brain' ? BRAIN_CHIP_DESCRIPTIONS : undefined}
+          />
 
           {/* Streak pill (no-deferment #2) */}
           {stats?.streak && <StreakPill sessions={stats.streak.sessions} longestDays={stats.streak.longestDays} />}

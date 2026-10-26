@@ -48,6 +48,13 @@ export type TopbarChipsProps = {
   /** Active type filter - matches chip type or null for "all". */
   activeType: MemoryType | null;
   onFilterChange: (type: MemoryType | null) => void;
+  /**
+   * The true total when the type counts overlap (the brain's Wiki tile repeats its
+   * Decisions). Without it the Memories chip sums the type counts, as before.
+   */
+  total?: number;
+  /** One-line explanation per chip, shown in the hover popover. */
+  descriptions?: Partial<Record<'memories' | 'decisions' | 'wiki', string>>;
 };
 
 type ChipDef = {
@@ -82,10 +89,12 @@ const TopbarChips: React.FC<TopbarChipsProps> = ({
   weekDeltas = {},
   activeType,
   onFilterChange,
+  total,
+  descriptions,
 }) => {
   const { t } = useTranslation('memory');
 
-  const totalCount = Object.values(typeCounts).reduce((a, b) => a + b, 0);
+  const totalCount = total ?? Object.values(typeCounts).reduce((a, b) => a + b, 0);
 
   // Pre-compute stable sparkline heights per chip key (deterministic, not random).
   const sparkHeights = useMemo<Record<string, number[]>>(
@@ -94,7 +103,7 @@ const TopbarChips: React.FC<TopbarChipsProps> = ({
       decisions: stableSparkHeights('decisions'),
       wiki: stableSparkHeights('wiki'),
     }),
-    [],
+    []
   );
 
   const chips: ChipEntry[] = [
@@ -133,8 +142,18 @@ const TopbarChips: React.FC<TopbarChipsProps> = ({
         const popoverContent = (
           <div className={styles.popoverContent} data-testid={`chip-popover-${chip.key}`}>
             <div className={styles.popoverStat}>{chip.count.toLocaleString()}</div>
+            {descriptions?.[chip.key as 'memories' | 'decisions' | 'wiki'] && (
+              <div
+                data-testid={`chip-description-${chip.key}`}
+                style={{ maxWidth: 240, fontSize: 12, lineHeight: 1.4 }}
+              >
+                {descriptions[chip.key as 'memories' | 'decisions' | 'wiki']}
+              </div>
+            )}
             {delta > 0 && (
-              <div className={styles.popoverDelta}>+{delta} {t('archive.chip.thisWeek', 'this week')}</div>
+              <div className={styles.popoverDelta}>
+                +{delta} {t('archive.chip.thisWeek', 'this week')}
+              </div>
             )}
             <div className={styles.popoverSparkline}>
               {/* 8-bar sparkline - stable placeholder until real weekDeltas are wired */}
@@ -142,28 +161,20 @@ const TopbarChips: React.FC<TopbarChipsProps> = ({
                 <div key={i} className={styles.sparkBar} style={{ height: `${ht}%` }} />
               ))}
             </div>
-            <button
-              type='button'
-              className={styles.popoverLink}
-              onClick={() => onFilterChange(chip.type)}
-            >
+            <button type='button' className={styles.popoverLink} onClick={() => onFilterChange(chip.type)}>
               {t('archive.chip.viewAsFilter', 'View as filter')}
             </button>
           </div>
         );
 
         return (
-          <Popover
-            key={chip.key}
-            content={popoverContent}
-            position='bottom'
-            trigger='hover'
-          >
+          <Popover key={chip.key} content={popoverContent} position='bottom' trigger='hover'>
             <button
               type='button'
               className={`${styles.chip}${isActive ? ` ${styles.chipActive}` : ''}`}
               onClick={() => onFilterChange(isActive ? null : chip.type)}
               data-testid={`topbar-chip-${chip.key}`}
+              title={descriptions?.[chip.key as 'memories' | 'decisions' | 'wiki']}
             >
               <span className={styles.chipGlyph} style={{ color: chip.color }} aria-hidden>
                 {chip.glyph}

@@ -92,6 +92,12 @@ describe('BrainMemoryService', () => {
     ]);
   });
 
+  it('lists the long-term tiers for the wiki filter', async () => {
+    const svc = new BrainMemoryService(fakeBrain());
+    const res = await svc.listEntries({ project: 'general', types: ['wiki'] });
+    expect(res.entries.map((e) => e.id).sort()).toEqual(['b']);
+  });
+
   it('opens a listed entry with its full body', async () => {
     const svc = new BrainMemoryService(fakeBrain());
     await svc.listEntries({});
@@ -101,8 +107,10 @@ describe('BrainMemoryService', () => {
 
   it('reports stats from the brain tiers', async () => {
     const stats = await new BrainMemoryService(fakeBrain()).getStats();
-    expect(stats).toMatchObject({ total: 5, projects: 2, sessions: 1, decisions: 1 });
+    expect(stats).toMatchObject({ total: 5, projects: 2, sessions: 1, decisions: 1, wiki: 1 });
     expect(stats.typeCounts.observation).toBe(3);
+    // Wiki is the long-term tiers (semantic 1 + procedural 0) and overlaps Decisions.
+    expect(stats.typeCounts.wiki).toBe(1);
   });
 
   it('saves a quick add to the brain and refuses thin content', async () => {

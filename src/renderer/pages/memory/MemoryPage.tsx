@@ -25,7 +25,7 @@ import InstallFailedCard from './state-branches/InstallFailedCard';
 import FullPanelShell from './state-branches/FullPanelShell';
 import styles from './MemoryPage.module.css';
 
-const renderStateBranch = (status: IjfwStatusPayload | null): React.ReactElement => {
+const renderStateBranch = (status: IjfwStatusPayload | null, backend: 'brain' | 'ijfw' | null): React.ReactElement => {
   if (!status) {
     return (
       <div className={styles.center} data-testid='memory-loading' role='status' aria-busy='true' aria-live='polite'>
@@ -53,11 +53,11 @@ const renderStateBranch = (status: IjfwStatusPayload | null): React.ReactElement
     case 'install_failed':
       return <InstallFailedCard errorReason={status.errorReason} stderr={status.stderr} />;
     case 'installed_current':
-      return <FullPanelShell />;
+      return <FullPanelShell backend={backend ?? undefined} />;
     default:
       // Exhaustiveness guard - keeps FullPanelShell reachable for the
       // typechecker and gives Wave 5 a fallback for unknown states.
-      return <FullPanelShell />;
+      return <FullPanelShell backend={backend ?? undefined} />;
   }
 };
 
@@ -165,7 +165,7 @@ const MemoryPage: React.FC = () => {
       role='region'
       aria-label='Memory'
     >
-      {renderStateBranch(shownStatus)}
+      {renderStateBranch(shownStatus, backend)}
     </div>
   );
 };

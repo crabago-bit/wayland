@@ -69,11 +69,13 @@ const TIER_TO_TYPE: Record<string, MemoryType> = {
   semantic: 'decision',
   procedural: 'pattern',
 };
-const TYPE_TO_TIER: Partial<Record<MemoryType, string>> = {
-  observation: 'working',
-  session: 'episodic',
-  decision: 'semantic',
-  pattern: 'procedural',
+/** A type filter selects these tiers. `wiki` is the long-term knowledge: semantic + procedural. */
+const TYPE_TO_TIERS: Partial<Record<MemoryType, readonly string[]>> = {
+  observation: ['working'],
+  session: ['episodic'],
+  decision: ['semantic'],
+  pattern: ['procedural'],
+  wiki: ['semantic', 'procedural'],
 };
 
 /** Brain tool results arrive as JSON text; tolerate both text and already-parsed values. */
@@ -183,7 +185,9 @@ export class BrainMemoryService {
       pattern: tier.procedural ?? 0,
       observation: tier.working ?? 0,
       session: tier.episodic ?? 0,
-      wiki: 0,
+      // Long-term knowledge: the semantic and procedural tiers. It overlaps `decision` and
+      // `pattern` on purpose, so a total must come from the brain, never from summing these.
+      wiki: (tier.semantic ?? 0) + (tier.procedural ?? 0),
       preference: 0,
     };
     const flat = Array(7).fill(0) as number[];
@@ -214,7 +218,7 @@ export class BrainMemoryService {
 
   async listEntries(filter: ListFilter = {}): Promise<{ entries: MemoryEntry[]; total: number }> {
     const workspaces = await this.targetWorkspaces(filter.project);
-    const wantedTiers = filter.types?.map((t) => TYPE_TO_TIER[t]).filter((t): t is string => Boolean(t));
+    const wantedTiers = filter.types?.flatMap((t) => TYPE_TO_TIERS[t] ?? []);
     const search = filter.search?.trim();
     const perWorkspace = Math.min(MAX_PER_WORKSPACE, Math.max(50, (filter.limit ?? 100) + (filter.offset ?? 0)));
 
