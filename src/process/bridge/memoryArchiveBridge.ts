@@ -94,12 +94,14 @@ function resolveMemoryBackend(): Promise<{ backend: MemoryBackend; kind: 'brain'
         const endpoint = await readBrainEndpoint();
         if (endpoint) {
           log.info('[memory-archive] using the brain MCP server', { url: endpoint.url });
+          console.log(`[memory-archive] backend=brain url=${endpoint.url}`);
           return { backend: new BrainMemoryService(new BrainMcpClient(endpoint)), kind: 'brain' as const };
         }
       } catch (err) {
         log.warn('[memory-archive] brain endpoint lookup failed, falling back to IJFW', { err });
       }
     }
+    console.log('[memory-archive] backend=ijfw (no enabled brain MCP server found)');
     return { backend: getIjfwArchiveService() as unknown as MemoryBackend, kind: 'ijfw' as const };
   })();
   return backendPromise;
