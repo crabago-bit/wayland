@@ -6,37 +6,61 @@
   min-height: 0;
 }
 
-.sky {
+.canvas {
   flex: 1;
   min-height: 0;
   width: 100%;
   cursor: grab;
   touch-action: none;
-  background: radial-gradient(ellipse at 50% 40%, #151b34 0%, #0a0d1c 70%, #05060f 100%);
+  background: var(--color-bg-1);
 }
 
-.sky:active {
+.canvas:active {
   cursor: grabbing;
 }
 
-.clusterLabel {
-  font-size: 14px;
+.outerRim {
+  fill: none;
+  stroke: #3a4470;
+  stroke-width: 1;
+}
+
+.tick {
+  stroke: #5a669b;
+  stroke-width: 1;
+}
+
+.divider {
+  stroke: #8d98c4;
+  stroke-width: 1;
+  stroke-opacity: 0.16;
+  stroke-dasharray: 2 5;
+}
+
+.sectorLabel {
+  font-size: 13px;
   font-weight: 600;
-  fill: #cbd2ea;
-  letter-spacing: 0.02em;
+  fill: var(--color-text-2);
   pointer-events: none;
 }
 
-.line {
-  stroke: #8d98c4;
+.link {
+  fill: none;
+  stroke: #aab4e8;
   stroke-width: 0.8;
-  stroke-opacity: 0.22;
+  stroke-opacity: 0.13;
 }
 
-.lineLit {
+.linkLit {
+  fill: none;
   stroke: #e6ebff;
   stroke-width: 1.4;
   stroke-opacity: 0.9;
+}
+
+.figure {
+  stroke-width: 1;
+  stroke-opacity: 0.4;
 }
 
 .star {

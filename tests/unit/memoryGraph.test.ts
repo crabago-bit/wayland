@@ -6,7 +6,15 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildMemoryGraph, buildMemoryLinks, extractTerms } from '@process/services/memory/memoryGraph';
-import { layoutClusters, layoutGraph } from '@/renderer/pages/memory/graphLayout';
+import {
+  SKY_CX,
+  SKY_CY,
+  SKY_RADIUS,
+  arcPath,
+  layoutGraph,
+  layoutSky,
+  skyLines,
+} from '@/renderer/pages/memory/graphLayout';
 
 const entry = (id: string, body: string, type: 'decision' | 'pattern' = 'decision') => ({
   id,
@@ -90,34 +98,80 @@ describe('layoutGraph', () => {
   });
 });
 
-describe('layoutClusters', () => {
-  it('keeps each category in its own cluster and returns one cluster per category present', () => {
-    const nodes = [
-      ...Array.from({ length: 6 }, (_, i) => ({ id: `d${i}`, type: 'decision' })),
-      ...Array.from({ length: 6 }, (_, i) => ({ id: `p${i}`, type: 'pattern' })),
-    ];
-    const edges = [{ source: 'd0', target: 'p0', weight: 1 }];
-    const { positions, clusters } = layoutClusters(nodes, edges, ['decision', 'preference', 'pattern']);
-    expect(clusters.map((c) => c.type)).toEqual(['decision', 'pattern']);
-    const dist = (id: string, c: { x: number; y: number }) =>
-      Math.hypot(positions.get(id)!.x - c.x, positions.get(id)!.y - c.y);
+describe('layoutSky', () => {
+  const nodes = [
+    ...Array.from({ length: 30 }, (_, i) => ({ id: `d${i}`, type: 'decision', degree: 30 - i })),
+    ...Array.from({ length: 12 }, (_, i) => ({ id: `p${i}`, type: 'pattern', degree: 12 - i })),
+    { id: 'w0', type: 'wiki', degree: 1 },
+  ];
+  const order = ['decision', 'preference', 'pattern', 'session', 'wiki', 'observation'];
+
+  it('keeps every star inside the round chart and inside its own wedge', () => {
+    const { positions, sectors } = layoutSky(nodes, order);
+    expect(sectors.map((s) => s.type)).toEqual(['decision', 'pattern', 'wiki']);
     for (const node of nodes) {
-      const own = clusters.find((c) => c.type === node.type)!;
-      const other = clusters.find((c) => c.type !== node.type)!;
-      expect(dist(node.id, own)).toBeLessThan(dist(node.id, other));
+      const p = positions.get(node.id)!;
+      const r = Math.hypot(p.x - SKY_CX, p.y - SKY_CY);
+      expect(r).toBeLessThanOrEqual(SKY_RADIUS + 0.001);
+      const sector = sectors.find((s) => s.type === node.type)!;
+      let angle = Math.atan2(p.y - SKY_CY, p.x - SKY_CX);
+      while (angle < sector.start) angle += Math.PI * 2;
+      expect(angle).toBeGreaterThanOrEqual(sector.start - 1e-6);
+      expect(angle).toBeLessThanOrEqual(sector.end + 1e-6);
     }
+  });
+
+  it('puts the best-connected memory of a category nearest the centre, deterministically', () => {
+    const a = layoutSky(nodes, order);
+    const b = layoutSky(nodes, order);
+    const radius = (id: string) => {
+      const p = a.positions.get(id)!;
+      return Math.hypot(p.x - SKY_CX, p.y - SKY_CY);
+    };
+    expect(radius('d0')).toBeLessThan(radius('d29'));
+    for (const [id, p] of a.positions) expect(b.positions.get(id)).toEqual(p);
+  });
+
+  it('gives wedges that do not overlap', () => {
+    const { sectors } = layoutSky(nodes, order);
+    for (let i = 1; i < sectors.length; i++) expect(sectors[i].start).toBeGreaterThan(sectors[i - 1].end);
   });
 });
 
-describe('layoutClusters shape', () => {
-  it('keeps every star inside its cluster circle', () => {
-    const nodes = Array.from({ length: 40 }, (_, i) => ({ id: `n${i}`, type: 'wiki' }));
-    const edges = nodes.slice(1).map((n, i) => ({ source: `n${i}`, target: n.id, weight: 1 }));
-    const { positions, clusters } = layoutClusters(nodes, edges, ['wiki']);
-    const c = clusters[0];
-    for (const p of positions.values()) {
-      expect(Math.hypot(p.x - c.x, p.y - c.y)).toBeLessThanOrEqual(c.radius + 0.001);
-    }
+describe('skyLines', () => {
+  it('joins every category into one connected figure', () => {
+    const nodes = [
+      ...Array.from({ length: 25 }, (_, i) => ({ id: `d${i}`, type: 'decision', degree: i })),
+      ...Array.from({ length: 9 }, (_, i) => ({ id: `p${i}`, type: 'pattern', degree: i })),
+      { id: 'w0', type: 'wiki', degree: 1 },
+    ];
+    const { positions } = layoutSky(nodes, ['decision', 'pattern', 'wiki']);
+    const lines = skyLines(nodes, positions);
+    // A tree over n stars has n - 1 lines; a lone star has none.
+    expect(lines).toHaveLength(24 + 8);
+    const reach = (type: string) => {
+      const ids = nodes.filter((n) => n.type === type).map((n) => n.id);
+      const seen = new Set([ids[0]]);
+      for (let pass = 0; pass < ids.length; pass++) {
+        for (const l of lines) {
+          if (seen.has(l.a) !== seen.has(l.b) && ids.includes(l.a) && ids.includes(l.b)) {
+            seen.add(l.a);
+            seen.add(l.b);
+          }
+        }
+      }
+      return seen.size;
+    };
+    expect(reach('decision')).toBe(25);
+    expect(reach('pattern')).toBe(9);
+  });
+});
+
+describe('arcPath', () => {
+  it('bows a link toward the centre of the sky', () => {
+    const d = arcPath({ x: 200, y: 100 }, { x: 800, y: 100 });
+    const control = d.match(/Q ([\d.]+) ([\d.]+)/)!;
+    expect(Number(control[2])).toBeGreaterThan(100);
   });
 });
 

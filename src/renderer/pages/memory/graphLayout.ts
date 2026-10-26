@@ -86,21 +86,39 @@ export function layoutGraph(nodes: LayoutNode[], edges: LayoutEdge[], iterations
   return positions;
 }
 
-export type ClusterNode = { id: string; type: string };
-export type Cluster = { type: string; x: number; y: number; radius: number; count: number };
+export type SkyNode = { id: string; type: string; degree: number };
+export type Sector = { type: string; start: number; end: number; mid: number; count: number };
+export type SkyLine = { a: string; b: string };
+
+export const SKY_CX = GRAPH_WIDTH / 2;
+export const SKY_CY = GRAPH_HEIGHT / 2;
+export const SKY_RADIUS = 300;
+const GOLDEN = 0.6180339887;
+const SECTOR_GAP = 0.07;
+const INNER = 0.1;
+const OUTER = 0.95;
+
+/** Deterministic 0..1 from a string, so the same memory always lands on the same spot. */
+function hash01(text: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 10000) / 10000;
+}
 
 /**
- * Constellation layout: one cluster per category on an ellipse, each laid out on its own with
- * only its internal links, so the stars of a category stay together and the cross-category
- * lines show how the clusters relate. `order` fixes where each category sits.
+ * Round star chart: one disc, divided into a wedge per category (wider for bigger categories).
+ * Inside its wedge the best-connected memories sit nearest the centre and the rest spiral out,
+ * jittered a little so it reads as a sky rather than a diagram. Pure and deterministic.
  */
-export function layoutClusters(
-  nodes: ClusterNode[],
-  edges: LayoutEdge[],
+export function layoutSky(
+  nodes: SkyNode[],
   order: readonly string[]
-): { positions: Map<string, Point>; clusters: Cluster[] } {
+): { positions: Map<string, Point>; sectors: Sector[] } {
   const positions = new Map<string, Point>();
-  const groups = new Map<string, ClusterNode[]>();
+  const groups = new Map<string, SkyNode[]>();
   for (const node of nodes) {
     const list = groups.get(node.type);
     if (list) list.push(node);
@@ -109,42 +127,80 @@ export function layoutClusters(
   const present = order.filter((type) => groups.has(type));
   for (const type of groups.keys()) if (!present.includes(type)) present.push(type);
 
-  const cx = GRAPH_WIDTH / 2;
-  const cy = GRAPH_HEIGHT / 2;
-  const rx = present.length > 1 ? 360 : 0;
-  const ry = present.length > 1 ? 235 : 0;
-  const clusters: Cluster[] = [];
+  const weights = present.map((type) => Math.pow(Math.max(groups.get(type)!.length, 8), 0.7));
+  const total = weights.reduce((sum, w) => sum + w, 0) || 1;
+  const usable = Math.PI * 2 - SECTOR_GAP * present.length;
+  const sectors: Sector[] = [];
+  let cursor = -Math.PI / 2;
   present.forEach((type, i) => {
-    const members = groups.get(type) ?? [];
-    const angle = (i / present.length) * Math.PI * 2 - Math.PI / 2;
-    const centerX = cx + Math.cos(angle) * rx;
-    const centerY = cy + Math.sin(angle) * ry;
-    const radius = Math.min(95, 28 + Math.sqrt(members.length) * 7.5);
-    const ids = new Set(members.map((m) => m.id));
-    const local = layoutGraph(
-      members,
-      edges.filter((e) => ids.has(e.source) && ids.has(e.target)),
-      140
-    );
-    // The force layout fills a wide rectangle; pour it into a disc by keeping each node's
-    // direction from the centroid and scaling its distance so the farthest sits on the rim.
-    let mx = 0;
-    let my = 0;
-    for (const p of local.values()) {
-      mx += p.x;
-      my += p.y;
-    }
-    mx /= local.size || 1;
-    my /= local.size || 1;
-    let farthest = 1;
-    for (const p of local.values()) farthest = Math.max(farthest, Math.hypot(p.x - mx, p.y - my));
-    for (const [id, p] of local) {
-      const dist = Math.hypot(p.x - mx, p.y - my);
-      const angle = Math.atan2(p.y - my, p.x - mx);
-      const r = radius * Math.pow(dist / farthest, 0.75);
-      positions.set(id, { x: centerX + Math.cos(angle) * r, y: centerY + Math.sin(angle) * r });
-    }
-    clusters.push({ type, x: centerX, y: centerY, radius, count: members.length });
+    const members = (groups.get(type) ?? []).slice().sort((a, b) => b.degree - a.degree || a.id.localeCompare(b.id));
+    const span = (weights[i] / total) * usable;
+    const start = cursor + SECTOR_GAP / 2;
+    const end = start + span;
+    const pad = Math.min(0.05, span * 0.1);
+    members.forEach((node, k) => {
+      const frac = members.length === 1 ? 0.5 : (k * GOLDEN + hash01(node.id) * 0.25) % 1;
+      const angle = start + pad + frac * Math.max(0.0001, span - pad * 2);
+      const radial = INNER + (OUTER - INNER) * Math.sqrt((k + 0.5) / members.length);
+      const jitter = 1 + (hash01(`${node.id}:r`) - 0.5) * 0.06;
+      const r = SKY_RADIUS * Math.min(OUTER, radial * jitter);
+      positions.set(node.id, { x: SKY_CX + Math.cos(angle) * r, y: SKY_CY + Math.sin(angle) * r });
+    });
+    sectors.push({ type, start, end, mid: (start + end) / 2, count: members.length });
+    cursor = end + SECTOR_GAP / 2;
   });
-  return { positions, clusters };
+  return { positions, sectors };
+}
+
+/**
+ * The stick figure of each category: a minimum spanning tree over its stars' positions, so every
+ * star in a category is joined to its nearest neighbours and the whole group is one connected shape.
+ */
+export function skyLines(nodes: SkyNode[], positions: Map<string, Point>): SkyLine[] {
+  const groups = new Map<string, string[]>();
+  for (const node of nodes) {
+    if (!positions.has(node.id)) continue;
+    const list = groups.get(node.type);
+    if (list) list.push(node.id);
+    else groups.set(node.type, [node.id]);
+  }
+  const lines: SkyLine[] = [];
+  for (const ids of groups.values()) {
+    if (ids.length < 2) continue;
+    const inTree = new Set<string>([ids[0]]);
+    const best = new Map<string, { from: string; d: number }>();
+    const dist = (a: string, b: string) => {
+      const p = positions.get(a)!;
+      const q = positions.get(b)!;
+      return (p.x - q.x) ** 2 + (p.y - q.y) ** 2;
+    };
+    for (const id of ids.slice(1)) best.set(id, { from: ids[0], d: dist(ids[0], id) });
+    while (best.size > 0) {
+      let pick = '';
+      let pickD = Infinity;
+      for (const [id, b] of best) {
+        if (b.d < pickD) {
+          pick = id;
+          pickD = b.d;
+        }
+      }
+      lines.push({ a: best.get(pick)!.from, b: pick });
+      best.delete(pick);
+      inTree.add(pick);
+      for (const [id, b] of best) {
+        const d = dist(pick, id);
+        if (d < b.d) best.set(id, { from: pick, d });
+      }
+    }
+  }
+  return lines;
+}
+
+/** A link drawn as a curve bowed toward the centre of the sky, so cross-category links read as arcs. */
+export function arcPath(a: Point, b: Point): string {
+  const mx = (a.x + b.x) / 2;
+  const my = (a.y + b.y) / 2;
+  const cx = mx + (SKY_CX - mx) * 0.55;
+  const cy = my + (SKY_CY - my) * 0.55;
+  return `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
 }

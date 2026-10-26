@@ -119,6 +119,7 @@ describe('ConstellationView', () => {
     render(<ConstellationView graph={graph} isLoading={false} error={null} onSelect={onSelect} />);
     expect(screen.getByTestId('memory-constellation-cluster-decision').textContent).toContain('Decisions');
     expect(screen.getByTestId('memory-constellation-cluster-pattern')).toBeTruthy();
+    expect(screen.getByTestId('memory-constellation-disc')).toBeTruthy();
     fireEvent.click(screen.getByTestId('memory-constellation-star-b'));
     expect(onSelect).toHaveBeenCalledWith('b');
   });
