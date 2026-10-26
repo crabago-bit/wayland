@@ -3320,6 +3320,7 @@ import type {
   MemoryEntry,
   MemoryGraph,
   MemoryGraphFilter,
+  MemoryRelated,
   ListFilter,
   ProjectSummary,
   TagCount,
@@ -3341,6 +3342,8 @@ export const memory = {
   getProjects: buildProvider<ProjectSummary[], void>('memory.get-projects'),
   /** Memories linked by the specific things they mention in common (files, hosts, identifiers). */
   getGraph: buildProvider<MemoryGraph, MemoryGraphFilter>('memory.get-graph'),
+  /** Memories that share the most with this one (files, hosts, identifiers). */
+  getRelated: buildProvider<MemoryRelated[], { id: string }>('memory.get-related'),
   /** Top tags, optionally scoped to a workspace. */
   getTags: buildProvider<TagCount[], { project?: string } | void>('memory.get-tags'),
   /** Save a new memory to the brain (`projectPath` is `brain://<workspace>`). */

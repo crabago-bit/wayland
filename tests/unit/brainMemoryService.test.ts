@@ -300,3 +300,38 @@ describe('BrainMemoryService', () => {
     expect(cb).toHaveBeenCalled();
   });
 });
+
+describe('BrainMemoryService graph and related', () => {
+  const linked = [
+    chunk('a1', 'pattern: deploy script', { content: 'edit deploy-webui.sh then run pm2-restart.sh to apply' }),
+    chunk('a2', 'bug fix: deploy script', { content: 'deploy-webui.sh needs pm2-restart.sh afterwards' }),
+    chunk('a3', 'decision: unrelated', { content: 'nothing in common with the others here at all' }),
+  ];
+  const brain: BrainTools = {
+    async callTool(name, args = {}) {
+      if (name === 'stats') return text({ total: 3, by_workspace: { general: 3 } });
+      if (name === 'get_chunks') return text(args.workspace === 'general' ? linked : []);
+      return text({});
+    },
+  };
+
+  it('getGraph links memories that mention the same things and respects the category filter', async () => {
+    const service = new BrainMemoryService(brain);
+    const all = await service.getGraph();
+    expect(all.edges).toHaveLength(1);
+    expect(all.nodes.map((n) => n.id).sort()).toEqual(['a1', 'a2']);
+    expect(all.unlinked).toBe(1);
+    const decisionsOnly = await service.getGraph({ types: ['decision'] });
+    expect(decisionsOnly.nodes).toHaveLength(0);
+  });
+
+  it('getRelated returns the linked memory with the terms that join them', async () => {
+    const service = new BrainMemoryService(brain);
+    const related = await service.getRelated('a1');
+    expect(related).toHaveLength(1);
+    expect(related[0]).toMatchObject({ id: 'a2', type: 'pattern' });
+    expect(related[0].terms).toEqual(expect.arrayContaining(['deploy-webui.sh']));
+    expect(await service.getRelated('a3')).toEqual([]);
+    expect(await service.getRelated('missing')).toEqual([]);
+  });
+});

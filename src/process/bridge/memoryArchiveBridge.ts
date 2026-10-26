@@ -19,6 +19,7 @@ import type {
   ListFilter,
   MemoryEntry,
   MemoryGraph,
+  MemoryRelated,
   ProjectSummary,
   TagCount,
 } from '@/common/types/memory';
@@ -148,6 +149,17 @@ export function initMemoryArchiveBridge(): void {
     const empty = (): MemoryGraph => ({ nodes: [], edges: [], totalEntries: 0, linked: 0, unlinked: 0 });
     if (!parsed.success) return empty();
     return withBrain<MemoryGraph>('getGraph', (b) => b.getGraph(parsed.data), empty, empty);
+  });
+
+  ipcBridge.memory.getRelated.provider(async (args: unknown) => {
+    const parsed = idSchema.safeParse(args);
+    if (!parsed.success) return [];
+    return withBrain<MemoryRelated[]>(
+      'getRelated',
+      (b) => b.getRelated(parsed.data.id),
+      () => [],
+      () => []
+    );
   });
 
   ipcBridge.memory.getTags.provider(async (args: unknown) => {

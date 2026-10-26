@@ -37,13 +37,14 @@ import type {
   MemoryEntry,
   MemoryGraph,
   MemoryGraphFilter,
+  MemoryRelated,
   MemoryStats,
   MemoryType,
   ProjectSummary,
   StatKey,
   TagCount,
 } from '@/common/types/memory';
-import { buildMemoryGraph } from './memoryGraph';
+import { buildMemoryGraph, buildMemoryLinks } from './memoryGraph';
 
 /** The seam to the brain MCP server; tests inject a fake. */
 export interface BrainTools {
@@ -192,6 +193,7 @@ export class BrainMemoryService {
   private index: Index | null = null;
   private loading: Promise<Index> | null = null;
   private hidden: HiddenRecord[] | null = null;
+  private links: { index: Index; byId: ReturnType<typeof buildMemoryLinks> } | null = null;
   private readonly listeners = new Set<ChangeCallback>();
   private lastIndexedAt = 0;
 
@@ -425,6 +427,27 @@ export class BrainMemoryService {
       (e) => (!types || types.has(e.type)) && (!workspace || e.project === workspace)
     );
     return buildMemoryGraph(scoped);
+  }
+
+  /** The memories that share the most with this one, strongest first. */
+  async getRelated(id: string, limit = 8): Promise<MemoryRelated[]> {
+    const index = await this.ensureIndex();
+    if (!index.byId.has(id)) return [];
+    if (this.links?.index !== index) this.links = { index, byId: buildMemoryLinks(index.entries) };
+    const related: MemoryRelated[] = [];
+    for (const edge of this.links.byId.get(id) ?? []) {
+      const other = index.byId.get(edge.source === id ? edge.target : edge.source);
+      if (other) {
+        related.push({
+          id: other.id,
+          summary: other.summary,
+          type: other.type,
+          weight: edge.weight,
+          terms: edge.terms,
+        });
+      }
+    }
+    return related.sort((a, b) => b.weight - a.weight).slice(0, limit);
   }
 
   async getProjects(): Promise<ProjectSummary[]> {

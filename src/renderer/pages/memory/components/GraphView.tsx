@@ -10,10 +10,11 @@
  * file, host or identifier. Click a dot to open it; drag to pan, scroll to zoom.
  */
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import type { MemoryGraph } from '@/common/types/memory';
 import { categoryOf } from '../categories';
 import { GRAPH_HEIGHT, GRAPH_WIDTH, layoutGraph } from '../graphLayout';
+import { usePanZoom } from '../hooks/usePanZoom';
 import styles from './GraphView.module.css';
 
 export type GraphViewProps = {
@@ -22,15 +23,16 @@ export type GraphViewProps = {
   error: string | null;
   selectedId?: string;
   onSelect?: (id: string) => void;
+  /** Memories matching the search box; they stay bright while the rest dim. */
+  highlightIds?: Set<string> | null;
 };
 
-type View = { x: number; y: number; k: number };
-const FIT: View = { x: 0, y: 0, k: 1 };
+/** How many of the best-connected memories always show their title. */
+const LABELLED = 10;
 
-const GraphView: React.FC<GraphViewProps> = ({ graph, isLoading, error, selectedId, onSelect }) => {
+const GraphView: React.FC<GraphViewProps> = ({ graph, isLoading, error, selectedId, onSelect, highlightIds }) => {
   const [hoverId, setHoverId] = useState<string | null>(null);
-  const [view, setView] = useState<View>(FIT);
-  const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const pan = usePanZoom();
 
   const positions = useMemo(
     () => (graph ? layoutGraph(graph.nodes, graph.edges) : new Map<string, { x: number; y: number }>()),
@@ -54,28 +56,16 @@ const GraphView: React.FC<GraphViewProps> = ({ graph, isLoading, error, selected
   );
   const nodeById = useMemo(() => new Map((graph?.nodes ?? []).map((n) => [n.id, n])), [graph]);
 
-  const onWheel = useCallback((e: React.WheelEvent) => {
-    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-    setView((v) => ({ ...v, k: Math.min(6, Math.max(0.5, v.k * factor)) }));
-  }, []);
-  const onPointerDown = useCallback((e: React.PointerEvent) => {
-    drag.current = { x: e.clientX, y: e.clientY, moved: false };
-  }, []);
-  const onPointerMove = useCallback((e: React.PointerEvent) => {
-    const d = drag.current;
-    if (!d) return;
-    const dx = e.clientX - d.x;
-    const dy = e.clientY - d.y;
-    if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true;
-    if (d.moved) {
-      d.x = e.clientX;
-      d.y = e.clientY;
-      setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
-    }
-  }, []);
-  const onPointerUp = useCallback(() => {
-    drag.current = null;
-  }, []);
+  const labelled = useMemo(
+    () =>
+      new Set(
+        [...(graph?.nodes ?? [])]
+          .sort((x, y) => y.degree - x.degree)
+          .slice(0, LABELLED)
+          .map((n) => n.id)
+      ),
+    [graph]
+  );
 
   if (error) {
     return (
@@ -109,13 +99,9 @@ const GraphView: React.FC<GraphViewProps> = ({ graph, isLoading, error, selected
         viewBox={`0 0 ${GRAPH_WIDTH} ${GRAPH_HEIGHT}`}
         role='img'
         aria-label={`Graph of ${graph.nodes.length} linked memories`}
-        onWheel={onWheel}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerLeave={onPointerUp}
+        {...pan.handlers}
       >
-        <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
+        <g transform={pan.transform}>
           {graph.edges.map((e) => {
             const a = positions.get(e.source);
             const b = positions.get(e.target);
@@ -139,7 +125,7 @@ const GraphView: React.FC<GraphViewProps> = ({ graph, isLoading, error, selected
             const p = positions.get(n.id);
             if (!p) return null;
             const color = categoryOf(n.type)?.color ?? '#9CA3AF';
-            const dim = focusSet ? !focusSet.has(n.id) : false;
+            const dim = focusSet ? !focusSet.has(n.id) : highlightIds ? !highlightIds.has(n.id) : false;
             return (
               <circle
                 key={n.id}
@@ -158,7 +144,7 @@ const GraphView: React.FC<GraphViewProps> = ({ graph, isLoading, error, selected
                 onFocus={() => setHoverId(n.id)}
                 onBlur={() => setHoverId(null)}
                 onClick={() => {
-                  if (!drag.current?.moved) onSelect?.(n.id);
+                  if (!pan.moved()) onSelect?.(n.id);
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
@@ -169,6 +155,16 @@ const GraphView: React.FC<GraphViewProps> = ({ graph, isLoading, error, selected
               />
             );
           })}
+          {graph.nodes
+            .filter((n) => (labelled.has(n.id) || highlightIds?.has(n.id)) && n.id !== hoverId)
+            .map((n) => {
+              const p = positions.get(n.id);
+              return p ? (
+                <text key={`l-${n.id}`} x={p.x + 10} y={p.y - 8} className={styles.labelQuiet}>
+                  {n.summary.length > 36 ? `${n.summary.slice(0, 36)}…` : n.summary}
+                </text>
+              ) : null;
+            })}
           {hovered && hoveredPos ? (
             <text x={hoveredPos.x + 12} y={hoveredPos.y - 10} className={styles.label}>
               {hovered.summary.length > 70 ? `${hovered.summary.slice(0, 70)}…` : hovered.summary}
@@ -182,7 +178,7 @@ const GraphView: React.FC<GraphViewProps> = ({ graph, isLoading, error, selected
           {graph.totalEntries.toLocaleString()} memories link to another
           {graph.unlinked > 0 ? ` · ${graph.unlinked.toLocaleString()} stand alone (mostly logs)` : ''}
         </span>
-        <button type='button' className={styles.reset} onClick={() => setView(FIT)}>
+        <button type='button' className={styles.reset} onClick={pan.reset}>
           Reset view
         </button>
       </div>

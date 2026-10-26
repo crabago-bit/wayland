@@ -27,6 +27,8 @@ export type MemoryRowProps = {
   entry: MemoryEntry;
   selected?: boolean;
   onClick?: (id: string) => void;
+  /** Tighter rows: no body snippet. */
+  compact?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -69,7 +71,7 @@ const projectBasename = (projectPath: string): string => {
 // Component
 // ---------------------------------------------------------------------------
 
-const MemoryRow: React.FC<MemoryRowProps> = ({ entry, selected = false, onClick }) => {
+const MemoryRow: React.FC<MemoryRowProps> = ({ entry, selected = false, onClick, compact = false }) => {
   const handleClick = useCallback(() => {
     onClick?.(entry.id);
   }, [onClick, entry.id]);
@@ -90,7 +92,7 @@ const MemoryRow: React.FC<MemoryRowProps> = ({ entry, selected = false, onClick 
 
   return (
     <div
-      className={`${styles.row}${selected ? ` ${styles.selected}` : ''}`}
+      className={`${styles.row}${selected ? ` ${styles.selected}` : ''}${compact ? ` ${styles.compact}` : ''}`}
       role='button'
       tabIndex={0}
       aria-selected={selected}
@@ -114,9 +116,11 @@ const MemoryRow: React.FC<MemoryRowProps> = ({ entry, selected = false, onClick 
         <div className={styles.title} data-testid='memory-row-title'>
           {entry.summary}
         </div>
-        <div className={styles.snippet} data-testid='memory-row-snippet'>
-          {entry.bodyPreview}
-        </div>
+        {compact ? null : (
+          <div className={styles.snippet} data-testid='memory-row-snippet'>
+            {entry.bodyPreview}
+          </div>
+        )}
       </div>
 
       {/* Meta */}

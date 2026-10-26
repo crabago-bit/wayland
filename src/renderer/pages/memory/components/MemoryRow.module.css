@@ -155,3 +155,11 @@
 .chevron.chevronSelected {
   opacity: 1;
 }
+
+/* Compact density: one line per memory. */
+.compact {
+  min-height: 40px;
+  max-height: 44px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}

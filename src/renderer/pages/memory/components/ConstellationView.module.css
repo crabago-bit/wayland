@@ -1,0 +1,98 @@
+/* A night sky stays dark in both themes; the chrome around it uses theme tokens. */
+.wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.sky {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  cursor: grab;
+  touch-action: none;
+  background: radial-gradient(ellipse at 50% 40%, #151b34 0%, #0a0d1c 70%, #05060f 100%);
+}
+
+.sky:active {
+  cursor: grabbing;
+}
+
+.clusterLabel {
+  font-size: 14px;
+  font-weight: 600;
+  fill: #cbd2ea;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+
+.line {
+  stroke: #8d98c4;
+  stroke-width: 0.8;
+  stroke-opacity: 0.22;
+}
+
+.lineLit {
+  stroke: #e6ebff;
+  stroke-width: 1.4;
+  stroke-opacity: 0.9;
+}
+
+.star {
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+
+.star:focus-visible {
+  outline: none;
+}
+
+.ring {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 1.5;
+}
+
+.label {
+  font-size: 13px;
+  fill: #f1f4ff;
+  paint-order: stroke;
+  stroke: #05060f;
+  stroke-width: 4px;
+  pointer-events: none;
+}
+
+.footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--color-text-3);
+  border-top: 1px solid var(--color-border-2);
+  background: var(--color-bg-2);
+}
+
+.reset {
+  border: 1px solid var(--color-border-2);
+  background: transparent;
+  color: var(--color-text-2);
+  border-radius: 6px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--color-text-3);
+}

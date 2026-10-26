@@ -156,3 +156,13 @@ export type MemoryGraph = {
 };
 
 export type MemoryGraphFilter = { types?: string[]; project?: string };
+
+/** A memory that shares specific terms with another, for the detail drawer. */
+export type MemoryRelated = {
+  id: string;
+  summary: string;
+  type: MemoryType;
+  weight: number;
+  /** The shared terms, strongest first. */
+  terms: string[];
+};

@@ -57,6 +57,8 @@ export type MemoryListProps = {
   typeCounts: Record<MemoryType, number>;
   /** Fired by Virtuoso when user scrolls to the bottom - triggers cursor pagination. */
   onEndReached?: () => void;
+  /** One-line rows without the body snippet. */
+  compact?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -74,6 +76,7 @@ const MemoryList: React.FC<MemoryListProps> = ({
   onTypeFilterChange,
   typeCounts,
   onEndReached,
+  compact = false,
 }) => {
   const handleChipClick = useCallback(
     (chipType: MemoryType | 'all') => {
@@ -132,7 +135,15 @@ const MemoryList: React.FC<MemoryListProps> = ({
             itemContent={(index) => {
               const entry = entries[index];
               if (!entry) return null;
-              return <MemoryRow key={entry.id} entry={entry} selected={entry.id === selectedId} onClick={onSelect} />;
+              return (
+                <MemoryRow
+                  key={entry.id}
+                  entry={entry}
+                  selected={entry.id === selectedId}
+                  onClick={onSelect}
+                  compact={compact}
+                />
+              );
             }}
           />
         )}

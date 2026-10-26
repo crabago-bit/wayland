@@ -85,3 +85,52 @@ export function layoutGraph(nodes: LayoutNode[], edges: LayoutEdge[], iterations
   nodes.forEach((node, i) => positions.set(node.id, { x: x[i], y: y[i] }));
   return positions;
 }
+
+export type ClusterNode = { id: string; type: string };
+export type Cluster = { type: string; x: number; y: number; radius: number; count: number };
+
+/**
+ * Constellation layout: one cluster per category on an ellipse, each laid out on its own with
+ * only its internal links, so the stars of a category stay together and the cross-category
+ * lines show how the clusters relate. `order` fixes where each category sits.
+ */
+export function layoutClusters(
+  nodes: ClusterNode[],
+  edges: LayoutEdge[],
+  order: readonly string[]
+): { positions: Map<string, Point>; clusters: Cluster[] } {
+  const positions = new Map<string, Point>();
+  const groups = new Map<string, ClusterNode[]>();
+  for (const node of nodes) {
+    const list = groups.get(node.type);
+    if (list) list.push(node);
+    else groups.set(node.type, [node]);
+  }
+  const present = order.filter((type) => groups.has(type));
+  for (const type of groups.keys()) if (!present.includes(type)) present.push(type);
+
+  const cx = GRAPH_WIDTH / 2;
+  const cy = GRAPH_HEIGHT / 2;
+  const rx = present.length > 1 ? 320 : 0;
+  const ry = present.length > 1 ? 210 : 0;
+  const clusters: Cluster[] = [];
+  present.forEach((type, i) => {
+    const members = groups.get(type) ?? [];
+    const angle = (i / present.length) * Math.PI * 2 - Math.PI / 2;
+    const centerX = cx + Math.cos(angle) * rx;
+    const centerY = cy + Math.sin(angle) * ry;
+    const radius = Math.min(140, 34 + Math.sqrt(members.length) * 11);
+    const ids = new Set(members.map((m) => m.id));
+    const local = layoutGraph(
+      members,
+      edges.filter((e) => ids.has(e.source) && ids.has(e.target)),
+      140
+    );
+    const scale = radius / 300;
+    for (const [id, p] of local) {
+      positions.set(id, { x: centerX + (p.x - cx) * scale, y: centerY + (p.y - cy) * scale });
+    }
+    clusters.push({ type, x: centerX, y: centerY, radius, count: members.length });
+  });
+  return { positions, clusters };
+}

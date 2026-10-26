@@ -50,12 +50,11 @@ export function extractTerms(text: string): string[] {
   return [...found];
 }
 
-export function buildMemoryGraph(entries: GraphInput[]): MemoryGraph {
-  const termsById = new Map<string, string[]>();
+/** Every memory's strongest few links (each link appears under both of its ends). */
+export function buildMemoryLinks(entries: GraphInput[]): Map<string, MemoryGraphEdge[]> {
   const postings = new Map<string, string[]>();
   for (const entry of entries) {
     const terms = extractTerms(`${entry.summary}\n${entry.body}`);
-    termsById.set(entry.id, terms);
     for (const term of terms) {
       const list = postings.get(term);
       if (list) list.push(entry.id);
@@ -105,6 +104,11 @@ export function buildMemoryGraph(entries: GraphInput[]): MemoryGraph {
     perNode.set(pair.target, b);
   }
 
+  return perNode;
+}
+
+export function buildMemoryGraph(entries: GraphInput[], links = buildMemoryLinks(entries)): MemoryGraph {
+  const perNode = links;
   const byId = new Map(entries.map((e) => [e.id, e]));
   const degree = new Map<string, number>();
   const edgeSet = new Set<MemoryGraphEdge>();

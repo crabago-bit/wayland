@@ -5,8 +5,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { buildMemoryGraph, extractTerms } from '@process/services/memory/memoryGraph';
-import { layoutGraph } from '@/renderer/pages/memory/graphLayout';
+import { buildMemoryGraph, buildMemoryLinks, extractTerms } from '@process/services/memory/memoryGraph';
+import { layoutClusters, layoutGraph } from '@/renderer/pages/memory/graphLayout';
 
 const entry = (id: string, body: string, type: 'decision' | 'pattern' = 'decision') => ({
   id,
@@ -87,5 +87,31 @@ describe('layoutGraph', () => {
 
   it('returns nothing for an empty graph', () => {
     expect(layoutGraph([], []).size).toBe(0);
+  });
+});
+
+describe('layoutClusters', () => {
+  it('keeps each category in its own cluster and returns one cluster per category present', () => {
+    const nodes = [
+      ...Array.from({ length: 6 }, (_, i) => ({ id: `d${i}`, type: 'decision' })),
+      ...Array.from({ length: 6 }, (_, i) => ({ id: `p${i}`, type: 'pattern' })),
+    ];
+    const edges = [{ source: 'd0', target: 'p0', weight: 1 }];
+    const { positions, clusters } = layoutClusters(nodes, edges, ['decision', 'preference', 'pattern']);
+    expect(clusters.map((c) => c.type)).toEqual(['decision', 'pattern']);
+    const dist = (id: string, c: { x: number; y: number }) =>
+      Math.hypot(positions.get(id)!.x - c.x, positions.get(id)!.y - c.y);
+    for (const node of nodes) {
+      const own = clusters.find((c) => c.type === node.type)!;
+      const other = clusters.find((c) => c.type !== node.type)!;
+      expect(dist(node.id, own)).toBeLessThan(dist(node.id, other));
+    }
+  });
+});
+
+describe('buildMemoryLinks', () => {
+  it('gives each end of a link the same edge', () => {
+    const links = buildMemoryLinks([entry('a', 'alpha-one beta-two'), entry('b', 'alpha-one beta-two')]);
+    expect(links.get('a')?.[0]).toBe(links.get('b')?.[0]);
   });
 });

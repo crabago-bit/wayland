@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import type { MemoryEntry } from '@/common/types/memory';
 import { categoryOf } from '../categories';
+import RelatedMemories from './RelatedMemories';
 import styles from './RightDrawer.module.css';
 
 type ExtendedEntry = MemoryEntry & { body: string };
@@ -34,6 +35,8 @@ export type RightDrawerProps = {
   onEdit?: (entry: ExtendedEntry) => void;
   /** Archive this entry after confirmation. */
   onArchive?: (entry: ExtendedEntry) => void;
+  /** Open another memory from the Related list; the list is hidden without it. */
+  onOpenRelated?: (id: string) => void;
 };
 
 const formatRelative = (ts: number): string => {
@@ -52,7 +55,7 @@ const formatRelative = (ts: number): string => {
 export const sourceLabels = (entry: Pick<MemoryEntry, 'tags' | 'type'>): string[] =>
   (entry.tags ?? []).filter((tag) => tag !== entry.type);
 
-const RightDrawer: React.FC<RightDrawerProps> = ({ entry, onClose, onCopy, onEdit, onArchive }) => {
+const RightDrawer: React.FC<RightDrawerProps> = ({ entry, onClose, onCopy, onEdit, onArchive, onOpenRelated }) => {
   const { t } = useTranslation('memory');
 
   // Esc closes drawer
@@ -186,6 +189,16 @@ const RightDrawer: React.FC<RightDrawerProps> = ({ entry, onClose, onCopy, onEdi
                 )}
               </div>
             </div>
+
+            {onOpenRelated ? (
+              <RelatedMemories
+                entryId={entry.id}
+                onOpen={onOpenRelated}
+                label={t('archive.drawer.related', 'Related')}
+                sectionClassName={styles.section}
+                headingClassName={styles.sectionLabel}
+              />
+            ) : null}
           </div>
         </div>
       )}

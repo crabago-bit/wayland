@@ -87,3 +87,12 @@
   font-size: 14px;
   color: var(--color-text-3);
 }
+
+.labelQuiet {
+  font-size: 11px;
+  fill: var(--color-text-2);
+  paint-order: stroke;
+  stroke: var(--color-bg-1);
+  stroke-width: 3px;
+  pointer-events: none;
+}

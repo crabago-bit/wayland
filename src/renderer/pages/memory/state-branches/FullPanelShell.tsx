@@ -27,7 +27,7 @@
  * List column margin-right transitions in sync with drawer opening.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Input, Message, Modal } from '@arco-design/web-react';
 import type { RefInputType } from '@arco-design/web-react/es/Input/interface';
 import { Archive, ArchiveRestore, Search, Plus } from 'lucide-react';
@@ -40,6 +40,8 @@ import { useInRouterContext } from 'react-router-dom';
 import MemoryList from '../components/MemoryList';
 import CardsView from '../components/CardsView';
 import GraphView from '../components/GraphView';
+import ConstellationView from '../components/ConstellationView';
+import { filterGraph, matchingIds } from '../graphFilter';
 import { useMemoryGraph } from '../hooks/useMemoryGraph';
 import RightDrawer from '../components/RightDrawer';
 import TopbarChips from '../components/TopbarChips';
@@ -75,18 +77,28 @@ function timeWindowToFilter(tw: TimeWindow): ListFilter['timeWindow'] {
 // Constants
 // ---------------------------------------------------------------------------
 
-type MemoryViewMode = 'list' | 'cards' | 'graph';
+type MemoryViewMode = 'list' | 'cards' | 'graph' | 'constellation';
 const VIEW_MODES: ReadonlyArray<{ value: MemoryViewMode; label: string }> = [
   { value: 'list', label: 'List' },
   { value: 'cards', label: 'Cards' },
   { value: 'graph', label: 'Graph' },
+  { value: 'constellation', label: 'Constellation' },
 ];
 const VIEW_MODE_KEY = 'wayland.memory.view';
+const DENSITY_KEY = 'wayland.memory.density';
+
+function readStoredCompact(): boolean {
+  try {
+    return window.localStorage.getItem(DENSITY_KEY) === 'compact';
+  } catch {
+    return false;
+  }
+}
 
 function readStoredViewMode(): MemoryViewMode {
   try {
     const stored = window.localStorage.getItem(VIEW_MODE_KEY);
-    if (stored === 'list' || stored === 'cards' || stored === 'graph') return stored;
+    if (stored === 'list' || stored === 'cards' || stored === 'graph' || stored === 'constellation') return stored;
   } catch {
     /* storage unavailable */
   }
@@ -133,7 +145,22 @@ const FullPanelShell: React.FC = () => {
   }, []);
 
   const { stats, entries, projects, total, isLoading, reload } = useMemoryIndex(filter);
-  const graphState = useMemoryGraph(filter, viewMode === 'graph');
+  const [compact, setCompact] = useState(readStoredCompact);
+  const toggleCompact = useCallback(() => {
+    setCompact((prev) => {
+      try {
+        window.localStorage.setItem(DENSITY_KEY, prev ? 'comfortable' : 'compact');
+      } catch {
+        /* storage unavailable */
+      }
+      return !prev;
+    });
+  }, []);
+  const [minLinks, setMinLinks] = useState(1);
+  const isSky = viewMode === 'graph' || viewMode === 'constellation';
+  const graphState = useMemoryGraph(filter, isSky);
+  const skyGraph = useMemo(() => filterGraph(graphState.graph, minLinks), [graphState.graph, minLinks]);
+  const highlightIds = useMemo(() => matchingIds(skyGraph, filter.search), [skyGraph, filter.search]);
   const { selectedId, selected, selectEntry, clearSelection } = useSelectedEntry();
 
   const [composerOpen, setComposerOpen] = useState(false);
@@ -486,6 +513,30 @@ const FullPanelShell: React.FC = () => {
             </button>
           ))}
         </div>
+        {isSky ? (
+          <label className={styles.viewOption} data-testid='memory-min-links'>
+            {t('archive.view.minLinks', 'Min links')} {minLinks}
+            <input
+              type='range'
+              min={1}
+              max={5}
+              value={minLinks}
+              onChange={(e) => setMinLinks(Number(e.target.value))}
+              aria-label={t('archive.view.minLinks', 'Min links')}
+            />
+          </label>
+        ) : null}
+        {viewMode === 'list' ? (
+          <button
+            type='button'
+            className={`${styles.viewBtn} ${styles.viewOptionBtn}`}
+            aria-pressed={compact}
+            onClick={toggleCompact}
+            data-testid='memory-density-toggle'
+          >
+            {compact ? t('archive.view.comfortable', 'Comfortable') : t('archive.view.compact', 'Compact')}
+          </button>
+        ) : null}
         <div className={styles.resultCount} data-testid='memory-result-count'>
           {resultCountLabel}
         </div>
@@ -504,11 +555,21 @@ const FullPanelShell: React.FC = () => {
             >
               {viewMode === 'graph' ? (
                 <GraphView
-                  graph={graphState.graph}
+                  graph={skyGraph}
                   isLoading={graphState.isLoading}
                   error={graphState.error}
                   selectedId={selectedId ?? undefined}
                   onSelect={handleSelectRow}
+                  highlightIds={highlightIds}
+                />
+              ) : viewMode === 'constellation' ? (
+                <ConstellationView
+                  graph={skyGraph}
+                  isLoading={graphState.isLoading}
+                  error={graphState.error}
+                  selectedId={selectedId ?? undefined}
+                  onSelect={handleSelectRow}
+                  highlightIds={highlightIds}
                 />
               ) : viewMode === 'cards' ? (
                 <CardsView
@@ -529,6 +590,7 @@ const FullPanelShell: React.FC = () => {
                   onTypeFilterChange={handleTypeFilter}
                   typeCounts={typeCounts}
                   onEndReached={handleEndReached}
+                  compact={compact}
                 />
               )}
             </div>
@@ -546,6 +608,7 @@ const FullPanelShell: React.FC = () => {
                 onCopy={handleCopy}
                 onEdit={handleEdit}
                 onArchive={handleArchive}
+                onOpenRelated={selectEntry}
               />
             </ErrorBoundary>
           </>

@@ -1,8 +1,32 @@
+.scroll {
+  height: 100%;
+  overflow-y: auto;
+  padding: 8px 16px 24px;
+}
+
+.section {
+  margin-top: 12px;
+}
+
+.groupHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.groupCount {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-3);
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 12px;
-  padding: 16px;
 }
 
 .card {
@@ -22,11 +46,6 @@
 .card:hover,
 .cardSelected {
   border-color: var(--color-text-3);
-}
-
-.chip {
-  font-size: 12px;
-  font-weight: 600;
 }
 
 .title {
