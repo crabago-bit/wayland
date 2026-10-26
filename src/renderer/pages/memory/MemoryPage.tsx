@@ -141,16 +141,20 @@ const MemoryPage: React.FC = () => {
   const [backend, setBackend] = useState<'brain' | 'ijfw' | null>(null);
   useEffect(() => {
     let cancelled = false;
-    ipcBridge.memory.getBackend
-      .invoke()
-      .then((kind) => !cancelled && setBackend(kind === 'brain' ? 'brain' : 'ijfw'))
-      .catch(() => !cancelled && setBackend('ijfw'));
+    void (async () => {
+      try {
+        const provider = ipcBridge.memory?.getBackend;
+        const kind = provider && typeof provider.invoke === 'function' ? await provider.invoke() : 'ijfw';
+        if (!cancelled) setBackend(kind === 'brain' ? 'brain' : 'ijfw');
+      } catch {
+        if (!cancelled) setBackend('ijfw');
+      }
+    })();
     return () => {
       cancelled = true;
     };
   }, []);
-  const shownStatus: IjfwStatusPayload | null =
-    backend === 'brain' ? { status: 'installed_current' } : backend === null ? null : status;
+  const shownStatus: IjfwStatusPayload | null = backend === 'brain' ? { status: 'installed_current' } : status;
 
   const fullPanel = isFullPanel(shownStatus);
 

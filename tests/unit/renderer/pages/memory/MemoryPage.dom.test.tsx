@@ -23,10 +23,11 @@ import type { IjfwStatusPayload } from '@/common/adapter/ipcBridge';
 
 type Listener = (payload: IjfwStatusPayload) => void;
 
-const { listeners, unsubscribeSpy, getStatusInvoke } = vi.hoisted(() => ({
+const { listeners, unsubscribeSpy, getStatusInvoke, getBackendInvoke } = vi.hoisted(() => ({
   listeners: new Set<Listener>(),
   unsubscribeSpy: vi.fn(),
   getStatusInvoke: vi.fn<() => Promise<IjfwStatusPayload | undefined>>(),
+  getBackendInvoke: vi.fn<() => Promise<'brain' | 'ijfw'>>(),
 }));
 
 vi.mock('@/common', () => ({
@@ -43,6 +44,7 @@ vi.mock('@/common', () => ({
       },
       getStatus: { invoke: getStatusInvoke },
     },
+    memory: { getBackend: { invoke: getBackendInvoke } },
   },
 }));
 
@@ -55,9 +57,7 @@ vi.mock('@renderer/pages/memory/state-branches/AutoSettingUpCard', () => ({
 }));
 
 vi.mock('@renderer/pages/memory/state-branches/InstallingCard', () => ({
-  default: ({ version }: { version?: string }) => (
-    <div data-testid='branch-installing' data-version={version ?? ''} />
-  ),
+  default: ({ version }: { version?: string }) => <div data-testid='branch-installing' data-version={version ?? ''} />,
 }));
 
 vi.mock('@renderer/pages/memory/state-branches/InstallFailedCard', () => ({
@@ -83,6 +83,8 @@ beforeEach(() => {
   unsubscribeSpy.mockReset();
   getStatusInvoke.mockReset();
   getStatusInvoke.mockResolvedValue(undefined);
+  getBackendInvoke.mockReset();
+  getBackendInvoke.mockResolvedValue('ijfw');
 });
 
 afterEach(() => {
@@ -90,6 +92,16 @@ afterEach(() => {
 });
 
 describe('MemoryPage', () => {
+  it('shows the full panel when the brain is the backend, whatever the IJFW status says', async () => {
+    getBackendInvoke.mockResolvedValue('brain');
+    getStatusInvoke.mockResolvedValue({ status: 'not_installed' });
+    render(<MemoryPage />);
+    emit({ status: 'installing' });
+    expect(await screen.findByTestId('branch-full-panel-shell')).toBeTruthy();
+    expect(screen.queryByTestId('branch-installing')).toBeNull();
+    expect(screen.queryByTestId('branch-auto-setting-up')).toBeNull();
+  });
+
   it('subscribes to status emitter on mount and unsubscribes on unmount', () => {
     const { unmount } = render(<MemoryPage />);
     expect(listeners.size).toBe(1);
@@ -179,7 +191,7 @@ describe('MemoryPage', () => {
       () => {
         expect(screen.getByTestId('branch-auto-setting-up')).toBeTruthy();
       },
-      { timeout: 2000 },
+      { timeout: 2000 }
     );
   });
 });
