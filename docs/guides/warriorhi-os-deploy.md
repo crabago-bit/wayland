@@ -2,7 +2,7 @@
 
 How the Wayland WebUI at https://wayland.warriorhi.com is actually run, and how to keep it alive across upstream bumps. `docker-compose.webui.yml` is historical; the service does NOT run in Docker.
 
-> **Hostname move (2026-11-03):** the WebUI now lives at https://wayland.warriorhi.com. `os.warriorhi.com` is a permanent 301 to the new host (Traefik `dynamic/wayland.yml`; the live router is `dynamic/wayland-new-host.yml`). DNS for warriorhi.com is at Hostinger with no wildcard, so every new subdomain needs a manual A record first. Rollback files: `wayland.yml.bak-pre-host-move-20261103` and `/home/forge/wayland/bin/wayland-webui.sh.bak-pre-wayland-host-20261103`.
+> **Hostname move (2026-11-03):** the WebUI now lives at https://wayland.warriorhi.com. `os.warriorhi.com` is a permanent 301 to the new host (Traefik `dynamic/wayland.yml`; the live router is `dynamic/wayland-new-host.yml`). DNS for warriorhi.com is at Hostinger with no wildcard, so every new subdomain needs a manual A record first. Rollback files: `/home/forge/backups/wayland.yml.bak-pre-host-move-20261103` and `/home/forge/wayland/bin/wayland-webui.sh.bak-pre-wayland-host-20261103`.
 
 Since 0.13 (branch `local/warriorhi-v0.13.2`) the bundled engine is **Fuigo**. Wayland Core is gone: no `prepareWaylandCore.js`, no contract pin, no `~/.config/wayland-core/config.toml` for the app, and no engine symlink on PATH.
 
