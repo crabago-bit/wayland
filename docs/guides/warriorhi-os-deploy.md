@@ -1,6 +1,8 @@
-# os.warriorhi.com runbook (WarriorHi fork)
+# wayland.warriorhi.com runbook (WarriorHi fork)
 
-How the Wayland WebUI at https://os.warriorhi.com is actually run, and how to keep it alive across upstream bumps. `docker-compose.webui.yml` is historical; the service does NOT run in Docker.
+How the Wayland WebUI at https://wayland.warriorhi.com is actually run, and how to keep it alive across upstream bumps. `docker-compose.webui.yml` is historical; the service does NOT run in Docker.
+
+> **Hostname move (2026-11-03):** the WebUI now lives at https://wayland.warriorhi.com. `os.warriorhi.com` is a permanent 301 to the new host (Traefik `dynamic/wayland.yml`; the live router is `dynamic/wayland-new-host.yml`). DNS for warriorhi.com is at Hostinger with no wildcard, so every new subdomain needs a manual A record first. Rollback files: `wayland.yml.bak-pre-host-move-20261103` and `/home/forge/wayland/bin/wayland-webui.sh.bak-pre-wayland-host-20261103`.
 
 Since 0.13 (branch `local/warriorhi-v0.13.2`) the bundled engine is **Fuigo**. Wayland Core is gone: no `prepareWaylandCore.js`, no contract pin, no `~/.config/wayland-core/config.toml` for the app, and no engine symlink on PATH.
 
@@ -10,7 +12,7 @@ Since 0.13 (branch `local/warriorhi-v0.13.2`) the bundled engine is **Fuigo**. W
 |---|---|
 | Process | pm2 `wayland-webui` (id 17), launcher `/home/forge/wayland/bin/wayland-webui.sh` → `bun dist-server/server.mjs`, port 3403 loopback |
 | Proxy | Traefik file route `/home/forge/docker-config/traefik/dynamic/wayland.yml` → 127.0.0.1:3403, LetsEncrypt |
-| Env | `ALLOW_REMOTE=false`, `WAYLAND_TRUSTED_PROXY=1`, `WAYLAND_ALLOWED_ORIGINS=https://os.warriorhi.com`, `SERVER_BASE_URL=https://os.warriorhi.com`, `DATA_DIR=/home/forge/wayland-desktop-data` |
+| Env | `ALLOW_REMOTE=false`, `WAYLAND_TRUSTED_PROXY=1`, `WAYLAND_ALLOWED_ORIGINS=https://wayland.warriorhi.com,...`, `SERVER_BASE_URL=https://wayland.warriorhi.com`, `DATA_DIR=/home/forge/wayland-desktop-data` |
 | Engine | `resources/bundled-fuigo/linux-x64/fuigo` + `bundle.json` receipt, staged by `scripts/fuigo/prepare.cjs` (pin: `scripts/fuigo/authority.json`). The server resolves it from `process.cwd()/resources/bundled-fuigo/<platform>` only: no PATH fallback, a symlink is refused, and a binary whose sha256 differs from the receipt does not spawn. |
 | Engine homes | `<userData>/fuigo` for ordinary chats, `<userData>/fuigo-laddered` for agents with a JARVIS autonomy rung. Desktop rewrites each `config.toml` before every spawn; edits there do not persist. |
 | Desktop config | `$DATA_DIR/config/wayland-config.txt` = base64(encodeURIComponent(JSON)). Only edit with the app stopped. |
@@ -60,7 +62,7 @@ Per chat, use the composer "+" menu → MCP toggles (`activeMcpServers`, persist
 
 ## Default model
 
-Fuigo's default is `fuigo.defaultModel` in the config store, used for new Fuigo chats, scheduled runs and Fuigo teammates. On os.warriorhi.com it points at the JARVIS router (`byok/openai/jarvis-default`, the OpenAI-compatible row at `http://127.0.0.1:4000/v1`), set at cutover with
+Fuigo's default is `fuigo.defaultModel` in the config store, used for new Fuigo chats, scheduled runs and Fuigo teammates. On wayland.warriorhi.com it points at the JARVIS router (`byok/openai/jarvis-default`, the OpenAI-compatible row at `http://127.0.0.1:4000/v1`), set at cutover with
 
 ```bash
 node scripts/warriorhi-fuigo-default-model.mjs --data-dir /home/forge/wayland-desktop-data --server-stopped

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-shot deploy for the Wayland WebUI at https://os.warriorhi.com.
+# One-shot deploy for the Wayland WebUI at https://wayland.warriorhi.com (moved from os.warriorhi.com 2026-11-03; os.* redirects).
 #
 #   scripts/deploy-webui.sh            # build current checkout + restart
 #   scripts/deploy-webui.sh --pull     # also fetch upstream + rebase local patches first
@@ -70,7 +70,7 @@ if [ "$RESTART" = 1 ]; then
   done
   step 7 "smoke"
   local_code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3403/)
-  pub_code=$(curl -s -o /dev/null -w '%{http_code}' https://os.warriorhi.com/)
+  pub_code=$(curl -s -o /dev/null -w '%{http_code}' https://wayland.warriorhi.com/)
   echo "local $local_code  public $pub_code"
   [ "$local_code" = 200 ] && [ "$pub_code" = 200 ] || { echo "smoke FAILED"; pm2 logs wayland-webui --lines 30 --nostream; exit 1; }
   pm2 jlist | python3 -c "import json,sys;[print('pm2',p['pm2_env']['status'],'restarts',p['pm2_env']['restart_time']) for p in json.load(sys.stdin) if p['name']=='wayland-webui']"
